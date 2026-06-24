@@ -2,7 +2,7 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
 
 use crate::{
     admin, balance, errors::VaultError, events,
-    storage::{DataKey, PoolStats, StakePosition, UserStats},
+    storage::{DataKey, PoolStats, StakePosition, UnbondingPosition, UserStats},
 };
 
 pub(crate) const CONTRACT_VERSION: &str = "0.1.0";
@@ -48,6 +48,20 @@ impl VaultContract {
     /// Unstake by burning `shares`. This is an alias for `withdraw`.
     pub fn unstake(env: Env, staker: Address, shares: i128) -> Result<i128, VaultError> {
         Self::do_unstake(&env, &staker, shares)
+    }
+
+    /// Convenience function to fully exit a staking position in one call.
+    ///
+    /// Reads the caller's entire share balance and unstakes it, auto-claiming
+    /// any pending rewards first (same behaviour as `unstake`).
+    /// Returns the total token amount returned to the user.
+    /// Reverts with `PositionNotFound` when the user has no active position.
+    pub fn unstake_all(env: Env, user: Address) -> Result<i128, VaultError> {
+        let shares = balance::get_shares(&env, &user);
+        if shares == 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+        Self::do_unstake(&env, &user, shares)
     }
 
     /// Claim accumulated staking rewards without changing the staked position.
@@ -586,6 +600,42 @@ impl VaultContract {
             &user,
             env.ledger().sequence(),
         ))
+    }
+
+    /// Read-only query for the reward token balance held by the contract.
+    ///
+    /// Returns the current balance of the vault token in the contract's own
+    /// account. This covers both staked principal and the funded reward pool,
+    /// allowing integrators to assess whether the pool can sustain its current
+    /// reward rate before staking. No auth required.
+    pub fn reward_token_balance(env: Env) -> Result<i128, VaultError> {
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        Ok(token_client.balance(&env.current_contract_address()))
+    }
+
+    /// Read-only query for how many ledgers ago a user opened their staking position.
+    ///
+    /// Returns `current_ledger - staked_at_ledger` for the user's position,
+    /// which is useful for frontends showing lock-up countdowns, boost tier
+    /// eligibility, and time-to-target estimates.
+    /// Reverts with `PositionNotFound` if the user has no active position.
+    /// No auth required.
+    pub fn position_age_ledgers(env: Env, user: Address) -> Result<u32, VaultError> {
+        let shares = balance::get_shares(&env, &user);
+        if shares == 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+        let staked_at: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StakedAtLedger(user))
+            .unwrap_or(0);
+        Ok(env.ledger().sequence().saturating_sub(staked_at))
     }
 
     // --- Pool statistics (#38) ---
