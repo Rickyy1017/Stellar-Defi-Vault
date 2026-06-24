@@ -24,6 +24,8 @@ pub enum DataKey {
     TotalStakers,
     TotalRewardsPaid,
     Delegate(Address),
+    // Address that receives slashed tokens. Defaults to admin when not set.
+    SlashTreasury,
     PoolCap,
 }
 

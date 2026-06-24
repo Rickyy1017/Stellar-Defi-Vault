@@ -62,3 +62,9 @@ pub fn position_closed(env: &Env, user: &Address) {
     let topics = (symbol_short!("pos_clos"), user);
     env.events().publish(topics, (env.ledger().sequence(),));
 }
+
+pub fn slash(env: &Env, admin: &Address, user: &Address, amount: i128) {
+    let topics = (symbol_short!("slash"), admin);
+    env.events()
+        .publish(topics, (user.clone(), amount, env.ledger().sequence()));
+}

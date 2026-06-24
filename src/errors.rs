@@ -20,4 +20,6 @@ pub enum VaultError {
     InsufficientRewardPool = 14,
     NotADelegate = 15,
     PoolCapReached = 16,
+    /// No active position found for a given user when expected.
+    PositionNotFound = 17,
 }

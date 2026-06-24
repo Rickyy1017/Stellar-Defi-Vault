@@ -607,3 +607,196 @@ fn test_paused_event_includes_ledger() {
     let ledger_val: u32 = u32::try_from_val(&env, &data_vec.get(0).unwrap()).unwrap();
     assert_eq!(ledger_val, 42, "paused event data should include the current ledger sequence");
 }
+
+// ── slash admin actions tests ───────────────────────────────────────────────
+
+#[test]
+fn test_slash_partial_and_treasury_receive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    vault.initialize(&admin, &token_addr);
+
+    // set custom treasury
+    vault.set_slash_treasury(&admin, &treasury);
+
+    // fund alice and stake
+    token_admin.mint(&alice, &500_000);
+    vault.stake(&alice, &200_000);
+
+    // pre-check balances
+    assert_eq!(token.balance(&vault_id), 200_000);
+    assert_eq!(token.balance(&treasury), 0);
+
+    // admin slashes 50_000
+    let slashed = vault.slash(&admin, &alice, &50_000).unwrap();
+    assert_eq!(slashed, 50_000);
+
+    // alice position reduced accordingly (shares correspond to amounts on first stake)
+    assert_eq!(vault.shares_of(&alice), 150_000);
+
+    // treasury received tokens
+    assert_eq!(token.balance(&treasury), 50_000);
+    // contract balance decreased
+    assert_eq!(token.balance(&vault_id), 150_000);
+}
+
+#[test]
+fn test_slash_full_and_position_removed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    vault.initialize(&admin, &token_addr);
+    vault.set_slash_treasury(&admin, &treasury);
+
+    token_admin.mint(&alice, &300_000);
+    vault.stake(&alice, &150_000);
+
+    // slash full or larger amount
+    let slashed = vault.slash(&admin, &alice, &200_000).unwrap();
+    assert_eq!(slashed, 150_000);
+
+    // position removed
+    assert_eq!(vault.shares_of(&alice), 0);
+    assert_eq!(token.balance(&treasury), 150_000);
+    assert_eq!(token.balance(&vault_id), 0);
+}
+
+#[test]
+fn test_slash_works_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    vault.initialize(&admin, &token_addr);
+    vault.set_slash_treasury(&admin, &treasury);
+
+    token_admin.mint(&alice, &200_000);
+    vault.stake(&alice, &100_000);
+
+    // pause the contract
+    vault.pause();
+
+    // should still be able to slash
+    let slashed = vault.slash(&admin, &alice, &30_000).unwrap();
+    assert_eq!(slashed, 30_000);
+    assert_eq!(token.balance(&treasury), 30_000);
+}
+
+#[test]
+fn test_non_admin_rejected_for_slash() {
+    use crate::errors::VaultError;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let (token_addr, _token, token_admin) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    vault.initialize(&admin, &token_addr);
+
+    token_admin.mint(&alice, &100_000);
+    vault.stake(&alice, &50_000);
+
+    let res = vault.try_slash(&bob, &alice, &10_000);
+    assert_eq!(res, Err(Ok(VaultError::Unauthorized)));
+}
+
+#[test]
+fn test_reward_forfeiture_on_slash() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 0;
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    vault.initialize(&admin, &token_addr);
+    vault.set_slash_treasury(&admin, &treasury);
+
+    token_admin.mint(&alice, &500_000);
+    vault.stake(&alice, &100_000);
+
+    // advance ledger to accrue rewards
+    env.ledger().with_mut(|li| li.sequence_number = 1000);
+    vault.set_reward_rate_bps(&1000); // set a rate so rewards accrue
+
+    // compute pending before slash (call claim would consume; we just simulate by checking pending)
+    let pending_before = vault.calc_pending_reward(&alice).unwrap();
+    assert!(pending_before > 0);
+
+    // Slash user
+    vault.slash(&admin, &alice, &50_000).unwrap();
+
+    // After slash, accrued rewards should be cleared; claim should return 0
+    let claim_after = vault.claim(&alice).unwrap();
+    assert_eq!(claim_after, 0);
+}
+
+#[test]
+fn test_initialization_defaults_treasury_to_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    // initialize without specifying treasury (defaults to admin)
+    vault.initialize(&admin, &token_addr);
+
+    token_admin.mint(&alice, &100_000);
+    vault.stake(&alice, &20_000);
+
+    // admin slashes -> funds should go to admin (default treasury)
+    vault.slash(&admin, &alice, &10_000).unwrap();
+    assert_eq!(token.balance(&admin), 10_000);
+}

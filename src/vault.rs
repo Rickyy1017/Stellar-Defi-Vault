@@ -24,6 +24,8 @@ impl VaultContract {
         admin::set_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Paused, &false);
+        // By default, set the slash treasury to the admin address. Can be updated by admin later.
+        env.storage().instance().set(&DataKey::SlashTreasury, &admin);
         Ok(())
     }
 
@@ -198,6 +200,13 @@ impl VaultContract {
         let old_admin = admin::get_admin(&env)?;
         admin::set_admin(&env, &new_admin);
         events::admin_changed(&env, &old_admin, &new_admin);
+        Ok(())
+    }
+
+    /// Admin: set the address that receives slashed tokens. Defaults to admin at initialize.
+    pub fn set_slash_treasury(env: Env, treasury: Address) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::SlashTreasury, &treasury);
         Ok(())
     }
 
@@ -522,6 +531,93 @@ impl VaultContract {
         events::deposit(&env, &beneficiary, amount, shares);
 
         Ok(shares)
+    }
+
+    /// Admin: slash a user's staked principal. Can be called while paused.
+    /// `admin_addr` must be the admin and is provided to follow existing patterns.
+    /// Returns the actual slashed token amount.
+    pub fn slash(env: Env, admin_addr: Address, user: Address, amount: i128) -> Result<i128, VaultError> {
+        // authorization: caller must be admin (enforced by require_admin)
+        admin::require_admin(&env)?;
+        // admin_addr is an argument (follows other admin methods) but we still check admin auth above
+
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares == 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+
+        // compute user's position amount (token units)
+        let position_amount = balance::shares_to_amount(total_shares, total_deposited, user_shares)
+            .ok_or(VaultError::ArithmeticError)?;
+        if position_amount == 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        // actual_slash_amount = min(requested, position_amount)
+        let actual = if amount > position_amount { position_amount } else { amount };
+
+        // compute shares to remove corresponding to `actual` (may round)
+        let mut shares_to_remove = balance::amount_to_shares(total_shares, total_deposited, actual)
+            .unwrap_or(user_shares);
+        if shares_to_remove > user_shares {
+            shares_to_remove = user_shares;
+        }
+
+        // token and treasury addresses
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::SlashTreasury)
+            .ok_or(VaultError::NotInitialized)?;
+
+        // update user shares and totals
+        let new_user_shares = user_shares - shares_to_remove;
+        balance::set_shares(&env, &user, new_user_shares);
+        balance::set_total_shares(&env, total_shares - shares_to_remove);
+
+        let new_total_deposited = total_deposited
+            .checked_sub(actual)
+            .ok_or(VaultError::ArithmeticError)?;
+        balance::set_total_deposited(&env, new_total_deposited);
+
+        if new_user_shares == 0 {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::StakedAtLedger(user.clone()));
+            let total_stakers = balance::get_total_stakers(&env);
+            if total_stakers > 0 {
+                balance::set_total_stakers(&env, total_stakers - 1);
+            }
+            events::position_closed(&env, &user);
+        }
+        Self::record_stake_snapshot(&env, &user, new_user_shares);
+
+        // Reward forfeiture: clear accrued rewards and advance checkpoint so no further claim for pre-slash accrual
+        balance::set_accrued_reward(&env, &user, 0);
+        balance::set_reward_checkpoint_ledger(&env, &user, env.ledger().sequence());
+        balance::set_last_claim_ledger(&env, &user, env.ledger().sequence());
+
+        // transfer slashed tokens from contract to treasury
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&env.current_contract_address(), &treasury, &actual);
+
+        // emit event
+        let admin_actual = admin::get_admin(&env)?;
+        events::slash(&env, &admin_actual, &user, actual);
+
+        Ok(actual)
     }
 
     // --- Internal helpers ---
