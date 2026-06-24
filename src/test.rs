@@ -9,7 +9,10 @@ use soroban_sdk::{
 
 use crate::{
     errors::VaultError,
-    vault::{VaultContract, VaultContractClient, BOOST_BPS_BASE, STELLAR_LEDGERS_PER_YEAR},
+    vault::{
+        VaultContract, VaultContractClient, BOOST_BPS_BASE, CONTRACT_VERSION,
+        STELLAR_LEDGERS_PER_YEAR,
+    },
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -120,6 +123,18 @@ fn test_double_initialize_fails() {
         .register_stellar_asset_contract(Address::generate(&f.env));
     let result = f.vault.try_initialize(&f.admin, &token_addr);
     assert_eq!(result, Err(Ok(VaultError::AlreadyInitialized)));
+}
+
+#[test]
+fn test_get_admin_returns_initialized_admin() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.get_admin(), f.admin);
+}
+
+#[test]
+fn test_get_version_returns_contract_version() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.get_version(), soroban_sdk::String::from_str(&f.env, CONTRACT_VERSION));
 }
 
 // ── deposit ───────────────────────────────────────────────────────────────────
@@ -251,6 +266,19 @@ fn test_unpause_restores_operations() {
 
     let shares = f.vault.deposit(&f.alice, &100_000);
     assert_eq!(shares, 100_000);
+}
+
+#[test]
+fn test_is_paused_defaults_to_false() {
+    let f = VaultFixture::new();
+    assert!(!f.vault.is_paused());
+}
+
+#[test]
+fn test_is_paused_returns_true_after_pause() {
+    let f = VaultFixture::new();
+    f.vault.pause();
+    assert!(f.vault.is_paused());
 }
 
 // ── admin transfer ────────────────────────────────────────────────────────────

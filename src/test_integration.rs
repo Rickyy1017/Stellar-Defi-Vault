@@ -392,10 +392,10 @@ fn test_total_stakers_tracks_entries_and_exits() {
     );
 }
 
-// ── user_stats returns correct data ───────────────────────────────────────────
+// ── position_of returns correct data ──────────────────────────────────────────
 
 #[test]
-fn test_user_stats_returns_correct_fields() {
+fn test_position_of_returns_correct_fields() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|li| {
@@ -415,17 +415,14 @@ fn test_user_stats_returns_correct_fields() {
     token_admin.mint(&alice, &500_000);
     vault.stake(&alice, &200_000);
 
-    let stats = vault.user_stats(&alice);
+    let position = vault.position_of(&alice).unwrap();
+    assert_eq!(position.amount, 200_000, "amount should equal staked tokens");
     assert_eq!(
-        stats.position_amount, 200_000,
-        "position_amount should equal staked tokens"
-    );
-    assert_eq!(
-        stats.staked_at_ledger, 10,
+        position.staked_at_ledger, 10,
         "staked_at_ledger should match ledger at stake time"
     );
     assert_eq!(
-        stats.last_claim_ledger, 0,
+        position.last_claim_ledger, 0,
         "last_claim_ledger should be 0 before any claim"
     );
 }

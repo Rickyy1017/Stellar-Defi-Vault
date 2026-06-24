@@ -62,11 +62,30 @@ pub struct PoolStats {
     pub total_rewards_paid: i128,
 }
 
+/// Aggregate user stats used by `user_stats`.
+///
+/// - `position_amount`: the user's current position size expressed in token units.
+/// - `pending_reward`: rewards accrued but not yet claimed.
+/// - `staked_at_ledger`: the ledger sequence when the position was first opened.
+/// - `last_claim_ledger`: the most recent ledger at which rewards were claimed.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserStats {
     pub position_amount: i128,
     pub pending_reward: i128,
+    pub staked_at_ledger: u32,
+    pub last_claim_ledger: u32,
+}
+
+/// Current stake position for a user.
+///
+/// - `amount`: the user's current position size expressed in token units.
+/// - `staked_at_ledger`: the ledger sequence when the position was first opened.
+/// - `last_claim_ledger`: the most recent ledger at which rewards were claimed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StakePosition {
+    pub amount: i128,
     pub staked_at_ledger: u32,
     pub last_claim_ledger: u32,
 }

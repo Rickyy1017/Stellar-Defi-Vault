@@ -1,10 +1,11 @@
-use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
 
 use crate::{
     admin, balance, errors::VaultError, events,
-    storage::{DataKey, PoolStats, UserStats, UnbondingPosition},
+    storage::{DataKey, PoolStats, StakePosition, UserStats},
 };
 
+pub(crate) const CONTRACT_VERSION: &str = "0.1.0";
 pub(crate) const BOOST_BPS_BASE: u32 = 10_000;
 pub(crate) const MAX_BOOST_TIERS: u32 = 5;
 pub(crate) const MAX_HISTORY_SNAPSHOTS: u32 = 100;
@@ -88,6 +89,33 @@ impl VaultContract {
     /// Query share balance of a user.
     pub fn shares_of(env: Env, user: Address) -> i128 {
         balance::get_shares(&env, &user)
+    }
+
+    /// Read-only query for the current admin address.
+    pub fn get_admin(env: Env) -> Result<Address, VaultError> {
+        admin::get_admin(&env)
+    }
+
+    /// Read-only query for the deployed contract version.
+    pub fn get_version(env: Env) -> String {
+        String::from_str(&env, CONTRACT_VERSION)
+    }
+
+    /// Returns true when the pool is paused, false otherwise.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Read-only query for the caller's active stake position.
+    ///
+    /// Returns the current `StakePosition` for an active account, including the
+    /// position amount, `staked_at_ledger`, and `last_claim_ledger`.
+    /// Returns `None` when the user has no active position.
+    pub fn position_of(env: Env, user: Address) -> Result<Option<StakePosition>, VaultError> {
+        Self::build_position(&env, &user)
     }
 
     /// Read-only governance weight using the user's current staked shares.
@@ -590,22 +618,14 @@ impl VaultContract {
     /// Per-user statistics: position size, pending reward, stake age, last claim ledger.
     pub fn user_stats(env: Env, user: Address) -> Result<UserStats, VaultError> {
         let _ = admin::get_admin(&env)?;
-        let total_shares = balance::get_total_shares(&env);
-        let total_deposited = balance::get_total_deposited(&env);
-        let shares = balance::get_shares(&env, &user);
-        let position_amount = if shares > 0 {
-            balance::shares_to_amount(total_shares, total_deposited, shares)
-                .ok_or(VaultError::ArithmeticError)?
-        } else {
-            0
-        };
+        let position = Self::build_position(&env, &user)?;
+        let position_amount = position.as_ref().map(|p| p.amount).unwrap_or(0);
         let pending_reward = Self::pending_reward(&env, &user)?;
-        let staked_at_ledger = env
-            .storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::StakedAtLedger(user.clone()))
+        let staked_at_ledger = position
+            .as_ref()
+            .map(|p| p.staked_at_ledger)
             .unwrap_or(0);
-        let last_claim_ledger = balance::get_last_claim_ledger(&env, &user);
+        let last_claim_ledger = position.as_ref().map(|p| p.last_claim_ledger).unwrap_or(0);
         Ok(UserStats {
             position_amount,
             pending_reward,
@@ -1046,6 +1066,30 @@ impl VaultContract {
         }
 
         balance::set_stake_history(env, user, &history);
+    }
+
+    fn build_position(env: &Env, user: &Address) -> Result<Option<StakePosition>, VaultError> {
+        let shares = balance::get_shares(env, user);
+        if shares == 0 {
+            return Ok(None);
+        }
+
+        let total_shares = balance::get_total_shares(env);
+        let total_deposited = balance::get_total_deposited(env);
+        let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
+        let staked_at_ledger = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::StakedAtLedger(user.clone()))
+            .unwrap_or(0);
+        let last_claim_ledger = balance::get_last_claim_ledger(env, user);
+
+        Ok(Some(StakePosition {
+            amount,
+            staked_at_ledger,
+            last_claim_ledger,
+        }))
     }
 
     fn pending_reward(env: &Env, user: &Address) -> Result<i128, VaultError> {
