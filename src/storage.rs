@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Vec};
 
 /// Storage keys for all persistent and instance state in the vault.
 ///
@@ -6,7 +6,8 @@ use soroban_sdk::{contracttype, Address};
 /// MinStake, RewardRateBps, RewardPoolBalance, BoostSchedule, Paused,
 /// WithdrawalLimit, LockPeriod, EarlyExitPenaltyBps, TotalStakers,
 /// TotalRewardsPaid, SlashTreasury, WhitelistEnabled, CooldownPeriod,
-/// PoolCap, ClaimCap, ClaimCapWindow.
+/// PoolCap, ClaimCap, ClaimCapWindow, StakeDecimals, RewardDecimals,
+/// UnstakeFeeBps, AllStakers.
 ///
 /// Persistent keys (per-user, long-lived): ShareBalance, StakeHistory,
 /// RewardCheckpointLedger, LastClaimLedger, AccruedReward, StakedAtLedger,
@@ -47,12 +48,20 @@ pub enum DataKey {
     PoolCap,
     // Rate change history: Vec<(ledger, rate_bps)> capped at 50 entries
     RateHistory,
+    // Active boost campaign info (#48)
+    BoostCampaign,
+    // Leaderboard of top stakers (#46)
+    Leaderboard,
+    // Max entries for leaderboard (#46)
+    LeaderboardSize,
     /// Maximum reward claimable per user within a rolling ledger window (0 = disabled).
     ClaimCap,
     /// Window size in ledgers for the per-user claim cap.
     ClaimCapWindow,
     /// Per-user running total of rewards claimed within the current window.
     UserClaimWindow(Address),
+    /// Per-user reward remainder (dust) from integer division.
+    RewardRemainder(Address),
 }
 
 #[contracttype]
@@ -95,6 +104,30 @@ pub struct UserStats {
     pub staked_at_ledger: u32,
     pub last_claim_ledger: u32,
 }
+
+/// Active boost campaign set by admin (#48).
+///
+/// - `multiplier_bps`: reward multiplier stacked on top of tier multipliers (10000 = 1x).
+/// - `starts_at_ledger`: ledger when the campaign was activated.
+/// - `ends_at_ledger`: ledger after which the campaign no longer applies.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CampaignInfo {
+    pub multiplier_bps: u32,
+    pub starts_at_ledger: u32,
+    pub ends_at_ledger: u32,
+}
+
+/// A single entry in the staking leaderboard (#46).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeaderboardEntry {
+    pub staker: Address,
+    pub amount: i128,
+}
+
+/// Type alias for the leaderboard vector used in storage and queries.
+pub type Leaderboard = Vec<LeaderboardEntry>;
 
 /// Current stake position for a user.
 ///
