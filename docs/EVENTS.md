@@ -88,6 +88,28 @@ Emitted when the admin injects yield into the vault.
 | data.0 | i128 | amount added |
 | data.1 | u32 | ledger sequence |
 
+### `tk_rescue` — token_rescued
+Emitted when the admin rescues a non-stake, non-reward token from the vault.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| topic[0] | Symbol | `"tk_rescue"` |
+| data.0 | Address | token address rescued |
+| data.1 | i128 | amount rescued |
+| data.2 | Address | recipient address |
+| data.3 | u32 | ledger sequence |
+
+### `adm_act` — admin_action
+Emitted for on-chain admin audit logging when an admin action is taken.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| topic[0] | Symbol | `"adm_act"` |
+| topic[1] | AdminAction | admin action type |
+| data.0 | Address | admin actor |
+| data.1 | u32 | ledger sequence |
+| data.2+ | mixed | action-specific parameters |
+
 ### `admin_set` — admin_transferred
 Emitted when the admin role is transferred to a new address.
 

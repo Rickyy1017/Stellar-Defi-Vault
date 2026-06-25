@@ -24,6 +24,38 @@ pub enum DataKey {
     TotalStakers,
     TotalRewardsPaid,
     Delegate(Address),
+    // Issue #39: rescue token
+    RewardToken,
+    // Issue #40: NFT receipt
+    NftContract,
+    // Issue #41: restake grace window
+    RestakeWindow,
+    LastUnstakeLedger(Address),
+    Restaked(Address),
+    // Issue #42: admin action audit log
+    AdminActionCount,
+}
+
+/// Issue #42: enum of all admin actions for the audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum AdminAction {
+    SetRewardRate,
+    Pause,
+    Unpause,
+    TransferAdmin,
+    SetLockPeriod,
+    SetCap,
+    Slash,
+    RescueToken,
+    SetEarlyExitPenalty,
+    SetMinStake,
+    FundRewardPool,
+    AddYield,
+    SetBoostSchedule,
+    SetNftContract,
+    SetRestakeWindow,
+    SetRewardToken,
 }
 
 #[contracttype]

@@ -9,6 +9,7 @@ use soroban_sdk::{
 
 use crate::{
     errors::VaultError,
+    nft::{StakeReceiptNFT, StakeReceiptNFTClient},
     vault::{VaultContract, VaultContractClient, BOOST_BPS_BASE, STELLAR_LEDGERS_PER_YEAR},
 };
 
@@ -812,4 +813,417 @@ fn test_reward_checkpoint_on_top_up_avoids_overpaying() {
 
     set_ledger(&f.env, 200);
     assert_eq!(f.vault.calc_pending_reward(&f.alice), 300);
+}
+
+// ── Issue #39: rescue_token ───────────────────────────────────────────────────
+
+#[test]
+fn test_rescue_third_token_succeeds() {
+    let f = VaultFixture::new();
+
+    // Create a third token (neither stake nor reward)
+    let third_token_addr = f.env.register_stellar_asset_contract(f.admin.clone());
+    let third_token_admin = token::StellarAssetClient::new(&f.env, &third_token_addr);
+    let third_token = token::Client::new(&f.env, &third_token_addr);
+
+    // Simulate a user accidentally sending the third token to the vault
+    let vault_id = f.vault.address.clone();
+    third_token_admin.mint(&vault_id, &5_000);
+
+    assert_eq!(third_token.balance(&vault_id), 5_000);
+    assert_eq!(third_token.balance(&f.alice), 0);
+
+    // Admin rescues those tokens
+    f.vault.rescue_token(&f.admin, &third_token_addr, &5_000, &f.alice);
+
+    assert_eq!(third_token.balance(&vault_id), 0);
+    assert_eq!(third_token.balance(&f.alice), 5_000);
+}
+
+#[test]
+fn test_rescue_stake_token_fails() {
+    let f = VaultFixture::new();
+    let stake_token_addr = f.token.address.clone();
+
+    // Alice stakes so the vault holds some stake tokens
+    f.vault.stake(&f.alice, &100_000);
+
+    let result = f.vault.try_rescue_token(&f.admin, &stake_token_addr, &100_000, &f.bob);
+    assert_eq!(result, Err(Ok(VaultError::CannotRescueStakeToken)));
+}
+
+#[test]
+fn test_rescue_reward_token_fails() {
+    let f = VaultFixture::new();
+
+    // Register a separate reward token address
+    let reward_token_addr = f.env.register_stellar_asset_contract(f.admin.clone());
+    let reward_token_admin = token::StellarAssetClient::new(&f.env, &reward_token_addr);
+    f.vault.set_reward_token(&reward_token_addr);
+
+    // Simulate some reward tokens ending up in the vault
+    let vault_id = f.vault.address.clone();
+    reward_token_admin.mint(&vault_id, &1_000);
+
+    let result = f.vault.try_rescue_token(&f.admin, &reward_token_addr, &1_000, &f.bob);
+    assert_eq!(result, Err(Ok(VaultError::CannotRescueRewardToken)));
+}
+
+#[test]
+fn test_rescue_token_requires_admin_auth() {
+    let f = VaultFixture::new();
+    let third_token_addr = f.env.register_stellar_asset_contract(f.admin.clone());
+    let third_token_admin = token::StellarAssetClient::new(&f.env, &third_token_addr);
+    let vault_id = f.vault.address.clone();
+    third_token_admin.mint(&vault_id, &1_000);
+
+    f.vault.rescue_token(&f.admin, &third_token_addr, &1_000, &f.alice);
+    // Verify admin auth was required (first recorded auth is the admin's)
+    assert_eq!(f.env.auths()[0].0, f.admin);
+}
+
+#[test]
+fn test_rescue_token_emits_token_rescued_event() {
+    let f = VaultFixture::new();
+    let third_token_addr = f.env.register_stellar_asset_contract(f.admin.clone());
+    let third_token_admin = token::StellarAssetClient::new(&f.env, &third_token_addr);
+    let vault_id = f.vault.address.clone();
+    third_token_admin.mint(&vault_id, &2_000);
+
+    f.vault.rescue_token(&f.admin, &third_token_addr, &2_000, &f.alice);
+
+    let events = f.env.events().all();
+    let rescue_events: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "tk_rescue"))
+        .collect();
+    assert_eq!(rescue_events.len(), 1);
+}
+
+// ── Issue #40: NFT receipt on stake ──────────────────────────────────────────
+
+fn setup_nft<'a>(f: &'a VaultFixture<'a>) -> (Address, StakeReceiptNFTClient<'a>) {
+    let nft_id = f.env.register_contract(None, StakeReceiptNFT);
+    let nft = StakeReceiptNFTClient::new(&f.env, &nft_id);
+    // The vault will be the minter
+    nft.initialize(&f.vault.address);
+    f.vault.set_nft_contract(&nft_id);
+    (nft_id, nft)
+}
+
+#[test]
+fn test_stake_mints_nft() {
+    let f = VaultFixture::new();
+    let (_nft_id, nft) = setup_nft(&f);
+
+    assert!(!nft.has_receipt(&f.alice));
+    f.vault.stake(&f.alice, &100_000);
+    assert!(nft.has_receipt(&f.alice));
+}
+
+#[test]
+fn test_full_unstake_burns_nft() {
+    let f = VaultFixture::new();
+    let (_nft_id, nft) = setup_nft(&f);
+
+    f.vault.stake(&f.alice, &100_000);
+    assert!(nft.has_receipt(&f.alice));
+
+    f.vault.unstake(&f.alice, &100_000);
+    assert!(!nft.has_receipt(&f.alice));
+}
+
+#[test]
+fn test_partial_unstake_keeps_nft() {
+    let f = VaultFixture::new();
+    let (_nft_id, nft) = setup_nft(&f);
+
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.unstake(&f.alice, &50_000); // partial — receipt should remain
+    assert!(nft.has_receipt(&f.alice));
+
+    f.vault.unstake(&f.alice, &50_000); // full — receipt should be burned
+    assert!(!nft.has_receipt(&f.alice));
+}
+
+#[test]
+fn test_nft_transfer_always_reverts() {
+    use crate::nft::NftError;
+
+    let f = VaultFixture::new();
+    let (_nft_id, nft) = setup_nft(&f);
+
+    f.vault.stake(&f.alice, &100_000);
+    assert!(nft.has_receipt(&f.alice));
+
+    let result = nft.try_transfer(&f.alice, &f.bob);
+    assert_eq!(result, Err(Ok(NftError::NonTransferable)));
+    // Receipt is still there
+    assert!(nft.has_receipt(&f.alice));
+}
+
+// ── Issue #41: restake grace window ──────────────────────────────────────────
+
+#[test]
+fn test_restake_minimal_no_lock() {
+    // Basic: set window, stake, full unstake, re-stake within window
+    let f = VaultFixture::new();
+    f.vault.set_restake_window(&100);
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.unstake(&f.alice, &100_000);
+    // At ledger 0, last_unstake = 0, current = 0, diff = 0 ≤ 100 → Restaked = true
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.unstake(&f.alice, &100_000);
+}
+
+#[test]
+fn test_restake_with_lock_no_penalty_after_expiry() {
+    let f = VaultFixture::new();
+    f.vault.set_lock_period(&100);
+    f.vault.set_early_exit_penalty_bps(&1000);
+    // NOTE: no set_restake_window here
+    f.vault.stake(&f.alice, &500_000);
+    // Unstake AFTER lock period → no penalty
+    set_ledger(&f.env, 100);
+    let first_return = f.vault.unstake(&f.alice, &500_000);
+    assert_eq!(first_return, 500_000);
+}
+
+#[test]
+fn test_restake_debug_set_window_then_stake_ledger() {
+    let f = VaultFixture::new();
+    f.vault.set_restake_window(&200);
+    f.vault.stake(&f.alice, &500_000);
+    set_ledger(&f.env, 100);
+    let ret = f.vault.unstake(&f.alice, &500_000);
+    assert_eq!(ret, 500_000);
+}
+
+#[test]
+fn test_restake_debug_lock_period_only() {
+    let f = VaultFixture::new();
+    f.vault.set_lock_period(&100);  // only this
+    f.vault.stake(&f.alice, &500_000);
+    set_ledger(&f.env, 100);
+    let ret = f.vault.unstake(&f.alice, &500_000);
+    assert_eq!(ret, 500_000);
+}
+
+#[test]
+fn test_restake_debug_a_penalty_call_only() {
+    // Does calling set_early_exit_penalty_bps alone panic?
+    let f = VaultFixture::new();
+    let _ = f.vault.try_set_early_exit_penalty_bps(&1000);
+}
+
+#[test]
+fn test_restake_debug_b_penalty_and_stake() {
+    let f = VaultFixture::new();
+    f.vault.set_early_exit_penalty_bps(&1000);
+    f.vault.stake(&f.alice, &500_000);
+}
+
+#[test]
+fn test_restake_debug_c_penalty_stake_unstake_no_ledger() {
+    let f = VaultFixture::new();
+    f.vault.set_early_exit_penalty_bps(&1000);
+    f.vault.stake(&f.alice, &500_000);
+    let result = f.vault.try_unstake(&f.alice, &500_000);
+    // If it errors instead of panicking, we can see the error
+    assert!(result.is_ok(), "Unstake failed: {:?}", result);
+}
+
+#[test]
+fn test_restake_debug_d_penalty_stake_ledger_unstake() {
+    let f = VaultFixture::new();
+    f.vault.set_early_exit_penalty_bps(&1000);
+    f.vault.stake(&f.alice, &500_000);
+    set_ledger(&f.env, 100);
+    f.vault.unstake(&f.alice, &500_000);
+}
+
+#[test]
+fn test_restake_debug_e_reward_rate_stake_unstake() {
+    // Does set_reward_rate_bps (another instance storage write) cause the same panic?
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.vault.stake(&f.alice, &500_000);
+    f.vault.unstake(&f.alice, &500_000);
+}
+
+#[test]
+fn test_restake_debug_f_withdrawal_limit_stake_unstake() {
+    // Does set_withdrawal_limit (another instance storage write) cause the same panic?
+    let f = VaultFixture::new();
+    f.vault.set_withdrawal_limit(&2_000_000);
+    f.vault.stake(&f.alice, &500_000);
+    f.vault.unstake(&f.alice, &500_000);
+}
+
+#[test]
+fn test_restake_within_window_is_penalty_free() {
+    let f = VaultFixture::new();
+
+    // Lock period 100, 10% early-exit penalty, 200-ledger restake window.
+    f.vault.set_lock_period(&100);
+    f.vault.set_early_exit_penalty_bps(&1000);
+    f.vault.set_restake_window(&200);
+
+    // Alice stakes at ledger 0.
+    f.vault.stake(&f.alice, &500_000);
+
+    // Alice unstakes AFTER the lock period expires (no penalty, no residual in vault).
+    set_ledger(&f.env, 100);
+    let first_return = f.vault.unstake(&f.alice, &500_000);
+    assert_eq!(first_return, 500_000, "No penalty after lock expires");
+    // LastUnstakeLedger = 100; vault is now empty.
+
+    // Alice re-stakes 50 ledgers later — within the 200-ledger window → Restaked = true.
+    set_ledger(&f.env, 150);
+    f.vault.stake(&f.alice, &500_000);
+
+    // Alice tries to exit at ledger 200 (50 after re-stake, still inside the new 100-ledger lock).
+    // Normally 10% penalty; Restaked flag exempts her.
+    set_ledger(&f.env, 200);
+    let returned = f.vault.unstake(&f.alice, &500_000);
+    assert_eq!(returned, 500_000, "Restaked user should receive full amount, no penalty");
+}
+
+#[test]
+fn test_restake_outside_window_incurs_normal_penalty() {
+    let f = VaultFixture::new();
+
+    // Lock 100 ledgers, 10% penalty, but only a 10-ledger restake window.
+    f.vault.set_lock_period(&100);
+    f.vault.set_early_exit_penalty_bps(&1000);
+    f.vault.set_restake_window(&10);
+
+    f.vault.stake(&f.alice, &500_000);
+
+    // Clean unstake after lock period.
+    set_ledger(&f.env, 100);
+    f.vault.unstake(&f.alice, &500_000);
+
+    // Re-stake 50 ledgers later — OUTSIDE the 10-ledger window → Restaked NOT set.
+    set_ledger(&f.env, 150);
+    f.vault.stake(&f.alice, &500_000);
+
+    // Early exit inside the new lock period — normal penalty applies.
+    set_ledger(&f.env, 200);
+    let returned = f.vault.unstake(&f.alice, &500_000);
+    let penalty = 500_000_i128 * 1000 / 10_000;
+    assert_eq!(returned, 500_000 - penalty, "Outside window: normal penalty applies");
+}
+
+#[test]
+fn test_restake_window_zero_disables_feature() {
+    let f = VaultFixture::new();
+
+    // Lock 100 ledgers, 10% penalty, window disabled.
+    f.vault.set_lock_period(&100);
+    f.vault.set_early_exit_penalty_bps(&1000);
+    f.vault.set_restake_window(&0);
+
+    f.vault.stake(&f.alice, &500_000);
+
+    // Clean unstake after lock period.
+    set_ledger(&f.env, 100);
+    f.vault.unstake(&f.alice, &500_000);
+
+    // Re-stake 1 ledger later — window = 0 means Restaked is never set.
+    set_ledger(&f.env, 101);
+    f.vault.stake(&f.alice, &500_000);
+
+    // Early exit inside lock period — penalty must apply since window = 0.
+    set_ledger(&f.env, 150);
+    let returned = f.vault.unstake(&f.alice, &500_000);
+    let penalty = 500_000_i128 * 1000 / 10_000;
+    assert_eq!(returned, 500_000 - penalty, "Window=0: normal penalty must apply");
+}
+
+// ── Issue #42: admin action audit log ────────────────────────────────────────
+
+#[test]
+fn test_admin_action_count_increments() {
+    let f = VaultFixture::new();
+
+    let before = f.vault.get_admin_action_count();
+    f.vault.set_reward_rate_bps(&500);
+    let after = f.vault.get_admin_action_count();
+    assert_eq!(after, before + 1, "Count should increment after each admin action");
+
+    f.vault.pause();
+    assert_eq!(f.vault.get_admin_action_count(), before + 2);
+
+    f.vault.unpause();
+    assert_eq!(f.vault.get_admin_action_count(), before + 3);
+}
+
+#[test]
+fn test_admin_action_set_reward_rate_emits_audit_event() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&1000);
+
+    let events = f.env.events().all();
+    let audit_events: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "adm_act"))
+        .collect();
+    assert!(!audit_events.is_empty(), "adm_act event should be emitted");
+}
+
+#[test]
+fn test_admin_action_pause_emits_audit_event() {
+    let f = VaultFixture::new();
+    f.vault.pause();
+
+    let events = f.env.events().all();
+    let audit_events: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "adm_act"))
+        .collect();
+    assert!(!audit_events.is_empty(), "adm_act event should be emitted on pause");
+}
+
+#[test]
+fn test_admin_action_transfer_admin_emits_audit_event() {
+    let f = VaultFixture::new();
+    f.vault.transfer_admin(&f.bob);
+
+    let events = f.env.events().all();
+    let audit_events: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "adm_act"))
+        .collect();
+    assert!(!audit_events.is_empty(), "adm_act event should be emitted on transfer_admin");
+}
+
+#[test]
+fn test_admin_action_count_increments_across_all_admin_fns() {
+    let f = VaultFixture::new();
+    let mut expected = 0u32;
+
+    f.vault.set_reward_rate_bps(&500);
+    expected += 1;
+    assert_eq!(f.vault.get_admin_action_count(), expected);
+
+    f.vault.pause();
+    expected += 1;
+    assert_eq!(f.vault.get_admin_action_count(), expected);
+
+    f.vault.unpause();
+    expected += 1;
+    assert_eq!(f.vault.get_admin_action_count(), expected);
+
+    f.vault.set_lock_period(&100);
+    expected += 1;
+    assert_eq!(f.vault.get_admin_action_count(), expected);
+
+    f.vault.set_withdrawal_limit(&1_000_000);
+    expected += 1;
+    assert_eq!(f.vault.get_admin_action_count(), expected);
+
+    f.vault.transfer_admin(&f.bob);
+    expected += 1;
+    assert_eq!(f.vault.get_admin_action_count(), expected);
 }

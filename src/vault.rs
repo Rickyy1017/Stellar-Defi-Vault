@@ -2,6 +2,7 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 use crate::{
     admin, balance, errors::VaultError, events,
+    nft::StakeReceiptNFTClient,
     storage::{DataKey, PoolStats, UserStats},
 };
 
@@ -153,6 +154,8 @@ impl VaultContract {
         env.storage().instance().set(&DataKey::Paused, &true);
         let admin = admin::get_admin(&env)?;
         events::paused(&env, &admin);
+        events::admin_action_pause(&env, &admin);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -162,6 +165,8 @@ impl VaultContract {
         env.storage().instance().set(&DataKey::Paused, &false);
         let admin = admin::get_admin(&env)?;
         events::unpaused(&env, &admin);
+        events::admin_action_unpause(&env, &admin);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -188,6 +193,8 @@ impl VaultContract {
 
         let admin_actual = admin::get_admin(&env)?;
         events::yield_added(&env, &admin_actual, amount);
+        events::admin_action_add_yield(&env, &admin_actual, amount);
+        balance::increment_admin_action_count(&env);
 
         Ok(())
     }
@@ -198,6 +205,8 @@ impl VaultContract {
         let old_admin = admin::get_admin(&env)?;
         admin::set_admin(&env, &new_admin);
         events::admin_changed(&env, &old_admin, &new_admin);
+        events::admin_action_transfer_admin(&env, &old_admin, &new_admin);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -210,6 +219,8 @@ impl VaultContract {
         balance::set_withdrawal_limit(&env, limit);
         let admin = admin::get_admin(&env)?;
         events::withdrawal_limit_updated(&env, &admin, limit);
+        events::admin_action_set_cap(&env, &admin, limit);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -223,6 +234,9 @@ impl VaultContract {
     pub fn set_lock_period(env: Env, ledgers: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         env.storage().instance().set(&DataKey::LockPeriod, &ledgers);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_lock_period(&env, &admin, ledgers);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -232,9 +246,10 @@ impl VaultContract {
         if bps > 2000 {
             return Err(VaultError::InvalidPenaltyBps);
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::EarlyExitPenaltyBps, &bps);
+        env.storage().instance().set(&DataKey::EarlyExitPenaltyBps, &bps);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_early_exit_penalty(&env, &admin, bps);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -261,6 +276,9 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
         balance::set_min_stake(&env, amount);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_min_stake(&env, &admin, amount);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -276,6 +294,9 @@ impl VaultContract {
         let old_rate = balance::get_reward_rate_bps(&env);
         balance::set_reward_rate_bps(&env, rate_bps);
         events::rate_changed(&env, old_rate, rate_bps);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_reward_rate(&env, &admin, old_rate, rate_bps);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -303,6 +324,10 @@ impl VaultContract {
 
         let reward_pool = balance::get_reward_pool_balance(&env);
         balance::set_reward_pool_balance(&env, reward_pool + amount);
+
+        let admin_actual = admin::get_admin(&env)?;
+        events::admin_action_fund_reward_pool(&env, &admin_actual, amount);
+        balance::increment_admin_action_count(&env);
 
         Ok(())
     }
@@ -334,7 +359,11 @@ impl VaultContract {
             index += 1;
         }
 
+        let num_tiers = tiers.len();
         balance::set_boost_schedule(&env, &tiers);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_boost_schedule(&env, &admin, num_tiers);
+        balance::increment_admin_action_count(&env);
         Ok(())
     }
 
@@ -352,6 +381,96 @@ impl VaultContract {
             &user,
             env.ledger().sequence(),
         ))
+    }
+
+    // --- Issue #39: rescue stuck tokens ---
+
+    /// Admin: register a separate reward token address (distinct from the stake token).
+    /// Once set, `rescue_token` will also reject this token with CannotRescueRewardToken.
+    pub fn set_reward_token(env: Env, token: Address) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        balance::set_reward_token(&env, &token);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_reward_token(&env, &admin, &token);
+        balance::increment_admin_action_count(&env);
+        Ok(())
+    }
+
+    /// Admin: transfer `amount` of a stuck non-stake, non-reward token to `recipient`.
+    /// Rejects if the token is the stake token or the registered reward token.
+    pub fn rescue_token(
+        env: Env,
+        admin_addr: Address,
+        token: Address,
+        amount: i128,
+        recipient: Address,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let admin = admin::get_admin(&env)?;
+        if admin_addr != admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        let stake_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+
+        if token == stake_token {
+            return Err(VaultError::CannotRescueStakeToken);
+        }
+
+        if let Some(reward_token) = balance::get_reward_token(&env) {
+            if token == reward_token {
+                return Err(VaultError::CannotRescueRewardToken);
+            }
+        }
+
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&env.current_contract_address(), &recipient, &amount);
+
+        events::token_rescued(&env, &token, amount, &recipient);
+        events::admin_action_rescue_token(&env, &admin, &token, amount, &recipient);
+        balance::increment_admin_action_count(&env);
+
+        Ok(())
+    }
+
+    // --- Issue #40: NFT receipt ---
+
+    /// Admin: register the companion StakeReceiptNFT contract address.
+    pub fn set_nft_contract(env: Env, nft: Address) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        balance::set_nft_contract(&env, &nft);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_nft_contract(&env, &admin, &nft);
+        balance::increment_admin_action_count(&env);
+        Ok(())
+    }
+
+    // --- Issue #41: restake grace window ---
+
+    /// Admin: set the restake grace window in ledgers. Zero disables the feature.
+    pub fn set_restake_window(env: Env, ledgers: u32) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        balance::set_restake_window(&env, ledgers);
+        let admin = admin::get_admin(&env)?;
+        events::admin_action_set_restake_window(&env, &admin, ledgers);
+        balance::increment_admin_action_count(&env);
+        Ok(())
+    }
+
+    // --- Issue #42: admin action audit log ---
+
+    /// Read-only running count of admin actions taken on this contract.
+    pub fn get_admin_action_count(env: Env) -> Result<u32, VaultError> {
+        let _ = admin::get_admin(&env)?;
+        Ok(balance::get_admin_action_count(&env))
     }
 
     // --- Pool statistics (#38) ---
@@ -486,6 +605,27 @@ impl VaultContract {
             let total_stakers = balance::get_total_stakers(&env);
             balance::set_total_stakers(&env, total_stakers + 1);
             events::position_opened(&env, &beneficiary, amount);
+
+            // Issue #41: mark as restaked if within grace window
+            let restake_window = balance::get_restake_window(&env);
+            if restake_window > 0 {
+                if let Some(last_unstake) = balance::get_last_unstake_ledger(&env, &beneficiary) {
+                    if current_ledger.saturating_sub(last_unstake) <= restake_window {
+                        balance::set_restaked(&env, &beneficiary, true);
+                    }
+                }
+            }
+
+            // Issue #40: mint NFT receipt
+            if let Some(nft_addr) = balance::get_nft_contract(&env) {
+                let nft_client = StakeReceiptNFTClient::new(&env, &nft_addr);
+                nft_client.mint(
+                    &beneficiary.clone(),
+                    &env.current_contract_address(),
+                    &amount,
+                    &current_ledger,
+                );
+            }
         }
         Self::record_stake_snapshot(&env, &beneficiary, new_shares);
 
@@ -536,6 +676,27 @@ impl VaultContract {
             let total_stakers = balance::get_total_stakers(env);
             balance::set_total_stakers(env, total_stakers + 1);
             events::position_opened(env, staker, amount);
+
+            // Issue #41: mark position as restaked if within the grace window
+            let restake_window = balance::get_restake_window(env);
+            if restake_window > 0 {
+                if let Some(last_unstake) = balance::get_last_unstake_ledger(env, staker) {
+                    if current_ledger.saturating_sub(last_unstake) <= restake_window {
+                        balance::set_restaked(env, staker, true);
+                    }
+                }
+            }
+
+            // Issue #40: mint NFT receipt for the new position
+            if let Some(nft_addr) = balance::get_nft_contract(env) {
+                let nft_client = StakeReceiptNFTClient::new(env, &nft_addr);
+                nft_client.mint(
+                    &staker.clone(),
+                    &env.current_contract_address(),
+                    &amount,
+                    &current_ledger,
+                );
+            }
         }
         Self::record_stake_snapshot(env, staker, new_shares);
 
@@ -577,12 +738,12 @@ impl VaultContract {
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
 
-        let lock_period = env
+        let lock_period: u32 = env
             .storage()
             .instance()
             .get(&DataKey::LockPeriod)
             .unwrap_or(0);
-        let penalty_bps = env
+        let penalty_bps: u32 = env
             .storage()
             .instance()
             .get(&DataKey::EarlyExitPenaltyBps)
@@ -602,7 +763,11 @@ impl VaultContract {
             }
         };
 
-        let amount_returned = if is_locked && penalty_bps > 0 {
+        // Issue #41: restaked positions are exempt from early-exit penalty for one unstake cycle
+        let is_restaked = balance::is_restaked(env, staker);
+        let amount_returned = if is_restaked {
+            amount
+        } else if is_locked && penalty_bps > 0 {
             let penalty = amount
                 .checked_mul(penalty_bps as i128)
                 .ok_or(VaultError::ArithmeticError)?
@@ -622,11 +787,20 @@ impl VaultContract {
             env.storage()
                 .persistent()
                 .remove(&DataKey::StakedAtLedger(staker.clone()));
+            // Issue #41: record the ledger of this full unstake and clear restaked flag
+            balance::set_last_unstake_ledger(env, staker, current_ledger);
+            balance::remove_restaked(env, staker);
             let total_stakers = balance::get_total_stakers(env);
             if total_stakers > 0 {
                 balance::set_total_stakers(env, total_stakers - 1);
             }
             events::position_closed(env, staker);
+
+            // Issue #40: burn NFT receipt on full unstake
+            if let Some(nft_addr) = balance::get_nft_contract(env) {
+                let nft_client = StakeReceiptNFTClient::new(env, &nft_addr);
+                nft_client.burn(&staker.clone());
+            }
         }
         Self::record_stake_snapshot(env, staker, new_user_shares);
 

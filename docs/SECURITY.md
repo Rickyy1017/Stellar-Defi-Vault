@@ -34,6 +34,14 @@ Transfers `amount` tokens **from the admin's own wallet** into the vault contrac
 
 **Key constraint:** The admin is sending their own tokens *into* the vault, not extracting anything from it. This function cannot be used to remove user principal.
 
+### `rescue_token(admin_addr, token, amount, recipient)`
+
+Transfers a stuck non-stake, non-reward token from the vault to the specified `recipient`. This function is admin-only and rejects if the token matches either the configured stake token or the configured reward token.
+
+**Effect:** Only third-party tokens accidentally sent to the contract can be rescued. The admin cannot use this to move user principal or the registered reward token balance.
+
+**Emits:** `tk_rescue` event with the rescued token, amount, recipient, and ledger sequence.
+
 ### `transfer_admin(new_admin)`
 
 Replaces the stored admin address with `new_admin` in a single atomic step.
