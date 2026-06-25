@@ -43,4 +43,10 @@ pub enum VaultError {
     LeaderboardSizeTooLarge = 27,
     /// view_all_positions page_size exceeds the maximum of 20.
     PageSizeTooLarge = 28,
+    /// Staker is not KYC-approved and KYC enforcement is enabled (issue #106).
+    KycNotApproved = 29,
+    /// Contract has been permanently stopped via emergency_stop (issue #107).
+    ContractStopped = 30,
+    /// Total pool deposits would exceed the configured pool cap.
+    PoolCapReached = 31,
 }

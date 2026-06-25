@@ -67,6 +67,13 @@ pub enum DataKey {
     // Issue #101: frozen positions
     InactivityThreshold,
     FrozenAt(Address),
+    // Issue #106: KYC enforcement
+    KycRequired,
+    KycApproved(Address),
+    // Issue #107: permanent emergency stop
+    Stopped,
+    // Pool deposit cap (used by balance.rs and vault.rs)
+    PoolCap,
 }
 
 /// Issue #42: enum of all admin actions for the audit log.
@@ -214,4 +221,44 @@ pub struct UserSummary {
     pub position: Option<StakePosition>,
     pub pending_reward: i128,
     pub pool_share_bps: i128,
+}
+
+// ── Issue #105: stake/unstake history ────────────────────────────────────────
+
+/// Discriminant for a stake history entry.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum StakeAction {
+    Stake,
+    Unstake,
+}
+
+/// One entry in a user's recent staking activity log.
+///
+/// - `action`: whether the user staked or unstaked.
+/// - `amount`: token amount involved (not shares).
+/// - `ledger`: ledger sequence number at which the action was recorded.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StakeHistoryEntry {
+    pub action: StakeAction,
+    pub amount: i128,
+    pub ledger: u32,
+}
+
+// ── Issue #104: interface detection ──────────────────────────────────────────
+
+/// Feature interface identifiers for `supports_interface`.
+///
+/// `Base` is always supported. All others are only true when the corresponding
+/// feature is compiled into this deployment.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum InterfaceId {
+    Base,
+    Lockup,
+    Whitelist,
+    Compounding,
+    EpochMode,
+    VestingSchedule,
 }

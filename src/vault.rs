@@ -3,8 +3,14 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
 use crate::{
     admin, balance, errors::VaultError, events,
     nft::StakeReceiptNFTClient,
-    storage::{CampaignInfo, ClaimWindow, DataKey, LeaderboardEntry, PoolConfig, PoolStats, StakePosition, UnbondingPosition, UserStats, UserSummary},
+    storage::{
+        CampaignInfo, ClaimWindow, DataKey, InterfaceId, LeaderboardEntry, PoolConfig, PoolStats,
+        StakeAction, StakeHistoryEntry, StakePosition, UnbondingPosition, UserStats, UserSummary,
+    },
 };
+
+/// Maximum number of stake/unstake history entries kept per user (issue #105).
+pub(crate) const MAX_STAKE_HISTORY: u32 = 5;
 
 pub(crate) const CONTRACT_VERSION: &str = "0.1.0";
 pub(crate) const BOOST_BPS_BASE: u32 = 10_000;
@@ -283,6 +289,8 @@ impl VaultContract {
     /// Pause all deposits and withdrawals (admin only).
     pub fn pause(env: Env) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        // Issue #107: stopped contracts cannot be re-paused or unpaused.
+        Self::require_not_stopped(&env)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         let admin = admin::get_admin(&env)?;
         events::paused(&env, &admin);
@@ -294,6 +302,8 @@ impl VaultContract {
     /// Resume deposits and withdrawals after a pause (admin only).
     pub fn unpause(env: Env) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        // Issue #107: stopped contracts cannot be re-paused or unpaused.
+        Self::require_not_stopped(&env)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         let admin = admin::get_admin(&env)?;
         events::unpaused(&env, &admin);
@@ -801,7 +811,7 @@ impl VaultContract {
             if hist_ledger < current_ledger {
                 // hist_rate is the old rate that was active from last_ledger up to hist_ledger
                 let duration = hist_ledger - last_ledger;
-                weighted_sum += (duration as u64) * (hist_rate as u64);
+                weighted_sum += (duration as u64) * (last_rate as u64);
                 last_ledger = hist_ledger;
                 index += 1;
                 // Rate active from hist_ledger = old_rate of next entry, or current_rate.
@@ -944,14 +954,6 @@ impl VaultContract {
         }
 
         let stake_token: Address = env
-    /// Read-only query for the reward token balance held by the contract.
-    ///
-    /// Returns the current balance of the vault token in the contract's own
-    /// account. This covers both staked principal and the funded reward pool,
-    /// allowing integrators to assess whether the pool can sustain its current
-    /// reward rate before staking. No auth required.
-    pub fn reward_token_balance(env: Env) -> Result<i128, VaultError> {
-        let token_addr: Address = env
             .storage()
             .instance()
             .get(&DataKey::Token)
@@ -975,6 +977,23 @@ impl VaultContract {
         balance::increment_admin_action_count(&env);
 
         Ok(())
+    }
+
+    /// Read-only query for the reward token balance held by the contract.
+    ///
+    /// Returns the current balance of the vault token in the contract's own
+    /// account. This covers both staked principal and the funded reward pool,
+    /// allowing integrators to assess whether the pool can sustain its current
+    /// reward rate before staking. No auth required.
+    pub fn reward_token_balance(env: Env) -> Result<i128, VaultError> {
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        let balance = token::Client::new(&env, &token_addr)
+            .balance(&env.current_contract_address());
+        Ok(balance)
     }
 
     // --- Issue #40: NFT receipt ---
@@ -1007,8 +1026,6 @@ impl VaultContract {
     pub fn get_admin_action_count(env: Env) -> Result<u32, VaultError> {
         let _ = admin::get_admin(&env)?;
         Ok(balance::get_admin_action_count(&env))
-        let token_client = token::Client::new(&env, &token_addr);
-        Ok(token_client.balance(&env.current_contract_address()))
     }
 
     /// Read-only query for how many ledgers ago a user opened their staking position.
@@ -1746,6 +1763,7 @@ impl VaultContract {
 
     fn do_stake(env: &Env, staker: &Address, amount: i128) -> Result<i128, VaultError> {
         staker.require_auth();
+        Self::require_not_stopped(env)?;
         Self::require_not_paused(env)?;
 
         // If whitelist is enabled, reject non-whitelisted stakers. Existing stakers can still unstake/claim.
@@ -1762,6 +1780,24 @@ impl VaultContract {
                 .unwrap_or(false);
             if !allowed {
                 return Err(VaultError::NotWhitelisted);
+            }
+        }
+
+        // Issue #106: KYC enforcement — block unapproved stakers when required.
+        // Unstake and claim are intentionally not gated so users can always exit.
+        let kyc_required: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::KycRequired)
+            .unwrap_or(false);
+        if kyc_required {
+            let kyc_approved: bool = env
+                .storage()
+                .persistent()
+                .get(&DataKey::KycApproved(staker.clone()))
+                .unwrap_or(false);
+            if !kyc_approved {
+                return Err(VaultError::KycNotApproved);
             }
         }
 
@@ -1839,6 +1875,7 @@ impl VaultContract {
         }
         Self::record_stake_snapshot(env, staker, new_shares);
         Self::update_leaderboard(env, staker, new_shares);
+        Self::append_stake_history(env, staker, StakeAction::Stake, amount);
 
         events::deposit(env, staker, amount, shares);
 
@@ -1913,19 +1950,17 @@ impl VaultContract {
         };
 
         // Issue #41: restaked positions are exempt from early-exit penalty for one unstake cycle
+        // Issue #41: restaked positions are exempt from early-exit penalty for one unstake cycle
         let is_restaked = balance::is_restaked(env, staker);
-        let amount_returned = if is_restaked {
+        let amount_after_penalty = if is_restaked || !is_locked || penalty_bps == 0 {
             amount
-        } else if is_locked && penalty_bps > 0 {
-        let amount_after_penalty = if is_locked && penalty_bps > 0 {
+        } else {
             let penalty = amount
                 .checked_mul(penalty_bps as i128)
                 .ok_or(VaultError::ArithmeticError)?
                 .checked_div(BOOST_BPS_BASE as i128)
                 .ok_or(VaultError::ArithmeticError)?;
             amount - penalty
-        } else {
-            amount
         };
 
         // Unstake fee: charged on the post-penalty amount returned to the user
@@ -1977,6 +2012,7 @@ impl VaultContract {
         }
         Self::record_stake_snapshot(env, staker, new_user_shares);
         Self::update_leaderboard(env, staker, new_user_shares);
+        Self::append_stake_history(env, staker, StakeAction::Unstake, amount_returned);
 
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &amount_returned);
@@ -2135,6 +2171,7 @@ impl VaultContract {
         let campaign: Option<CampaignInfo> = env.storage().instance().get(&DataKey::BoostCampaign);
 
         let schedule = balance::get_boost_schedule(env).unwrap_or(Vec::new(env));
+        let mut reward: i128 = 0;
         let mut total_dust: i128 = 0;
         let mut cursor = start_ledger;
         let mut current_multiplier = BOOST_BPS_BASE;
@@ -2184,7 +2221,7 @@ impl VaultContract {
                 current_shares,
                 rate_bps,
                 current_multiplier,
-                threshold - cursor,
+                seg_end - cursor,
             )?;
             total_dust = total_dust
                 .checked_add(segment_dust)
@@ -2329,6 +2366,33 @@ impl VaultContract {
         multiplier
     }
 
+    /// Returns `(campaign_multiplier_bps, next_boundary_ledger)` for a given cursor position.
+    fn campaign_info_at(cursor: u32, campaign: &Option<CampaignInfo>) -> (u32, u32) {
+        match campaign {
+            Some(c) if cursor >= c.starts_at_ledger && cursor < c.ends_at_ledger => {
+                (c.multiplier_bps, c.ends_at_ledger)
+            }
+            Some(c) if cursor < c.starts_at_ledger => (BOOST_BPS_BASE, c.starts_at_ledger),
+            _ => (BOOST_BPS_BASE, u32::MAX),
+        }
+    }
+
+    /// Normalize a reward amount from stake-token precision to reward-token precision.
+    fn normalize_to_reward_decimals(env: &Env, amount: i128) -> Result<i128, VaultError> {
+        let stake_dec = balance::get_stake_decimals(env);
+        let reward_dec = balance::get_reward_decimals(env);
+        if stake_dec == reward_dec {
+            return Ok(amount);
+        }
+        if reward_dec > stake_dec {
+            let factor = 10i128.pow(reward_dec - stake_dec);
+            amount.checked_mul(factor).ok_or(VaultError::ArithmeticError)
+        } else {
+            let factor = 10i128.pow(stake_dec - reward_dec);
+            Ok(amount / factor)
+        }
+    }
+
     /// Update the on-chain leaderboard after a stake or unstake operation (#46).
     ///
     /// Rebuilds the sorted `Vec<LeaderboardEntry>` (descending by amount) removing the old entry
@@ -2438,6 +2502,40 @@ impl VaultContract {
         }
     }
 
+    /// Issue #107: returns `ContractStopped` if the emergency stop has been triggered.
+    fn require_not_stopped(env: &Env) -> Result<(), VaultError> {
+        let stopped: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Stopped)
+            .unwrap_or(false);
+        if stopped {
+            Err(VaultError::ContractStopped)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Append one entry to the user's stake/unstake history ring buffer (max 5).
+    fn append_stake_history(env: &Env, user: &Address, action: StakeAction, amount: i128) {
+        let key = DataKey::StakeHistory(user.clone());
+        let mut history: Vec<StakeHistoryEntry> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        if history.len() >= MAX_STAKE_HISTORY {
+            history.remove(0);
+        }
+        history.push_back(StakeHistoryEntry {
+            action,
+            amount,
+            ledger: env.ledger().sequence(),
+        });
+        env.storage().persistent().set(&key, &history);
+    }
+
     // ── Inner claim helper (no require_auth) ──────────────────────────────────
 
     /// Core claim logic shared by `claim` and `stake_and_claim`.
@@ -2501,6 +2599,7 @@ impl VaultContract {
     /// minting, event emission) without calling `require_auth`. Callers must
     /// have already authenticated the staker.
     fn do_stake_inner(env: &Env, staker: &Address, amount: i128) -> Result<i128, VaultError> {
+        Self::require_not_stopped(env)?;
         Self::require_not_paused(env)?;
 
         let whitelist_enabled: bool = env
@@ -2765,6 +2864,106 @@ impl VaultContract {
             pending_reward,
             pool_share_bps,
         })
+    }
+
+    // ── Issue #105: stake history ─────────────────────────────────────────────
+
+    /// Returns the last (up to 5) stake/unstake actions for `user`.
+    ///
+    /// Returns an empty vec for a user who has never staked. No auth required.
+    pub fn stake_history(env: Env, user: Address) -> Vec<StakeHistoryEntry> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::StakeHistory(user))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ── Issue #104: interface detection ──────────────────────────────────────
+
+    /// The compile-time set of interfaces this deployment supports.
+    ///
+    /// `Base` is always present. `Lockup` and `Whitelist` are supported because
+    /// the vault includes lock-period and whitelist features. `Compounding`,
+    /// `EpochMode`, and `VestingSchedule` are NOT included in this build.
+    const SUPPORTED_INTERFACES: &'static [InterfaceId] = &[
+        InterfaceId::Base,
+        InterfaceId::Lockup,
+        InterfaceId::Whitelist,
+    ];
+
+    /// Returns `true` if this contract deployment supports the given interface.
+    ///
+    /// Callers can use this for on-chain feature detection before invoking
+    /// optional functions. No auth required, no state changes.
+    pub fn supports_interface(_env: Env, interface: InterfaceId) -> bool {
+        Self::SUPPORTED_INTERFACES.contains(&interface)
+    }
+
+    // ── Issue #106: KYC enforcement ───────────────────────────────────────────
+
+    /// Toggle global KYC enforcement on or off (admin only).
+    ///
+    /// When `required` is `true`, only addresses marked approved via
+    /// `set_kyc_status` may call `stake`. Existing positions are unaffected —
+    /// users can always unstake and claim regardless of KYC status.
+    pub fn set_kyc_required(env: Env, required: bool) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::KycRequired, &required);
+        Ok(())
+    }
+
+    /// Approve or revoke KYC status for a specific address (admin only).
+    ///
+    /// Revoking KYC does not auto-unstake an existing position — it only
+    /// prevents the user from adding new stake while KYC enforcement is on.
+    pub fn set_kyc_status(env: Env, user: Address, approved: bool) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::KycApproved(user), &approved);
+        Ok(())
+    }
+
+    /// Returns `true` if `user` has been marked KYC-approved by the admin.
+    ///
+    /// Note: returns `false` when KYC enforcement is off — query
+    /// `kyc_required` separately if you need to distinguish these cases.
+    /// No auth required.
+    pub fn is_kyc_approved(env: Env, user: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::KycApproved(user))
+            .unwrap_or(false)
+    }
+
+    // ── Issue #107: permanent emergency stop ──────────────────────────────────
+
+    /// Permanently freeze the contract — no new stakes will ever be accepted.
+    ///
+    /// **This action is irreversible.** Once triggered, `stake` is permanently
+    /// blocked, and `pause`/`unpause` both revert with `ContractStopped`.
+    /// `unstake` and `claim` continue to work so all users can exit safely.
+    ///
+    /// Emits the `stopped` event. Can be called even when the contract is
+    /// already paused. Admin only.
+    pub fn emergency_stop(env: Env) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Stopped, &true);
+        let admin = admin::get_admin(&env)?;
+        events::stopped(&env, &admin);
+        Ok(())
+    }
+
+    /// Returns `true` if the contract has been permanently stopped.
+    ///
+    /// No auth required.
+    pub fn is_stopped(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Stopped)
+            .unwrap_or(false)
     }
 
 }

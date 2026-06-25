@@ -175,6 +175,9 @@ pub fn admin_action_set_reward_token(env: &Env, actor: &Address, token: &Address
     env.events().publish(
         (symbol_short!("adm_act"), AdminAction::SetRewardToken),
         (actor.clone(), env.ledger().sequence(), token.clone()),
+    );
+}
+
 pub fn slash(env: &Env, admin: &Address, user: &Address, amount: i128) {
     let topics = (symbol_short!("slash"), admin);
     env.events()
@@ -227,4 +230,13 @@ pub fn frozen_position(env: &Env, admin: &Address, user: &Address, frozen_at: u3
     let topics = (symbol_short!("frz_pos"), admin);
     env.events()
         .publish(topics, (user.clone(), frozen_at, env.ledger().sequence()));
+}
+
+// ── Issue #107: emergency stop event ─────────────────────────────────────────
+
+/// Emitted once when `emergency_stop` is triggered. This event is permanent
+/// and irreversible — the contract will never accept new stakes again.
+pub fn stopped(env: &Env, admin: &Address) {
+    let topics = (symbol_short!("stopped"), admin);
+    env.events().publish(topics, env.ledger().sequence());
 }
