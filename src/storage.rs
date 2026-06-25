@@ -7,11 +7,11 @@ use soroban_sdk::{contracttype, Address, Vec};
 /// WithdrawalLimit, LockPeriod, EarlyExitPenaltyBps, TotalStakers,
 /// TotalRewardsPaid, SlashTreasury, WhitelistEnabled, CooldownPeriod,
 /// PoolCap, ClaimCap, ClaimCapWindow, StakeDecimals, RewardDecimals,
-/// UnstakeFeeBps, AllStakers.
+/// UnstakeFeeBps, AllStakers, InactivityThreshold.
 ///
 /// Persistent keys (per-user, long-lived): ShareBalance, StakeHistory,
 /// RewardCheckpointLedger, LastClaimLedger, AccruedReward, StakedAtLedger,
-/// Delegate, Whitelisted, UnbondingPosition, UserClaimWindow.
+/// Delegate, Whitelisted, UnbondingPosition, UserClaimWindow, FrozenAt.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -46,6 +46,27 @@ pub enum DataKey {
     Restaked(Address),
     // Issue #42: admin action audit log
     AdminActionCount,
+    // Keys used throughout vault.rs / balance.rs
+    SlashTreasury,
+    WhitelistEnabled,
+    Whitelisted(Address),
+    CooldownPeriod,
+    UnbondingPosition(Address),
+    RewardRemainder(Address),
+    UserClaimWindow(Address),
+    StakeDecimals,
+    RewardDecimals,
+    UnstakeFeeBps,
+    AllStakers,
+    ClaimCap,
+    ClaimCapWindow,
+    RateHistory,
+    BoostCampaign,
+    Leaderboard,
+    LeaderboardSize,
+    // Issue #101: frozen positions
+    InactivityThreshold,
+    FrozenAt(Address),
 }
 
 /// Issue #42: enum of all admin actions for the audit log.
@@ -68,32 +89,6 @@ pub enum AdminAction {
     SetNftContract,
     SetRestakeWindow,
     SetRewardToken,
-    /// Address that receives slashed tokens. Defaults to admin when not set.
-    SlashTreasury,
-    /// Whitelist flag and per-user whitelist mapping for permissioned pools.
-    WhitelistEnabled,
-    Whitelisted(Address),
-    /// Cooldown period in ledgers for unbonding flow. 0 means instant unstake allowed.
-    CooldownPeriod,
-    /// Per-user unbonding position stored when request_unstake is called.
-    UnbondingPosition(Address),
-    PoolCap,
-    // Rate change history: Vec<(ledger, rate_bps)> capped at 50 entries
-    RateHistory,
-    // Active boost campaign info (#48)
-    BoostCampaign,
-    // Leaderboard of top stakers (#46)
-    Leaderboard,
-    // Max entries for leaderboard (#46)
-    LeaderboardSize,
-    /// Maximum reward claimable per user within a rolling ledger window (0 = disabled).
-    ClaimCap,
-    /// Window size in ledgers for the per-user claim cap.
-    ClaimCapWindow,
-    /// Per-user running total of rewards claimed within the current window.
-    UserClaimWindow(Address),
-    /// Per-user reward remainder (dust) from integer division.
-    RewardRemainder(Address),
 }
 
 #[contracttype]
@@ -206,4 +201,17 @@ pub struct PoolConfig {
 pub struct ClaimWindow {
     pub claimed_in_window: i128,
     pub window_started_at: u32,
+}
+
+/// Aggregated user state returned by `user_summary` (issue #103).
+///
+/// - `position`: current stake position, or `None` if user has no stake.
+/// - `pending_reward`: rewards accrued but not yet claimed.
+/// - `pool_share_bps`: user's share of the total pool in basis points (10000 = 100%).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UserSummary {
+    pub position: Option<StakePosition>,
+    pub pending_reward: i128,
+    pub pool_share_bps: i128,
 }
