@@ -5,7 +5,8 @@ use crate::{
     nft::StakeReceiptNFTClient,
     storage::{
         CampaignInfo, ClaimWindow, DataKey, InterfaceId, LeaderboardEntry, PoolConfig, PoolStats,
-        StakeAction, StakeHistoryEntry, StakePosition, UnbondingPosition, UserStats, UserSummary,
+        StakeAction, StakeHistoryEntry, StakePosition, StakeStreak, UnbondingPosition, UnstakeCheckResult,
+        UserStats, UserSummary,
     },
 };
 
@@ -2964,6 +2965,230 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Stopped)
             .unwrap_or(false)
+    }
+
+    // ── Issue #98: can_unstake pre-flight check ────────────────────────────────
+
+    /// Read-only pre-flight check that simulates whether an unstake of the given
+    /// `amount` (in token units) would succeed for `user`, without modifying
+    /// any state or requiring authentication.
+    ///
+    /// Mirrors the exact same checks as `do_unstake` in the same order so the
+    /// result accurately reflects what would happen on-chain.
+    pub fn can_unstake(env: Env, user: Address, amount: i128) -> UnstakeCheckResult {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            return UnstakeCheckResult::PoolPaused;
+        }
+
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares == 0 {
+            return UnstakeCheckResult::NoPosition;
+        }
+
+        if amount <= 0 {
+            return UnstakeCheckResult::InsufficientAmount;
+        }
+
+        if let Some(limit) = balance::get_withdrawal_limit(&env) {
+            if amount > limit {
+                return UnstakeCheckResult::InsufficientAmount;
+            }
+        }
+
+        if user_shares < amount {
+            return UnstakeCheckResult::InsufficientAmount;
+        }
+
+        let lock_period: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LockPeriod)
+            .unwrap_or(0);
+        if lock_period > 0 {
+            let staked_at: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::StakedAtLedger(user.clone()))
+                .unwrap_or(0);
+            let current_ledger = env.ledger().sequence();
+            if current_ledger < staked_at.saturating_add(lock_period) {
+                return UnstakeCheckResult::StillLocked;
+            }
+        }
+
+        UnstakeCheckResult::Ok
+    }
+
+    // ── Issue #97: pool description ────────────────────────────────────────────
+
+    /// Admin: set or update the on-chain pool description.
+    ///
+    /// The description is stored as a `soroban_sdk::String` in instance storage
+    /// and can be queried via `get_pool_description`. Maximum length is 200
+    /// characters — reverts with `DescriptionTooLong` if exceeded.
+    ///
+    /// Emits a `description_updated` event on every change.
+    pub fn set_pool_description(
+        env: Env,
+        admin: Address,
+        description: soroban_sdk::String,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+
+        if description.len() > 200 {
+            return Err(VaultError::DescriptionTooLong);
+        }
+
+        balance::set_pool_description(&env, &description);
+        let admin_addr = admin::get_admin(&env)?;
+        events::description_updated(&env, &admin_addr, &description);
+        Ok(())
+    }
+
+    /// Read-only query for the pool description.
+    ///
+    /// Returns `None` if no description has been set yet. No auth required.
+    pub fn get_pool_description(env: Env) -> Option<soroban_sdk::String> {
+        balance::get_pool_description(&env)
+    }
+
+    // ── Issue #96: percentage_of_pool ──────────────────────────────────────────
+
+    /// Read-only query that returns the user's staked amount as a percentage of
+    /// the total pool, expressed in basis points (10 000 = 100%).
+    ///
+    /// Formula: `(user_staked * 10_000) / total_staked`. Integer arithmetic
+    /// truncates — see doc comment. Returns 0 if the user has no position or
+    /// total staked is 0. No auth required.
+    pub fn percentage_of_pool(env: Env, user: Address) -> i128 {
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares == 0 {
+            return 0;
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        if total_shares == 0 || total_deposited == 0 {
+            return 0;
+        }
+
+        let user_amount = match balance::shares_to_amount(total_shares, total_deposited, user_shares)
+        {
+            Some(a) => a,
+            None => return 0,
+        };
+
+        user_amount
+            .checked_mul(BOOST_BPS_BASE as i128)
+            .unwrap_or(0)
+            .checked_div(total_deposited)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #99: staking streak tracker ──────────────────────────────────────
+
+    /// Admin: record which users were active in a completed Wave.
+    ///
+    /// `wave_id` must be monotonically increasing (greater than the last
+    /// recorded wave_id). Users present in consecutive calls have their
+    /// `current_streak` incremented; users absent from a wave have their
+    /// streak reset to 0. `longest_streak` is never decremented.
+    ///
+    /// Maximum 50 active users per call to bound compute cost.
+    /// Reverts with `NonMonotonicWaveId` or `TooManyActiveUsers` on violation.
+    pub fn record_wave_activity(
+        env: Env,
+        admin: Address,
+        wave_id: u32,
+        active_users: Vec<Address>,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+
+        if active_users.len() > 50 {
+            return Err(VaultError::TooManyActiveUsers);
+        }
+
+        let last_wave = balance::get_last_recorded_wave(&env).unwrap_or(0);
+        if wave_id <= last_wave {
+            return Err(VaultError::NonMonotonicWaveId);
+        }
+
+        // Reset streaks for all existing stakers who are NOT in active_users
+        let all_stakers = balance::get_all_stakers(&env);
+        let mut i = 0u32;
+        while i < all_stakers.len() {
+            let staker = all_stakers.get(i).unwrap();
+            let mut found = false;
+            let mut j = 0u32;
+            while j < active_users.len() {
+                if active_users.get(j).unwrap() == staker {
+                    found = true;
+                    break;
+                }
+                j += 1;
+            }
+            if !found {
+                let mut streak =
+                    balance::get_user_streak(&env, &staker).unwrap_or(StakeStreak {
+                        current_streak: 0,
+                        longest_streak: 0,
+                        last_active_wave: 0,
+                    });
+                if streak.current_streak > 0 {
+                    streak.current_streak = 0;
+                    balance::set_user_streak(&env, &staker, &streak);
+                }
+            }
+            i += 1;
+        }
+
+        // Update streaks for active users
+        i = 0;
+        while i < active_users.len() {
+            let user = active_users.get(i).unwrap();
+            let mut streak = balance::get_user_streak(&env, &user).unwrap_or(StakeStreak {
+                current_streak: 0,
+                longest_streak: 0,
+                last_active_wave: 0,
+            });
+
+            if last_wave > 0 && streak.last_active_wave == last_wave {
+                streak.current_streak += 1;
+            } else {
+                streak.current_streak = 1;
+            }
+
+            if streak.current_streak > streak.longest_streak {
+                streak.longest_streak = streak.current_streak;
+            }
+            streak.last_active_wave = wave_id;
+
+            balance::set_user_streak(&env, &user, &streak);
+            i += 1;
+        }
+
+        balance::set_last_recorded_wave(&env, wave_id);
+        Ok(())
+    }
+
+    /// Read-only query for a user's staking streak.
+    ///
+    /// Returns a `StakeStreak` with `current_streak`, `longest_streak`, and
+    /// `last_active_wave`. Returns default (all zeros) if no streak data exists.
+    /// No auth required.
+    pub fn get_streak(env: Env, user: Address) -> StakeStreak {
+        balance::get_user_streak(&env, &user).unwrap_or(StakeStreak {
+            current_streak: 0,
+            longest_streak: 0,
+            last_active_wave: 0,
+        })
     }
 
 }

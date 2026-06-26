@@ -1,5 +1,5 @@
 use crate::storage::{ClaimWindow, DataKey};
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 pub fn get_shares(env: &Env, user: &Address) -> i128 {
     env.storage()
@@ -401,5 +401,35 @@ pub fn set_reward_remainder(env: &Env, user: &Address, amount: i128) {
     env.storage()
         .persistent()
         .set(&DataKey::RewardRemainder(user.clone()), &amount);
+}
+
+// ── Issue #97: pool description ──────────────────────────────────────────────
+
+pub fn get_pool_description(env: &Env) -> Option<soroban_sdk::String> {
+    env.storage().instance().get(&symbol_short!("pool_desc"))
+}
+
+pub fn set_pool_description(env: &Env, description: &soroban_sdk::String) {
+    env.storage().instance().set(&symbol_short!("pool_desc"), description);
+}
+
+// ── Issue #99: staking streak ────────────────────────────────────────────────
+
+pub fn get_last_recorded_wave(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("last_wave"))
+}
+
+pub fn set_last_recorded_wave(env: &Env, wave_id: u32) {
+    env.storage().instance().set(&symbol_short!("last_wave"), &wave_id);
+}
+
+pub fn get_user_streak(env: &Env, user: &Address) -> Option<crate::storage::StakeStreak> {
+    let key = (Symbol::new(env, "strk"), user.clone());
+    env.storage().persistent().get(&key)
+}
+
+pub fn set_user_streak(env: &Env, user: &Address, streak: &crate::storage::StakeStreak) {
+    let key = (Symbol::new(env, "strk"), user.clone());
+    env.storage().persistent().set(&key, streak);
 }
 

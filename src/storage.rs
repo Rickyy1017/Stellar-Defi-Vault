@@ -262,3 +262,28 @@ pub enum InterfaceId {
     EpochMode,
     VestingSchedule,
 }
+
+/// Result of a `can_unstake` pre-flight check (issue #98).
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum UnstakeCheckResult {
+    /// The unstake would succeed.
+    Ok,
+    /// The user has no active staking position.
+    NoPosition,
+    /// The user's position is smaller than the requested amount (in token units).
+    InsufficientAmount,
+    /// The pool is currently paused.
+    PoolPaused,
+    /// The lock-up period has not yet elapsed (early exit penalty would apply).
+    StillLocked,
+}
+
+/// Per-user staking streak data (issue #99).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StakeStreak {
+    pub current_streak: u32,
+    pub longest_streak: u32,
+    pub last_active_wave: u32,
+}

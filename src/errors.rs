@@ -49,4 +49,10 @@ pub enum VaultError {
     ContractStopped = 30,
     /// Total pool deposits would exceed the configured pool cap.
     PoolCapReached = 31,
+    /// Pool description exceeds the maximum length of 200 characters (issue #97).
+    DescriptionTooLong = 32,
+    /// record_wave_activity received a wave_id <= the last recorded wave (issue #99).
+    NonMonotonicWaveId = 33,
+    /// record_wave_activity was called with more than 50 active users (issue #99).
+    TooManyActiveUsers = 34,
 }

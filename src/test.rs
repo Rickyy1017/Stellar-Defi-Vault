@@ -10,8 +10,7 @@ use soroban_sdk::{
 use crate::{
     errors::VaultError,
     nft::{StakeReceiptNFT, StakeReceiptNFTClient},
-    vault::{VaultContract, VaultContractClient, BOOST_BPS_BASE, STELLAR_LEDGERS_PER_YEAR},
-    storage::LeaderboardEntry,
+    storage::{LeaderboardEntry, UnstakeCheckResult},
     vault::{
         VaultContract, VaultContractClient, BOOST_BPS_BASE, CONTRACT_VERSION,
         STELLAR_LEDGERS_PER_YEAR,
@@ -1352,6 +1351,8 @@ fn test_admin_action_count_increments_across_all_admin_fns() {
     f.vault.transfer_admin(&f.bob);
     expected += 1;
     assert_eq!(f.vault.get_admin_action_count(), expected);
+}
+
 // ── reward token decimal normalization ────────────────────────────────────────
 
 #[test]
@@ -2203,4 +2204,245 @@ fn test_twap_zero_window_returns_current_rate() {
 
     let twap = f.vault.twap_apr_bps(&0);
     assert_eq!(twap, 1500);
+}
+
+// ── Issue #98: can_unstake pre-flight check ─────────────────────────────────
+
+#[test]
+fn test_can_unstake_ok_when_valid() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    assert_eq!(f.vault.can_unstake(&f.alice, &100_000), UnstakeCheckResult::Ok);
+}
+
+#[test]
+fn test_can_unstake_no_position() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.can_unstake(&f.alice, &100_000), UnstakeCheckResult::NoPosition);
+}
+
+#[test]
+fn test_can_unstake_insufficient_amount_zero() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    assert_eq!(f.vault.can_unstake(&f.alice, &0), UnstakeCheckResult::InsufficientAmount);
+}
+
+#[test]
+fn test_can_unstake_insufficient_amount_too_much() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    assert_eq!(f.vault.can_unstake(&f.alice, &200_000), UnstakeCheckResult::InsufficientAmount);
+}
+
+#[test]
+fn test_can_unstake_pool_paused() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.pause();
+    assert_eq!(f.vault.can_unstake(&f.alice, &100_000), UnstakeCheckResult::PoolPaused);
+}
+
+#[test]
+fn test_can_unstake_still_locked() {
+    let f = VaultFixture::new();
+    f.vault.set_lock_period(&100);
+    f.vault.stake(&f.alice, &100_000);
+    set_ledger(&f.env, 50);
+    assert_eq!(f.vault.can_unstake(&f.alice, &100_000), UnstakeCheckResult::StillLocked);
+}
+
+#[test]
+fn test_can_unstake_not_locked_after_period() {
+    let f = VaultFixture::new();
+    f.vault.set_lock_period(&100);
+    f.vault.stake(&f.alice, &100_000);
+    set_ledger(&f.env, 100);
+    assert_eq!(f.vault.can_unstake(&f.alice, &100_000), UnstakeCheckResult::Ok);
+}
+
+// ── Issue #97: set_pool_description ─────────────────────────────────────────
+
+#[test]
+fn test_set_and_get_pool_description() {
+    let f = VaultFixture::new();
+    let desc = soroban_sdk::String::from_str(&f.env, "My staking pool");
+    f.vault.set_pool_description(&f.admin, &desc);
+    assert_eq!(f.vault.get_pool_description(), Some(desc));
+}
+
+#[test]
+fn test_get_pool_description_returns_none_initially() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.get_pool_description(), None);
+}
+
+#[test]
+fn test_set_pool_description_too_long_reverts() {
+    let f = VaultFixture::new();
+    let long_desc = soroban_sdk::String::from_str(&f.env, &"a".repeat(201));
+    let result = f.vault.try_set_pool_description(&f.admin, &long_desc);
+    assert_eq!(result, Err(Ok(VaultError::DescriptionTooLong)));
+}
+
+#[test]
+fn test_set_pool_description_at_exact_limit_succeeds() {
+    let f = VaultFixture::new();
+    let desc = soroban_sdk::String::from_str(&f.env, &"a".repeat(200));
+    f.vault.set_pool_description(&f.admin, &desc);
+    assert_eq!(f.vault.get_pool_description(), Some(desc));
+}
+
+#[test]
+fn test_set_pool_description_non_admin_rejected() {
+    let f = VaultFixture::new();
+    let desc = soroban_sdk::String::from_str(&f.env, "test");
+    let result = f.vault.try_set_pool_description(&f.alice, &desc);
+    assert_eq!(result, Err(Ok(VaultError::Unauthorized)));
+}
+
+#[test]
+fn test_set_pool_description_emits_event() {
+    let f = VaultFixture::new();
+    let desc = soroban_sdk::String::from_str(&f.env, "Pool v2");
+    f.vault.set_pool_description(&f.admin, &desc);
+
+    let events = f.env.events().all();
+    let desc_events: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "desc_upd"))
+        .collect();
+    assert_eq!(desc_events.len(), 1);
+}
+
+// ── Issue #96: percentage_of_pool ───────────────────────────────────────────
+
+#[test]
+fn test_percentage_of_pool_sole_staker() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &1_000_000);
+    assert_eq!(f.vault.percentage_of_pool(&f.alice), 10_000);
+}
+
+#[test]
+fn test_percentage_of_pool_two_equal_stakers() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &500_000);
+    f.vault.stake(&f.bob, &500_000);
+    assert_eq!(f.vault.percentage_of_pool(&f.alice), 5_000);
+    assert_eq!(f.vault.percentage_of_pool(&f.bob), 5_000);
+}
+
+#[test]
+fn test_percentage_of_pool_no_position() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &1_000_000);
+    assert_eq!(f.vault.percentage_of_pool(&f.bob), 0);
+}
+
+#[test]
+fn test_percentage_of_pool_empty_pool() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.percentage_of_pool(&f.alice), 0);
+}
+
+#[test]
+fn test_percentage_of_pool_unequal_stakers() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &750_000);
+    f.vault.stake(&f.bob, &250_000);
+    assert_eq!(f.vault.percentage_of_pool(&f.alice), 7_500);
+    assert_eq!(f.vault.percentage_of_pool(&f.bob), 2_500);
+}
+
+// ── Issue #99: staking streak tracker ───────────────────────────────────────
+
+#[test]
+fn test_streak_increments_on_consecutive_waves() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.stake(&f.bob, &100_000);
+
+    let users1 = soroban_sdk::Vec::from_array(&f.env, [f.alice.clone(), f.bob.clone()]);
+    f.vault.record_wave_activity(&f.admin, &1, &users1);
+
+    let streak = f.vault.get_streak(&f.alice);
+    assert_eq!(streak.current_streak, 1);
+
+    let users2 = soroban_sdk::Vec::from_array(&f.env, [f.alice.clone()]);
+    f.vault.record_wave_activity(&f.admin, &2, &users2);
+
+    let streak = f.vault.get_streak(&f.alice);
+    assert_eq!(streak.current_streak, 2);
+
+    let streak_bob = f.vault.get_streak(&f.bob);
+    assert_eq!(streak_bob.current_streak, 0);
+}
+
+#[test]
+fn test_streak_resets_on_missed_wave() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+
+    let users1 = soroban_sdk::Vec::from_array(&f.env, [f.alice.clone()]);
+    f.vault.record_wave_activity(&f.admin, &1, &users1);
+
+    let streak = f.vault.get_streak(&f.alice);
+    assert_eq!(streak.current_streak, 1);
+
+    let empty = soroban_sdk::Vec::new(&f.env);
+    f.vault.record_wave_activity(&f.admin, &2, &empty);
+
+    let streak = f.vault.get_streak(&f.alice);
+    assert_eq!(streak.current_streak, 0);
+}
+
+#[test]
+fn test_streak_longest_preserved_after_reset() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+
+    let users = soroban_sdk::Vec::from_array(&f.env, [f.alice.clone()]);
+    f.vault.record_wave_activity(&f.admin, &1, &users);
+    f.vault.record_wave_activity(&f.admin, &2, &users);
+    f.vault.record_wave_activity(&f.admin, &3, &users);
+
+    let streak = f.vault.get_streak(&f.alice);
+    assert_eq!(streak.current_streak, 3);
+    assert_eq!(streak.longest_streak, 3);
+
+    let empty = soroban_sdk::Vec::new(&f.env);
+    f.vault.record_wave_activity(&f.admin, &4, &empty);
+
+    let streak = f.vault.get_streak(&f.alice);
+    assert_eq!(streak.current_streak, 0);
+    assert_eq!(streak.longest_streak, 3);
+}
+
+#[test]
+fn test_streak_non_admin_rejected() {
+    let f = VaultFixture::new();
+    let users = soroban_sdk::Vec::new(&f.env);
+    let result = f.vault.try_record_wave_activity(&f.alice, &1, &users);
+    assert_eq!(result, Err(Ok(VaultError::Unauthorized)));
+}
+
+#[test]
+fn test_streak_non_monotonic_wave_rejected() {
+    let f = VaultFixture::new();
+    let users = soroban_sdk::Vec::new(&f.env);
+    f.vault.record_wave_activity(&f.admin, &5, &users);
+    let result = f.vault.try_record_wave_activity(&f.admin, &3, &users);
+    assert_eq!(result, Err(Ok(VaultError::NonMonotonicWaveId)));
+}
+
+#[test]
+fn test_streak_too_many_active_users_rejected() {
+    let f = VaultFixture::new();
+    let mut users = soroban_sdk::Vec::new(&f.env);
+    for _ in 0..51 {
+        users.push_back(Address::generate(&f.env));
+    }
+    let result = f.vault.try_record_wave_activity(&f.admin, &1, &users);
+    assert_eq!(result, Err(Ok(VaultError::TooManyActiveUsers)));
 }

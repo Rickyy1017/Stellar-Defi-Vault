@@ -240,3 +240,12 @@ pub fn stopped(env: &Env, admin: &Address) {
     let topics = (symbol_short!("stopped"), admin);
     env.events().publish(topics, env.ledger().sequence());
 }
+
+// ── Issue #97: pool description event ────────────────────────────────────────
+
+/// Emitted when the admin updates the pool description.
+pub fn description_updated(env: &Env, admin: &Address, description: &soroban_sdk::String) {
+    let topics = (symbol_short!("desc_upd"), admin);
+    env.events()
+        .publish(topics, (description.clone(), env.ledger().sequence()));
+}
