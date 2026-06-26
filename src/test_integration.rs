@@ -108,7 +108,10 @@ fn test_integration_full_lifecycle() {
 
     // Verify pool_stats shows 5 stakers and correct total
     let stats = vault.pool_stats();
-    assert_eq!(stats.total_stakers, 5, "Should have 5 active stakers after all stake");
+    assert_eq!(
+        stats.total_stakers, 5,
+        "Should have 5 active stakers after all stake"
+    );
     assert_eq!(
         stats.total_staked,
         stake1 + stake2 + stake3 + stake4 + stake5,
@@ -151,7 +154,10 @@ fn test_integration_full_lifecycle() {
 
     // After all unstakes: staked balance = 0
     let (total_shares, total_deposited) = vault.vault_state();
-    assert_eq!(total_shares, 0, "Total shares should be 0 after all unstake");
+    assert_eq!(
+        total_shares, 0,
+        "Total shares should be 0 after all unstake"
+    );
     assert_eq!(
         total_deposited, 0,
         "Contract stake token balance should be 0 after all unstake"
@@ -229,7 +235,10 @@ fn test_integration_full_lifecycle() {
 fn test_whitelisted_user_can_stake_when_enabled() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let alice = Address::generate(&env);
@@ -244,14 +253,20 @@ fn test_whitelisted_user_can_stake_when_enabled() {
 
     token_admin.mint(&alice, &100_000);
     let res = vault.try_stake(&alice, &50_000);
-    assert!(res.is_ok(), "Whitelisted user should be able to stake when whitelist enabled");
+    assert!(
+        res.is_ok(),
+        "Whitelisted user should be able to stake when whitelist enabled"
+    );
 }
 
 #[test]
 fn test_non_whitelisted_user_rejected_when_enabled() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let bob = Address::generate(&env);
@@ -272,7 +287,10 @@ fn test_non_whitelisted_user_rejected_when_enabled() {
 fn test_toggle_off_allows_non_whitelisted() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let carol = Address::generate(&env);
@@ -295,11 +313,15 @@ fn test_toggle_off_allows_non_whitelisted() {
 fn test_revocation_blocks_new_stake_but_allows_unstake_and_claim() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.sequence_number = 0; li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 0;
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let alice = Address::generate(&env);
-    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let (token_addr, _token, token_admin) = create_token(&env, &admin);
     let vault_id = env.register_contract(None, VaultContract);
     let vault = VaultContractClient::new(&env, &vault_id);
     vault.initialize(&admin, &token_addr, &0_u32, &None, &None);
@@ -361,33 +383,38 @@ fn test_total_stakers_tracks_entries_and_exits() {
 
     vault.stake(&alice, &100_000);
     assert_eq!(
-        vault.pool_stats().total_stakers, 1,
+        vault.pool_stats().total_stakers,
+        1,
         "total_stakers should be 1 after alice stakes"
     );
 
     vault.stake(&bob, &200_000);
     assert_eq!(
-        vault.pool_stats().total_stakers, 2,
+        vault.pool_stats().total_stakers,
+        2,
         "total_stakers should be 2 after bob stakes"
     );
 
     // Partial unstake should NOT decrement stakers
     vault.unstake(&alice, &50_000);
     assert_eq!(
-        vault.pool_stats().total_stakers, 2,
+        vault.pool_stats().total_stakers,
+        2,
         "total_stakers unchanged after partial unstake"
     );
 
     // Full unstake decrements
     vault.unstake(&alice, &50_000);
     assert_eq!(
-        vault.pool_stats().total_stakers, 1,
+        vault.pool_stats().total_stakers,
+        1,
         "total_stakers should be 1 after alice fully unstakes"
     );
 
     vault.unstake(&bob, &200_000);
     assert_eq!(
-        vault.pool_stats().total_stakers, 0,
+        vault.pool_stats().total_stakers,
+        0,
         "total_stakers should be 0 after all fully unstake"
     );
 }
@@ -416,7 +443,10 @@ fn test_position_of_returns_correct_fields() {
     vault.stake(&alice, &200_000);
 
     let position = vault.position_of(&alice).unwrap();
-    assert_eq!(position.amount, 200_000, "amount should equal staked tokens");
+    assert_eq!(
+        position.amount, 200_000,
+        "amount should equal staked tokens"
+    );
     assert_eq!(
         position.staked_at_ledger, 10,
         "staked_at_ledger should match ledger at stake time"
@@ -460,21 +490,27 @@ fn test_stake_for_delegate_happy_path() {
     let shares = vault.stake_for(&delegate, &beneficiary, &300_000);
     assert_eq!(shares, 300_000, "Shares should equal amount on first stake");
     assert_eq!(
-        vault.shares_of(&beneficiary), 300_000,
+        vault.shares_of(&beneficiary),
+        300_000,
         "Position should be credited to beneficiary"
     );
     assert_eq!(
-        token.balance(&delegate), 200_000,
+        token.balance(&delegate),
+        200_000,
         "Tokens deducted from delegate's wallet"
     );
     assert_eq!(
-        token.balance(&beneficiary), 0,
+        token.balance(&beneficiary),
+        0,
         "Beneficiary's token balance unchanged"
     );
 
     // Beneficiary can unstake
     let returned = vault.unstake(&beneficiary, &300_000);
-    assert_eq!(returned, 300_000, "Beneficiary should recover tokens on unstake");
+    assert_eq!(
+        returned, 300_000,
+        "Beneficiary should recover tokens on unstake"
+    );
     assert_eq!(vault.shares_of(&beneficiary), 0);
 }
 
@@ -616,7 +652,8 @@ fn test_position_opened_event_on_first_stake() {
         .collect();
 
     assert_eq!(
-        matched.len(), 1,
+        matched.len(),
+        1,
         "pos_open should be emitted only on first stake, not top-ups"
     );
     let event = &matched[0];
@@ -663,7 +700,8 @@ fn test_position_closed_event_on_full_unstake() {
         .collect();
 
     assert_eq!(
-        matched.len(), 1,
+        matched.len(),
+        1,
         "pos_clos should be emitted only on full unstake, not partial"
     );
     let event = &matched[0];
@@ -713,7 +751,10 @@ fn test_paused_event_includes_ledger() {
     // event data is (ledger,) published as a Soroban Vec — extract the first element
     let data_vec = SorobanVec::<soroban_sdk::Val>::try_from_val(&env, &matched[0].2).unwrap();
     let ledger_val: u32 = u32::try_from_val(&env, &data_vec.get(0).unwrap()).unwrap();
-    assert_eq!(ledger_val, 42, "paused event data should include the current ledger sequence");
+    assert_eq!(
+        ledger_val, 42,
+        "paused event data should include the current ledger sequence"
+    );
 }
 
 // ── slash admin actions tests ───────────────────────────────────────────────
@@ -862,7 +903,7 @@ fn test_reward_forfeiture_on_slash() {
     let admin = Address::generate(&env);
     let alice = Address::generate(&env);
     let treasury = Address::generate(&env);
-    let (token_addr, token, token_admin) = create_token(&env, &admin);
+    let (token_addr, _token, token_admin) = create_token(&env, &admin);
     let vault_id = env.register_contract(None, VaultContract);
     let vault = VaultContractClient::new(&env, &vault_id);
     vault.initialize(&admin, &token_addr, &0_u32, &None, &None);
@@ -918,7 +959,11 @@ fn test_initialization_defaults_treasury_to_admin() {
 fn test_full_cooldown_flow() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.sequence_number = 0; li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 0;
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let alice = Address::generate(&env);
@@ -955,7 +1000,11 @@ fn test_full_cooldown_flow() {
 fn test_premature_execute_unstake_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.sequence_number = 0; li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 0;
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let alice = Address::generate(&env);
@@ -979,7 +1028,11 @@ fn test_premature_execute_unstake_fails() {
 fn test_zero_cooldown_bypass_allows_instant_unstake() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.sequence_number = 0; li.min_persistent_entry_ttl = 1_000_000; li.max_entry_ttl = 1_000_000; });
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 0;
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 1_000_000;
+    });
 
     let admin = Address::generate(&env);
     let alice = Address::generate(&env);
@@ -1034,7 +1087,10 @@ fn test_no_rewards_accrued_during_cooldown() {
     env.ledger().with_mut(|li| li.sequence_number = 100_000);
 
     let pending_before = vault.calc_pending_reward(&alice);
-    assert!(pending_before > 0, "expected non-zero pending reward before unstake");
+    assert!(
+        pending_before > 0,
+        "expected non-zero pending reward before unstake"
+    );
 
     // request_unstake finalizes accrual at the current ledger and stops further accrual.
     vault.request_unstake(&alice, &100_000);

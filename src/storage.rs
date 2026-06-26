@@ -161,6 +161,7 @@ pub struct LeaderboardEntry {
 }
 
 /// Type alias for the leaderboard vector used in storage and queries.
+#[allow(dead_code)]
 pub type Leaderboard = Vec<LeaderboardEntry>;
 
 /// Current stake position for a user.

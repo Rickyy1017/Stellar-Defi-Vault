@@ -70,9 +70,7 @@ pub fn get_rate_history(env: &Env) -> Vec<(u32, u32)> {
 }
 
 pub fn set_rate_history(env: &Env, history: &Vec<(u32, u32)>) {
-    env.storage()
-        .instance()
-        .set(&DataKey::RateHistory, history);
+    env.storage().instance().set(&DataKey::RateHistory, history);
 }
 
 pub const MAX_RATE_HISTORY_ENTRIES: u32 = 50;
@@ -104,10 +102,7 @@ pub fn set_withdrawal_limit(env: &Env, limit: i128) {
 }
 
 pub fn get_pool_cap(env: &Env) -> i128 {
-    env.storage()
-        .instance()
-        .get(&DataKey::PoolCap)
-        .unwrap_or(0)
+    env.storage().instance().get(&DataKey::PoolCap).unwrap_or(0)
 }
 
 pub fn set_pool_cap(env: &Env, cap: i128) {
@@ -184,9 +179,7 @@ pub fn get_total_stakers(env: &Env) -> u32 {
 }
 
 pub fn set_total_stakers(env: &Env, count: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::TotalStakers, &count);
+    env.storage().instance().set(&DataKey::TotalStakers, &count);
 }
 
 pub fn get_total_rewards_paid(env: &Env) -> i128 {
@@ -250,27 +243,41 @@ pub fn set_nft_contract(env: &Env, nft: &Address) {
 // ── Issue #41: restake grace window ──────────────────────────────────────────
 
 pub fn get_restake_window(env: &Env) -> u32 {
-    env.storage().instance().get(&DataKey::RestakeWindow).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&DataKey::RestakeWindow)
+        .unwrap_or(0)
 }
 
 pub fn set_restake_window(env: &Env, ledgers: u32) {
-    env.storage().instance().set(&DataKey::RestakeWindow, &ledgers);
+    env.storage()
+        .instance()
+        .set(&DataKey::RestakeWindow, &ledgers);
 }
 
 pub fn get_last_unstake_ledger(env: &Env, user: &Address) -> Option<u32> {
-    env.storage().persistent().get(&DataKey::LastUnstakeLedger(user.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastUnstakeLedger(user.clone()))
 }
 
 pub fn set_last_unstake_ledger(env: &Env, user: &Address, ledger: u32) {
-    env.storage().persistent().set(&DataKey::LastUnstakeLedger(user.clone()), &ledger);
+    env.storage()
+        .persistent()
+        .set(&DataKey::LastUnstakeLedger(user.clone()), &ledger);
 }
 
 pub fn is_restaked(env: &Env, user: &Address) -> bool {
-    env.storage().persistent().get(&DataKey::Restaked(user.clone())).unwrap_or(false)
+    env.storage()
+        .persistent()
+        .get(&DataKey::Restaked(user.clone()))
+        .unwrap_or(false)
 }
 
 pub fn set_restaked(env: &Env, user: &Address, value: bool) {
-    env.storage().persistent().set(&DataKey::Restaked(user.clone()), &value);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Restaked(user.clone()), &value);
 }
 
 pub fn remove_restaked(env: &Env, user: &Address) {
@@ -283,18 +290,26 @@ pub fn remove_restaked(env: &Env, user: &Address) {
 // ── Issue #42: admin action count ────────────────────────────────────────────
 
 pub fn get_admin_action_count(env: &Env) -> u32 {
-    env.storage().instance().get(&DataKey::AdminActionCount).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminActionCount)
+        .unwrap_or(0)
 }
 
 pub fn increment_admin_action_count(env: &Env) {
     let count = get_admin_action_count(env);
-    env.storage().instance().set(&DataKey::AdminActionCount, &(count + 1));
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminActionCount, &(count + 1));
 }
 
 // ── Claim cap (issue #78) ─────────────────────────────────────────────────────
 
 pub fn get_claim_cap(env: &Env) -> i128 {
-    env.storage().instance().get(&DataKey::ClaimCap).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&DataKey::ClaimCap)
+        .unwrap_or(0)
 }
 
 pub fn set_claim_cap(env: &Env, cap: i128) {
@@ -302,7 +317,10 @@ pub fn set_claim_cap(env: &Env, cap: i128) {
 }
 
 pub fn get_claim_cap_window(env: &Env) -> u32 {
-    env.storage().instance().get(&DataKey::ClaimCapWindow).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&DataKey::ClaimCapWindow)
+        .unwrap_or(0)
 }
 
 pub fn set_claim_cap_window(env: &Env, window_ledgers: u32) {
@@ -429,7 +447,9 @@ pub fn get_pool_description(env: &Env) -> Option<soroban_sdk::String> {
 }
 
 pub fn set_pool_description(env: &Env, description: &soroban_sdk::String) {
-    env.storage().instance().set(&symbol_short!("pool_desc"), description);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("pool_desc"), description);
 }
 
 // ── Issue #99: staking streak ────────────────────────────────────────────────
@@ -439,7 +459,9 @@ pub fn get_last_recorded_wave(env: &Env) -> Option<u32> {
 }
 
 pub fn set_last_recorded_wave(env: &Env, wave_id: u32) {
-    env.storage().instance().set(&symbol_short!("last_wave"), &wave_id);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("last_wave"), &wave_id);
 }
 
 pub fn get_user_streak(env: &Env, user: &Address) -> Option<crate::storage::StakeStreak> {
@@ -451,4 +473,3 @@ pub fn set_user_streak(env: &Env, user: &Address, streak: &crate::storage::Stake
     let key = (Symbol::new(env, "strk"), user.clone());
     env.storage().persistent().set(&key, streak);
 }
-

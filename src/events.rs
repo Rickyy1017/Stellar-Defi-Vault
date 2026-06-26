@@ -1,5 +1,5 @@
-use soroban_sdk::{symbol_short, Address, Env};
 use crate::storage::AdminAction;
+use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128) {
     let topics = (symbol_short!("deposit"), depositor);
@@ -9,8 +9,10 @@ pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128
 
 pub fn withdraw(env: &Env, withdrawer: &Address, shares_burned: i128, amount_returned: i128) {
     let topics = (symbol_short!("withdraw"), withdrawer);
-    env.events()
-        .publish(topics, (shares_burned, amount_returned, env.ledger().sequence()));
+    env.events().publish(
+        topics,
+        (shares_burned, amount_returned, env.ledger().sequence()),
+    );
 }
 
 pub fn paused(env: &Env, admin: &Address) {
@@ -43,8 +45,10 @@ pub fn withdrawal_limit_updated(env: &Env, admin: &Address, new_limit: i128) {
 
 pub fn rate_changed(env: &Env, old_rate_bps: u32, new_rate_bps: u32) {
     let topics = (symbol_short!("rate_chg"),);
-    env.events()
-        .publish(topics, (old_rate_bps, new_rate_bps, env.ledger().sequence()));
+    env.events().publish(
+        topics,
+        (old_rate_bps, new_rate_bps, env.ledger().sequence()),
+    );
 }
 
 pub fn pool_cap_updated(env: &Env, admin: &Address, new_cap: i128) {
@@ -68,7 +72,15 @@ pub fn position_closed(env: &Env, user: &Address) {
 
 pub fn token_rescued(env: &Env, token: &Address, amount: i128, recipient: &Address) {
     let topics = (symbol_short!("tk_rescue"),);
-    env.events().publish(topics, (token.clone(), amount, recipient.clone(), env.ledger().sequence()));
+    env.events().publish(
+        topics,
+        (
+            token.clone(),
+            amount,
+            recipient.clone(),
+            env.ledger().sequence(),
+        ),
+    );
 }
 
 // ── Issue #42: admin action audit events ─────────────────────────────────────
@@ -115,10 +127,22 @@ pub fn admin_action_set_cap(env: &Env, actor: &Address, new_limit: i128) {
     );
 }
 
-pub fn admin_action_rescue_token(env: &Env, actor: &Address, token: &Address, amount: i128, recipient: &Address) {
+pub fn admin_action_rescue_token(
+    env: &Env,
+    actor: &Address,
+    token: &Address,
+    amount: i128,
+    recipient: &Address,
+) {
     env.events().publish(
         (symbol_short!("adm_act"), AdminAction::RescueToken),
-        (actor.clone(), env.ledger().sequence(), token.clone(), amount, recipient.clone()),
+        (
+            actor.clone(),
+            env.ledger().sequence(),
+            token.clone(),
+            amount,
+            recipient.clone(),
+        ),
     );
 }
 
@@ -192,8 +216,10 @@ pub fn position_transferred(env: &Env, from: &Address, to: &Address, amount: i12
 
 pub fn campaign_started(env: &Env, admin: &Address, multiplier_bps: u32, ends_at_ledger: u32) {
     let topics = (symbol_short!("camp_on"), admin);
-    env.events()
-        .publish(topics, (multiplier_bps, ends_at_ledger, env.ledger().sequence()));
+    env.events().publish(
+        topics,
+        (multiplier_bps, ends_at_ledger, env.ledger().sequence()),
+    );
 }
 
 pub fn campaign_ended(env: &Env, admin: &Address) {
@@ -219,7 +245,12 @@ pub fn pool_initialized(
     let topics = (symbol_short!("init"),);
     env.events().publish(
         topics,
-        (admin.clone(), stake_token.clone(), reward_token.clone(), reward_rate_bps),
+        (
+            admin.clone(),
+            stake_token.clone(),
+            reward_token.clone(),
+            reward_rate_bps,
+        ),
     );
 }
 

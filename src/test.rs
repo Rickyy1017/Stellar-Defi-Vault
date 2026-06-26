@@ -10,7 +10,7 @@ use soroban_sdk::{
 use crate::{
     errors::VaultError,
     nft::{StakeReceiptNFT, StakeReceiptNFTClient},
-    storage::{LeaderboardEntry, UnstakeCheckResult},
+    storage::{UnstakeCheckResult},
     vault::{
         VaultContract, VaultContractClient, BOOST_BPS_BASE, CONTRACT_VERSION,
         STELLAR_LEDGERS_PER_YEAR,
@@ -2237,7 +2237,7 @@ fn test_rate_history_capped_at_50_entries() {
     f.vault.set_reward_rate_bps(&1000);
     for i in 1..=60 {
         set_ledger(&f.env, i * 10);
-        f.vault.set_reward_rate_bps(&(1000 + i as u32));
+        f.vault.set_reward_rate_bps(&(1000 + i));
     }
     set_ledger(&f.env, 650);
 

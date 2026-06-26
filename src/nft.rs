@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -88,9 +88,7 @@ impl StakeReceiptNFT {
 
     /// Returns true if `user` currently holds a receipt.
     pub fn has_receipt(env: Env, user: Address) -> bool {
-        env.storage()
-            .persistent()
-            .has(&NftDataKey::Receipt(user))
+        env.storage().persistent().has(&NftDataKey::Receipt(user))
     }
 
     /// Returns the receipt metadata for `user`, if one exists.
