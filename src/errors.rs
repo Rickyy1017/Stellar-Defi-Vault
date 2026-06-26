@@ -59,4 +59,6 @@ pub enum VaultError {
     InvalidAddress = 35,
     /// reward_rate_bps exceeds the maximum allowed cap (issue #72).
     RateTooHigh = 36,
+    /// bulk_set_kyc was called with more than 50 entries (issue #130).
+    BatchKycTooLarge = 37,
 }
