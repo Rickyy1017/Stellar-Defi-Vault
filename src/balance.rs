@@ -1,4 +1,4 @@
-use crate::storage::{ClaimWindow, DataKey};
+use crate::storage::{ChangelogEntry, ClaimWindow, DataKey, VestingEntry};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 pub fn get_shares(env: &Env, user: &Address) -> i128 {
@@ -472,4 +472,63 @@ pub fn get_user_streak(env: &Env, user: &Address) -> Option<crate::storage::Stak
 pub fn set_user_streak(env: &Env, user: &Address, streak: &crate::storage::StakeStreak) {
     let key = (Symbol::new(env, "strk"), user.clone());
     env.storage().persistent().set(&key, streak);
+}
+
+// ── Issue #114: on-chain admin changelog ─────────────────────────────────────
+// Key "chlg" (4 chars, short symbol) stored in instance storage.
+
+pub fn get_changelog(env: &Env) -> Vec<ChangelogEntry> {
+    env.storage()
+        .instance()
+        .get(&symbol_short!("chlg"))
+        .unwrap_or(Vec::new(env))
+}
+
+pub fn set_changelog(env: &Env, log: &Vec<ChangelogEntry>) {
+    env.storage().instance().set(&symbol_short!("chlg"), log);
+}
+
+// ── Issue #115: last reward rate change ledger ────────────────────────────────
+// Key "lrcl" (4 chars, short symbol) stored in instance storage.
+
+pub fn get_last_rate_change_ledger(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&symbol_short!("lrcl"))
+        .unwrap_or(0)
+}
+
+pub fn set_last_rate_change_ledger(env: &Env, ledger: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("lrcl"), &ledger);
+}
+
+// ── Issue #116: per-user vesting entries ─────────────────────────────────────
+// Key ("vest", user) stored in persistent storage (same pattern as streak).
+
+pub fn get_vesting_entries(env: &Env, user: &Address) -> Vec<VestingEntry> {
+    let key = (Symbol::new(env, "vest"), user.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env))
+}
+
+pub fn set_vesting_entries(env: &Env, user: &Address, entries: &Vec<VestingEntry>) {
+    let key = (Symbol::new(env, "vest"), user.clone());
+    env.storage().persistent().set(&key, entries);
+}
+
+// ── Issue #117: pool initialization ledger ───────────────────────────────────
+// Key "inal" (4 chars, short symbol) stored in instance storage.
+
+pub fn get_initialized_at_ledger(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("inal"))
+}
+
+pub fn set_initialized_at_ledger(env: &Env, ledger: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("inal"), &ledger);
 }
