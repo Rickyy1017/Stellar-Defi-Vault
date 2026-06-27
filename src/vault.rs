@@ -838,6 +838,21 @@ impl VaultContract {
         }
 
         balance::set_rate_history(&env, &history);
+
+        // Issue #124: also append to the rich rate history (max 20, sliding window).
+        let admin_for_history = admin::get_admin(&env)?;
+        let mut rich_history = balance::get_reward_rate_history(&env);
+        rich_history.push_back(RateHistoryEntry {
+            old_rate_bps: old_rate as i128,
+            new_rate_bps: rate_bps as i128,
+            changed_at_ledger: current_ledger,
+            changed_by: admin_for_history.clone(),
+        });
+        while rich_history.len() > balance::MAX_RICH_RATE_HISTORY {
+            rich_history.pop_front();
+        }
+        balance::set_reward_rate_history(&env, &rich_history);
+
         balance::set_reward_rate_bps(&env, rate_bps);
         // Issue #115: track the ledger of the most recent rate change for staker_count_at_rate.
         balance::set_last_rate_change_ledger(&env, current_ledger);
@@ -950,6 +965,17 @@ impl VaultContract {
     pub fn get_rate_history(env: Env) -> Result<Vec<(u32, u32)>, VaultError> {
         let _ = admin::get_admin(&env)?;
         Ok(balance::get_rate_history(&env))
+    }
+
+    /// Read-only: returns the last 20 reward-rate changes as rich `RateHistoryEntry` records.
+    ///
+    /// Each entry records the old rate, new rate, the ledger at which the change
+    /// was made, and the admin address that triggered it. Entries are in
+    /// chronological order (oldest first). No auth required.
+    ///
+    /// Returns an empty vector if `set_reward_rate_bps` has never been called.
+    pub fn get_reward_rate_history(env: Env) -> Vec<RateHistoryEntry> {
+        balance::get_reward_rate_history(&env)
     }
 
     /// Admin: fund the separate reward pool used by `claim`.
