@@ -214,6 +214,23 @@ pub fn position_transferred(env: &Env, from: &Address, to: &Address, amount: i12
         .publish(topics, (to.clone(), amount, env.ledger().sequence()));
 }
 
+/// Emitted by `transfer_position_with_rewards` (issue #134).
+///
+/// `pending_reward_estimate` is the pending reward computed at transfer time —
+/// it is informational only; no settlement occurs.
+pub fn position_transferred_with_rewards(
+    env: &Env,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+    pending_reward_estimate: i128,
+    ledger: u32,
+) {
+    let topics = (symbol_short!("pos_xf_rw"), from);
+    env.events()
+        .publish(topics, (to.clone(), amount, pending_reward_estimate, ledger));
+}
+
 pub fn campaign_started(env: &Env, admin: &Address, multiplier_bps: u32, ends_at_ledger: u32) {
     let topics = (symbol_short!("camp_on"), admin);
     env.events().publish(

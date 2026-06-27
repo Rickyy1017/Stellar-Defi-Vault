@@ -2843,6 +2843,221 @@ fn test_get_staker_rank_ties_broken_deterministically() {
     }
 }
 
+// ── Issue #132: position_value_in_reward_token ────────────────────────────────
+
+#[test]
+fn test_position_value_in_reward_token_1to1_rate() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &1_000_000);
+    f.vault.stake(&f.alice, &1_000_000);
+
+    // 10_000 bps == 1:1 rate — value in reward token equals staked amount
+    let val = f.vault.position_value_in_reward_token(&f.alice, &10_000);
+    let pos = f.vault.position_of(&f.alice).unwrap();
+    assert_eq!(val, pos.amount);
+}
+
+#[test]
+fn test_position_value_in_reward_token_half_rate() {
+    let f = VaultFixture::new();
+    f.token_admin.mint(&f.alice, &1_000_000);
+    f.vault.stake(&f.alice, &1_000_000);
+
+    // 5_000 bps == 0.5:1 rate — value is half the staked amount
+    let val = f.vault.position_value_in_reward_token(&f.alice, &5_000);
+    let pos = f.vault.position_of(&f.alice).unwrap();
+    assert_eq!(val, pos.amount / 2);
+}
+
+#[test]
+fn test_position_value_in_reward_token_zero_rate_rejected() {
+    let f = VaultFixture::new();
+    f.token_admin.mint(&f.alice, &1_000_000);
+    f.vault.stake(&f.alice, &1_000_000);
+
+    let res = f.vault.try_position_value_in_reward_token(&f.alice, &0);
+    assert_eq!(res, Err(Ok(VaultError::InvalidRate)));
+}
+
+#[test]
+fn test_position_value_in_reward_token_no_position_returns_zero() {
+    let f = VaultFixture::new();
+    let val = f.vault.position_value_in_reward_token(&f.alice, &10_000);
+    assert_eq!(val, 0);
+}
+
+// ── Issue #133: daily_reward_estimate ────────────────────────────────────────
+
+#[test]
+fn test_daily_reward_estimate_no_position_returns_zero() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    assert_eq!(f.vault.daily_reward_estimate(&f.alice), 0);
+}
+
+#[test]
+fn test_daily_reward_estimate_zero_rate_returns_zero() {
+    let f = VaultFixture::new();
+    f.token_admin.mint(&f.alice, &1_000_000);
+    f.vault.stake(&f.alice, &1_000_000);
+    assert_eq!(f.vault.daily_reward_estimate(&f.alice), 0);
+}
+
+#[test]
+fn test_daily_reward_estimate_known_rate() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500); // 5% APR
+    f.token_admin.mint(&f.alice, &10_000_000);
+    f.vault.stake(&f.alice, &10_000_000);
+
+    let daily = f.vault.daily_reward_estimate(&f.alice);
+    // Sanity: daily reward must be positive and less than annual reward
+    assert!(daily > 0);
+    // Annual at 500 bps: 10_000_000 * 500 / 10_000 = 500_000
+    // Daily should be roughly 500_000 / 365 ≈ 1369
+    assert!(daily < 500_000);
+}
+
+// ── Issue #134: transfer_position_with_rewards ───────────────────────────────
+
+#[test]
+fn test_transfer_position_with_rewards_recipient_inherits_pending_reward() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &5_000_000);
+    f.token_admin.mint(&f.admin, &1_000_000);
+    f.vault.fund_reward_pool(&f.admin, &1_000_000);
+    f.vault.stake(&f.alice, &5_000_000);
+
+    // Advance time so rewards accrue
+    set_ledger(&f.env, 1_000_000);
+
+    let pending_before = f.vault.calc_pending_reward(&f.alice);
+    assert!(pending_before > 0, "alice must have pending rewards");
+
+    // Transfer with rewards — bob inherits alice's full position including reward debt
+    f.vault.transfer_position_with_rewards(&f.alice, &f.bob);
+
+    // alice should have no position
+    assert_eq!(f.vault.shares_of(&f.alice), 0);
+
+    // bob can claim the inherited rewards
+    let claimed = f.vault.claim(&f.bob);
+    assert!(claimed > 0, "bob should be able to claim alice's inherited rewards");
+}
+
+#[test]
+fn test_transfer_position_with_rewards_no_settlement_to_sender() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &5_000_000);
+    f.token_admin.mint(&f.admin, &1_000_000);
+    f.vault.fund_reward_pool(&f.admin, &1_000_000);
+    f.vault.stake(&f.alice, &5_000_000);
+    set_ledger(&f.env, 500_000);
+
+    let alice_balance_before = f.token.balance(&f.alice);
+
+    f.vault.transfer_position_with_rewards(&f.alice, &f.bob);
+
+    // alice's token balance must not increase — no reward was settled to sender
+    assert_eq!(f.token.balance(&f.alice), alice_balance_before);
+}
+
+#[test]
+fn test_transfer_position_with_rewards_recipient_already_staking_rejected() {
+    let f = VaultFixture::new();
+    f.token_admin.mint(&f.alice, &1_000_000);
+    f.token_admin.mint(&f.bob, &500_000);
+    f.vault.stake(&f.alice, &1_000_000);
+    f.vault.stake(&f.bob, &500_000);
+
+    let res = f.vault.try_transfer_position_with_rewards(&f.alice, &f.bob);
+    assert_eq!(res, Err(Ok(VaultError::RecipientAlreadyStaking)));
+}
+
+#[test]
+#[ignore = "Soroban SDK 21.x: require_auth() issues a non-catchable abort in native test mode when auth is not mocked; enforced at protocol layer in production."]
+fn test_transfer_position_with_rewards_requires_auth() {
+    let f = VaultFixture::with_mock_auths(false);
+    let res = f.vault.try_transfer_position_with_rewards(&f.alice, &f.bob);
+    assert!(res.is_err());
+}
+
+// ── Issue #135: staking_efficiency_score ────────────────────────────────────
+
+#[test]
+fn test_staking_efficiency_score_no_position() {
+    let f = VaultFixture::new();
+    let eff = f.vault.staking_efficiency_score(&f.alice);
+    assert_eq!(eff.total_claimed, 0);
+    assert_eq!(eff.estimated_if_compounded, 0);
+    assert_eq!(eff.efficiency_bps, 0);
+}
+
+#[test]
+fn test_staking_efficiency_score_zero_rate_returns_zero_estimate() {
+    let f = VaultFixture::new();
+    f.token_admin.mint(&f.alice, &1_000_000);
+    f.vault.stake(&f.alice, &1_000_000);
+    set_ledger(&f.env, 1_000_000);
+
+    let eff = f.vault.staking_efficiency_score(&f.alice);
+    assert_eq!(eff.total_claimed, 0);
+    assert_eq!(eff.estimated_if_compounded, 0);
+    assert_eq!(eff.efficiency_bps, 0);
+}
+
+#[test]
+fn test_staking_efficiency_score_unclaimed_has_low_efficiency() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &10_000_000);
+    f.token_admin.mint(&f.admin, &10_000_000);
+    f.vault.fund_reward_pool(&f.admin, &10_000_000);
+    f.vault.stake(&f.alice, &10_000_000);
+
+    // Advance by several days worth of ledgers
+    set_ledger(&f.env, 100_000);
+
+    let eff = f.vault.staking_efficiency_score(&f.alice);
+    assert_eq!(eff.total_claimed, 0, "alice has not claimed anything");
+    assert_eq!(eff.efficiency_bps, 0, "0 claimed → 0 efficiency");
+}
+
+#[test]
+fn test_staking_efficiency_score_claimed_increases_efficiency() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &10_000_000);
+    f.token_admin.mint(&f.admin, &10_000_000);
+    f.vault.fund_reward_pool(&f.admin, &10_000_000);
+    f.vault.stake(&f.alice, &10_000_000);
+
+    set_ledger(&f.env, 200_000);
+    f.vault.claim(&f.alice);
+
+    let eff = f.vault.staking_efficiency_score(&f.alice);
+    assert!(eff.total_claimed > 0, "claimed amount must be recorded");
+    assert!(eff.efficiency_bps > 0, "efficiency must be positive after claiming");
+    assert!(eff.efficiency_bps <= 10_000, "efficiency must not exceed 10000 bps");
+}
+
+#[test]
+fn test_staking_efficiency_score_never_exceeds_10000_bps() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &10_000_000);
+    f.token_admin.mint(&f.admin, &50_000_000);
+    f.vault.fund_reward_pool(&f.admin, &50_000_000);
+    f.vault.stake(&f.alice, &10_000_000);
+
+    set_ledger(&f.env, 500_000);
+    f.vault.claim(&f.alice);
+
+    let eff = f.vault.staking_efficiency_score(&f.alice);
+    assert!(eff.efficiency_bps <= 10_000, "efficiency is capped at 10_000 bps");
 // ── Issue #114: get_changelog ────────────────────────────────────────────────
 
 #[test]

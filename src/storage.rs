@@ -301,6 +301,20 @@ pub struct StakeStreak {
     pub last_active_wave: u32,
 }
 
+/// Staking efficiency score for a user (issue #135).
+///
+/// - `total_claimed`: cumulative rewards the user has actually claimed.
+/// - `estimated_if_compounded`: approximate total rewards if all claims had been
+///   immediately restaked (daily compounding, no boost multipliers). This is an
+///   integer-math approximation; see `staking_efficiency_score` for caveats.
+/// - `efficiency_bps`: `total_claimed * 10_000 / estimated_if_compounded`,
+///   capped at 10_000. Returns 0 when `estimated_if_compounded` is 0.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StakingEfficiency {
+    pub total_claimed: i128,
+    pub estimated_if_compounded: i128,
+    pub efficiency_bps: i128,
 // ── Issue #114: on-chain changelog ───────────────────────────────────────────
 
 /// One entry in the rolling admin configuration changelog (issue #114).

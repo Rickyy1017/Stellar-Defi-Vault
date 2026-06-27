@@ -474,6 +474,18 @@ pub fn set_user_streak(env: &Env, user: &Address, streak: &crate::storage::Stake
     env.storage().persistent().set(&key, streak);
 }
 
+// ── Issue #135: per-user cumulative claimed counter ───────────────────────────
+// Uses a tuple key to avoid exhausting the DataKey enum's contracttype limit.
+
+pub fn get_user_total_claimed(env: &Env, user: &Address) -> i128 {
+    let key = (Symbol::new(env, "t_claimed"), user.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+pub fn add_user_total_claimed(env: &Env, user: &Address, amount: i128) {
+    let current = get_user_total_claimed(env, user);
+    let key = (Symbol::new(env, "t_claimed"), user.clone());
+    env.storage().persistent().set(&key, &(current + amount));
 // ── Issue #114: on-chain admin changelog ─────────────────────────────────────
 // Key "chlg" (4 chars, short symbol) stored in instance storage.
 

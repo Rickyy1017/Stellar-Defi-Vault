@@ -65,4 +65,6 @@ pub enum VaultError {
     MaxPositionsTooHigh = 38,
     /// bulk_set_kyc was called with more than 50 entries (issue #130).
     BatchKycTooLarge = 39,
+    /// Caller-supplied exchange rate is zero or negative (issue #132).
+    InvalidRate = 40,
 }
