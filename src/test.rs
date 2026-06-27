@@ -1943,6 +1943,14 @@ fn test_get_stake_token_before_init_fails() {
     assert_eq!(result, Err(Ok(VaultError::NotInitialized)));
 }
 
+#[test]
+fn test_get_reward_token_returns_set_token() {
+    let f = VaultFixture::new();
+    let reward_token_addr = f.env.register_stellar_asset_contract(f.admin.clone());
+    f.vault.set_reward_token(&reward_token_addr);
+    assert_eq!(f.vault.get_reward_token(), reward_token_addr);
+}
+
 // ── simulation functions (Issue #54) ────────────────────────────────────────
 
 #[test]

@@ -200,6 +200,11 @@ impl VaultContract {
             .ok_or(VaultError::NotInitialized)
     }
 
+    /// Read-only query for the reward token address.
+    pub fn get_reward_token(env: Env) -> Result<Address, VaultError> {
+        balance::get_reward_token(&env).ok_or(VaultError::NotInitialized)
+    }
+
     /// Read-only: ledger sequence of the last state-changing operation (issue #69).
     ///
     /// Returns 0 if no state-changing operation has been recorded yet.
