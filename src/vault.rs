@@ -2192,6 +2192,9 @@ impl VaultContract {
         events::withdraw(env, staker, shares, amount_returned);
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
 
+        // Issue #129: auto-pause if reward balance drops below threshold
+        Self::check_auto_pause(env)?;
+
         Ok(amount_returned)
     }
 
@@ -2691,6 +2694,36 @@ impl VaultContract {
         }
     }
 
+    /// Issue #129: check if reward balance dropped below threshold and auto-pause if needed.
+    fn check_auto_pause(env: &Env) -> Result<(), VaultError> {
+        let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
+        let threshold: i128 = env
+            .storage()
+            .instance()
+            .get(&threshold_key)
+            .unwrap_or(0);
+        
+        if threshold == 0 {
+            return Ok(()); // Auto-pause disabled
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        
+        let token_client = token::Client::new(env, &token_addr);
+        let reward_balance = token_client.balance(&env.current_contract_address());
+
+        if reward_balance < threshold {
+            env.storage().instance().set(&DataKey::Paused, &true);
+            events::auto_paused(env, reward_balance, threshold);
+        }
+
+        Ok(())
+    }
+
     /// Append one entry to the user's stake/unstake history ring buffer (max 5).
     fn append_stake_history(env: &Env, user: &Address, action: StakeAction, amount: i128) {
         // Uses a tuple key to avoid collision with DataKey::StakeHistory used for
@@ -2767,6 +2800,9 @@ impl VaultContract {
 
         events::claimed(env, staker, reward);
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
+
+        // Issue #129: auto-pause if reward balance drops below threshold
+        Self::check_auto_pause(env)?;
 
         Ok(reward)
     }
@@ -3372,6 +3408,162 @@ impl VaultContract {
             longest_streak: 0,
             last_active_wave: 0,
         })
+    }
+
+    // ── Issue #131: get_estimated_annual_reward ────────────────────────────────
+
+    /// Read-only calculator: estimated annual reward for a given stake amount.
+    ///
+    /// Returns the estimated annual reward for `amount` at the current
+    /// `reward_rate_bps`, without requiring an actual position or auth.
+    /// Formula: `amount * reward_rate_bps / 10000`.
+    /// Returns 0 if rate is 0 or amount is 0.
+    /// 
+    /// **Note:** This is a simplified estimate that does not account for
+    /// boost multipliers, campaign bonuses, or compounding effects. Actual
+    /// rewards will vary based on rate changes over time.
+    pub fn get_estimated_annual_reward(env: Env, amount: i128) -> i128 {
+        if amount == 0 {
+            return 0;
+        }
+        let rate_bps = balance::get_reward_rate_bps(&env);
+        if rate_bps == 0 {
+            return 0;
+        }
+        amount
+            .checked_mul(rate_bps as i128)
+            .unwrap_or(0)
+            .checked_div(BOOST_BPS_BASE as i128)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #130: bulk_set_kyc ──────────────────────────────────────────────
+
+    /// Admin: set KYC status for multiple addresses in one call.
+    ///
+    /// Each `(Address, bool)` pair in `approvals` sets the KYC status for that
+    /// address. Maximum 50 entries per call — reverts with `BatchKycTooLarge`
+    /// if exceeded. Emits one `kyc_status_changed` event per address updated.
+    /// Admin auth required.
+    ///
+    /// **Note:** This function is idempotent — setting an address to its
+    /// current status still updates the storage and emits an event.
+    pub fn bulk_set_kyc(
+        env: Env,
+        admin: Address,
+        approvals: Vec<(Address, bool)>,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin; // follows existing admin patterns
+
+        if approvals.len() > 50 {
+            return Err(VaultError::BatchKycTooLarge);
+        }
+
+        let mut i = 0u32;
+        while i < approvals.len() {
+            let (user, approved) = approvals.get(i).unwrap();
+            env.storage()
+                .persistent()
+                .set(&DataKey::KycApproved(user.clone()), &approved);
+            events::kyc_status_changed(&env, &user, approved);
+            i += 1;
+        }
+
+        Ok(())
+    }
+
+    // ── Issue #129: auto-pause on low reward token balance ────────────────────
+
+    /// Admin: set the reward token balance threshold for auto-pause.
+    ///
+    /// When the reward token balance drops below `threshold` after a claim,
+    /// unstake auto-claim, or batch_claim, the pool automatically pauses.
+    /// Pass `0` to disable auto-pause (no threshold check). Admin can manually
+    /// unpause after funding the contract with more reward tokens.
+    ///
+    /// **Note:** Auto-pause does not prevent users from unstaking their
+    /// principal — it only blocks new stakes (same as manual pause).
+    pub fn set_reward_threshold(env: Env, admin: Address, threshold: i128) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+
+        if threshold < 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
+        env.storage()
+            .instance()
+            .set(&threshold_key, &threshold);
+        Ok(())
+    }
+
+    /// Read-only query for the current reward threshold.
+    ///
+    /// Returns 0 if auto-pause is disabled. No auth required.
+    pub fn get_reward_threshold(env: Env) -> i128 {
+        let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
+        env.storage()
+            .instance()
+            .get(&threshold_key)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #127: stake_weighted_average_duration ────────────────────────────
+
+    /// Read-only: stake-weighted average duration of all positions.
+    ///
+    /// Returns the average number of ledgers that stakers have been in the pool,
+    /// weighted by their stake amount. Formula:
+    /// `sum(position.amount * (current_ledger - position.staked_at_ledger)) / total_staked`
+    ///
+    /// Returns 0 if no stakers or total staked is 0. Larger stake amounts have
+    /// more influence on the average. Integer arithmetic truncates fractional
+    /// ledgers. No auth required.
+    pub fn stake_weighted_average_duration(env: Env) -> u32 {
+        let all_stakers = balance::get_all_stakers(&env);
+        if all_stakers.is_empty() {
+            return 0;
+        }
+
+        let total_staked = balance::get_total_deposited(&env);
+        if total_staked == 0 {
+            return 0;
+        }
+
+        let current_ledger = env.ledger().sequence();
+        let total_shares = balance::get_total_shares(&env);
+
+        let mut weighted_sum: i128 = 0;
+        let mut i = 0u32;
+
+        while i < all_stakers.len() {
+            let user = all_stakers.get(i).unwrap();
+            let shares = balance::get_shares(&env, &user);
+            
+            if shares > 0 {
+                if let Some(amount) = balance::shares_to_amount(total_shares, total_staked, shares) {
+                    if let Some(staked_at) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, u32>(&DataKey::StakedAtLedger(user.clone()))
+                    {
+                        let duration = current_ledger.saturating_sub(staked_at);
+                        if let Some(weighted) = amount.checked_mul(duration as i128) {
+                            weighted_sum = weighted_sum.saturating_add(weighted);
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        if total_staked == 0 {
+            return 0;
+        }
+
+        (weighted_sum / total_staked) as u32
     }
 
 }

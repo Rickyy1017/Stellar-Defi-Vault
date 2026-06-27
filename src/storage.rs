@@ -67,12 +67,9 @@ pub enum DataKey {
     // Issue #101: frozen positions
     InactivityThreshold,
     FrozenAt(Address),
-    // Issue #106: KYC enforcement
     KycRequired,
     KycApproved(Address),
-    // Issue #107: permanent emergency stop
     Stopped,
-    // Pool deposit cap (used by balance.rs and vault.rs)
     PoolCap,
 }
 

@@ -63,4 +63,6 @@ pub enum VaultError {
     MaxPositionsReached = 37,
     /// set_max_positions_per_user rejected because max exceeds 10.
     MaxPositionsTooHigh = 38,
+    /// bulk_set_kyc was called with more than 50 entries (issue #130).
+    BatchKycTooLarge = 39,
 }

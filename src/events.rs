@@ -280,3 +280,21 @@ pub fn description_updated(env: &Env, admin: &Address, description: &soroban_sdk
     env.events()
         .publish(topics, (description.clone(), env.ledger().sequence()));
 }
+
+// ── Issue #129: auto-pause event ──────────────────────────────────────────────
+
+/// Emitted when the pool auto-pauses because reward balance fell below threshold.
+pub fn auto_paused(env: &Env, reward_balance: i128, threshold: i128) {
+    let topics = (symbol_short!("auto_paus"),);
+    env.events()
+        .publish(topics, (reward_balance, threshold, env.ledger().sequence()));
+}
+
+// ── Issue #130: KYC status changed event ──────────────────────────────────────
+
+/// Emitted for each address updated by bulk_set_kyc.
+pub fn kyc_status_changed(env: &Env, user: &Address, approved: bool) {
+    let topics = (symbol_short!("kyc_chg"), user);
+    env.events()
+        .publish(topics, (approved, env.ledger().sequence()));
+}
