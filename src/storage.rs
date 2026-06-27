@@ -7,11 +7,13 @@ use soroban_sdk::{contracttype, Address, String, Vec};
 /// WithdrawalLimit, LockPeriod, EarlyExitPenaltyBps, TotalStakers,
 /// TotalRewardsPaid, SlashTreasury, WhitelistEnabled, CooldownPeriod,
 /// PoolCap, ClaimCap, ClaimCapWindow, StakeDecimals, RewardDecimals,
-/// UnstakeFeeBps, AllStakers, InactivityThreshold.
+/// UnstakeFeeBps, AllStakers, InactivityThreshold, Changelog,
+/// LastRateChangeLedger, InitializedAtLedger.
 ///
 /// Persistent keys (per-user, long-lived): ShareBalance, StakeHistory,
 /// RewardCheckpointLedger, LastClaimLedger, AccruedReward, StakedAtLedger,
-/// Delegate, Whitelisted, UnbondingPosition, UserClaimWindow, FrozenAt.
+/// Delegate, Whitelisted, UnbondingPosition, UserClaimWindow, FrozenAt,
+/// VestingEntries.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -67,12 +69,9 @@ pub enum DataKey {
     // Issue #101: frozen positions
     InactivityThreshold,
     FrozenAt(Address),
-    // Issue #106: KYC enforcement
     KycRequired,
     KycApproved(Address),
-    // Issue #107: permanent emergency stop
     Stopped,
-    // Pool deposit cap (used by balance.rs and vault.rs)
     PoolCap,
     // Task 2: Vesting
     VestingPeriod,
@@ -231,26 +230,19 @@ pub struct ClaimWindow {
     pub window_started_at: u32,
 }
 
-/// Soroban-compatible optional StakePosition.
-///
-/// `Option<ContractType>` cannot appear as a field in another `#[contracttype]`
-/// struct (SDK 21.x limitation). This enum provides the same semantics.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum OptionalPosition {
-    None,
-    Some(StakePosition),
-}
-
 /// Aggregated user state returned by `user_summary` (issue #103).
 ///
-/// - `position`: current stake position, or `OptionalPosition::None` if no stake.
+/// - `position`: 0 or 1 `StakePosition` entries; empty when user has no stake.
 /// - `pending_reward`: rewards accrued but not yet claimed.
 /// - `pool_share_bps`: user's share of the total pool in basis points (10000 = 100%).
+///
+/// Note: `position` uses `Vec<StakePosition>` (0-or-1 elements) because
+/// `Option<ContractType>` is not supported in `#[contracttype]` structs in
+/// soroban-sdk 21.x testutils mode.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserSummary {
-    pub position: OptionalPosition,
+    pub position: Vec<StakePosition>,
     pub pending_reward: i128,
     pub pool_share_bps: i128,
 }

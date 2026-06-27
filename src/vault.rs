@@ -1,7 +1,9 @@
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Vec};
 
 use crate::{
-    admin, balance, errors::VaultError, events,
+    admin, balance,
+    errors::VaultError,
+    events,
     nft::StakeReceiptNFTClient,
     storage::{
         CampaignInfo, ClaimWindow, ContractMetadata, DataKey, InterfaceId, LeaderboardEntry,
@@ -13,15 +15,20 @@ use crate::{
 
 /// Maximum number of stake/unstake history entries kept per user (issue #105).
 pub(crate) const MAX_STAKE_HISTORY: u32 = 5;
+/// Maximum number of admin changelog entries retained (issue #114).
+pub(crate) const MAX_CHANGELOG_ENTRIES: u32 = 10;
 
 pub(crate) const CONTRACT_VERSION: &str = "0.1.0";
 pub(crate) const CONTRACT_NAME: &str = "stellar-staking-pool";
-pub(crate) const CONTRACT_DESCRIPTION: &str = "A staking pool contract for Stellar DeFi vault positions.";
+pub(crate) const CONTRACT_DESCRIPTION: &str =
+    "A staking pool contract for Stellar DeFi vault positions.";
 pub(crate) const BOOST_BPS_BASE: u32 = 10_000;
 pub(crate) const MAX_BOOST_TIERS: u32 = 5;
 pub(crate) const MAX_HISTORY_SNAPSHOTS: u32 = 100;
 pub(crate) const STELLAR_LEDGERS_PER_YEAR: u32 = 6_307_200;
 pub(crate) const MAX_UNSTAKE_FEE_BPS: u32 = 500;
+/// Approximate number of Stellar ledgers in one day at 5 s/ledger (issue #133).
+pub(crate) const LEDGERS_PER_DAY: u32 = 17_280;
 
 #[contract]
 pub struct VaultContract;
@@ -66,7 +73,11 @@ impl VaultContract {
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Paused, &false);
         // By default, set the slash treasury to the admin address. Can be updated by admin later.
-        env.storage().instance().set(&DataKey::SlashTreasury, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::SlashTreasury, &admin);
+        // Issue #117: record initialization ledger for pool_uptime_ledgers.
+        balance::set_initialized_at_ledger(&env, env.ledger().sequence());
 
         if reward_rate_bps > 0 {
             balance::set_reward_rate_bps(&env, reward_rate_bps);
@@ -187,6 +198,11 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)
+    }
+
+    /// Read-only query for the reward token address.
+    pub fn get_reward_token(env: Env) -> Result<Address, VaultError> {
+        balance::get_reward_token(&env).ok_or(VaultError::NotInitialized)
     }
 
     /// Read-only: ledger sequence of the last state-changing operation (issue #69).
@@ -338,6 +354,7 @@ impl VaultContract {
         events::admin_action_pause(&env, &admin);
         balance::increment_admin_action_count(&env);
         balance::set_last_updated_ledger(&env, env.ledger().sequence()); // Issue #69
+        Self::append_changelog(&env, &admin, String::from_str(&env, "paused"), 0, 1);
         Ok(())
     }
 
@@ -352,6 +369,7 @@ impl VaultContract {
         events::admin_action_unpause(&env, &admin);
         balance::increment_admin_action_count(&env);
         balance::set_last_updated_ledger(&env, env.ledger().sequence()); // Issue #69
+        Self::append_changelog(&env, &admin, String::from_str(&env, "unpaused"), 1, 0);
         Ok(())
     }
 
@@ -392,20 +410,31 @@ impl VaultContract {
         events::admin_changed(&env, &old_admin, &new_admin);
         events::admin_action_transfer_admin(&env, &old_admin, &new_admin);
         balance::increment_admin_action_count(&env);
+        Self::append_changelog(
+            &env,
+            &old_admin,
+            String::from_str(&env, "admin_transferred"),
+            0,
+            0,
+        );
         Ok(())
     }
 
     /// Admin: set the address that receives slashed tokens. Defaults to admin at initialize.
     pub fn set_slash_treasury(env: Env, treasury: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::SlashTreasury, &treasury);
+        env.storage()
+            .instance()
+            .set(&DataKey::SlashTreasury, &treasury);
         Ok(())
     }
 
     /// Admin: enable or disable staking whitelist. When enabled, only whitelisted addresses may call stake/stake_for.
     pub fn set_whitelist_enabled(env: Env, enabled: bool) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::WhitelistEnabled, &enabled);
+        env.storage()
+            .instance()
+            .set(&DataKey::WhitelistEnabled, &enabled);
         Ok(())
     }
 
@@ -421,7 +450,9 @@ impl VaultContract {
     /// Admin: remove address from whitelist
     pub fn remove_from_whitelist(env: Env, user: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        env.storage().persistent().remove(&DataKey::Whitelisted(user));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Whitelisted(user));
         Ok(())
     }
 
@@ -450,7 +481,9 @@ impl VaultContract {
     /// Admin: set the unbonding cooldown period in ledgers. 0 disables cooldown (instant unstake allowed).
     pub fn set_cooldown_period(env: Env, ledgers: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::CooldownPeriod, &ledgers);
+        env.storage()
+            .instance()
+            .set(&DataKey::CooldownPeriod, &ledgers);
         Ok(())
     }
 
@@ -461,7 +494,11 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        let cooldown: u32 = env.storage().instance().get(&DataKey::CooldownPeriod).unwrap_or(0);
+        let cooldown: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CooldownPeriod)
+            .unwrap_or(0);
         // If cooldown is zero, user can call instant unstake directly — we still allow request_unstake to perform instant withdrawal for convenience
 
         let total_shares = balance::get_total_shares(&env);
@@ -479,21 +516,27 @@ impl VaultContract {
         }
 
         // ensure requested amount <= position_amount
-        let actual_amount = if amount > position_amount { position_amount } else { amount };
+        let actual_amount = if amount > position_amount {
+            position_amount
+        } else {
+            amount
+        };
 
         // Crucial: finalize reward accrual up to now so that rewards on the to-be-unbonded principal stop accruing afterwards
         Self::accrue_rewards(&env, &user, user_shares)?;
 
         // compute shares to remove corresponding to actual_amount
-        let mut shares_to_remove = balance::amount_to_shares(total_shares, total_deposited, actual_amount)
-            .unwrap_or(user_shares);
+        let mut shares_to_remove =
+            balance::amount_to_shares(total_shares, total_deposited, actual_amount)
+                .unwrap_or(user_shares);
         if shares_to_remove > user_shares {
             shares_to_remove = user_shares;
         }
 
         // compute concrete amount removed based on shares_to_remove (rounding-safe)
-        let amount_removed = balance::shares_to_amount(total_shares, total_deposited, shares_to_remove)
-            .ok_or(VaultError::ArithmeticError)?;
+        let amount_removed =
+            balance::shares_to_amount(total_shares, total_deposited, shares_to_remove)
+                .ok_or(VaultError::ArithmeticError)?;
 
         // update user shares and totals immediately; funds remain in contract until execute_unstake
         let new_user_shares = user_shares - shares_to_remove;
@@ -525,9 +568,15 @@ impl VaultContract {
             .storage()
             .persistent()
             .get(&DataKey::UnbondingPosition(user.clone()))
-            .unwrap_or(UnbondingPosition { amount: 0, unbonding_since: 0 });
+            .unwrap_or(UnbondingPosition {
+                amount: 0,
+                unbonding_since: 0,
+            });
         let new_amount = existing.amount + amount_removed;
-        let new_pos = UnbondingPosition { amount: new_amount, unbonding_since: current_ledger };
+        let new_pos = UnbondingPosition {
+            amount: new_amount,
+            unbonding_since: current_ledger,
+        };
         env.storage()
             .persistent()
             .set(&DataKey::UnbondingPosition(user.clone()), &new_pos);
@@ -546,7 +595,9 @@ impl VaultContract {
             let token_client = token::Client::new(&env, &token_addr);
             token_client.transfer(&env.current_contract_address(), &user, &amount_removed);
             // remove unbonding position since executed
-            env.storage().persistent().remove(&DataKey::UnbondingPosition(user.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::UnbondingPosition(user.clone()));
         }
 
         Ok(())
@@ -555,7 +606,11 @@ impl VaultContract {
     /// Execute unstake after cooldown has passed. Transfers the pending unbonded amount to the user.
     pub fn execute_unstake(env: Env, user: Address) -> Result<i128, VaultError> {
         user.require_auth();
-        let cooldown: u32 = env.storage().instance().get(&DataKey::CooldownPeriod).unwrap_or(0);
+        let cooldown: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CooldownPeriod)
+            .unwrap_or(0);
         let pos_opt: Option<UnbondingPosition> = env
             .storage()
             .persistent()
@@ -581,13 +636,18 @@ impl VaultContract {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &user, &pos.amount);
 
-        env.storage().persistent().remove(&DataKey::UnbondingPosition(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::UnbondingPosition(user.clone()));
 
         Ok(pos.amount)
     }
 
     /// Read-only: get pending unbonding position for a user
-    pub fn pending_unbonding(env: Env, user: Address) -> Result<Option<UnbondingPosition>, VaultError> {
+    pub fn pending_unbonding(
+        env: Env,
+        user: Address,
+    ) -> Result<Option<UnbondingPosition>, VaultError> {
         let pos_opt: Option<UnbondingPosition> = env
             .storage()
             .persistent()
@@ -617,7 +677,9 @@ impl VaultContract {
         if bps > 2000 {
             return Err(VaultError::InvalidPenaltyBps);
         }
-        env.storage().instance().set(&DataKey::EarlyExitPenaltyBps, &bps);
+        env.storage()
+            .instance()
+            .set(&DataKey::EarlyExitPenaltyBps, &bps);
         let admin = admin::get_admin(&env)?;
         events::admin_action_set_early_exit_penalty(&env, &admin, bps);
         balance::increment_admin_action_count(&env);
@@ -774,23 +836,33 @@ impl VaultContract {
         }
         Self::validate_rate_bps(rate_bps)?; // Issue #72
         let old_rate = balance::get_reward_rate_bps(&env);
-        
+
         // Append to rate history before changing rate
         let current_ledger = env.ledger().sequence();
         let mut history = balance::get_rate_history(&env);
         history.push_back((current_ledger, old_rate));
-        
+
         // Cap history at 50 entries
         while history.len() > balance::MAX_RATE_HISTORY_ENTRIES {
             history.pop_front();
         }
-        
+
         balance::set_rate_history(&env, &history);
         balance::set_reward_rate_bps(&env, rate_bps);
+        // Issue #115: track the ledger of the most recent rate change for staker_count_at_rate.
+        balance::set_last_rate_change_ledger(&env, current_ledger);
         events::rate_changed(&env, old_rate, rate_bps);
         let admin = admin::get_admin(&env)?;
         events::admin_action_set_reward_rate(&env, &admin, old_rate, rate_bps);
         balance::increment_admin_action_count(&env);
+        // Issue #114: record this rate change in the on-chain changelog.
+        Self::append_changelog(
+            &env,
+            &admin,
+            String::from_str(&env, "rate_changed"),
+            old_rate as i128,
+            rate_bps as i128,
+        );
         Ok(())
     }
 
@@ -809,7 +881,7 @@ impl VaultContract {
     /// Calculates the weighted average of rates based on how many ledgers each rate was active.
     pub fn twap_apr_bps(env: Env, window_ledgers: u32) -> Result<u32, VaultError> {
         let _ = admin::get_admin(&env)?;
-        
+
         if window_ledgers == 0 {
             return Ok(balance::get_reward_rate_bps(&env));
         }
@@ -829,7 +901,7 @@ impl VaultContract {
         // We need to reconstruct the rate timeline
         let mut weighted_sum: u64 = 0;
         let total_ledgers: u64 = window_ledgers as u64;
-        
+
         // Each history entry (L, old_rate) means "at L, rate changed FROM old_rate".
         // The rate active FROM ledger L is the old_rate of the NEXT entry, or current_rate if last.
         // Find the first entry strictly after start_ledger.
@@ -879,7 +951,9 @@ impl VaultContract {
         weighted_sum += (final_duration as u64) * (current_rate as u64);
 
         // Calculate average using checked_div to avoid manual zero checks
-        let avg = weighted_sum.checked_div(total_ledgers).unwrap_or(current_rate as u64);
+        let avg = weighted_sum
+            .checked_div(total_ledgers)
+            .unwrap_or(current_rate as u64);
         Ok(avg as u32)
     }
 
@@ -1036,8 +1110,8 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
-        let balance = token::Client::new(&env, &token_addr)
-            .balance(&env.current_contract_address());
+        let balance =
+            token::Client::new(&env, &token_addr).balance(&env.current_contract_address());
         Ok(balance)
     }
 
@@ -1145,10 +1219,7 @@ impl VaultContract {
         let position = Self::build_position(&env, &user)?;
         let position_amount = position.as_ref().map(|p| p.amount).unwrap_or(0);
         let pending_reward = Self::pending_reward(&env, &user)?;
-        let staked_at_ledger = position
-            .as_ref()
-            .map(|p| p.staked_at_ledger)
-            .unwrap_or(0);
+        let staked_at_ledger = position.as_ref().map(|p| p.staked_at_ledger).unwrap_or(0);
         let last_claim_ledger = position.as_ref().map(|p| p.last_claim_ledger).unwrap_or(0);
         Ok(UserStats {
             position_amount,
@@ -1257,9 +1328,10 @@ impl VaultContract {
 
         let current_ledger = env.ledger().sequence();
         if current_shares == 0 {
-            env.storage()
-                .persistent()
-                .set(&DataKey::StakedAtLedger(beneficiary.clone()), &current_ledger);
+            env.storage().persistent().set(
+                &DataKey::StakedAtLedger(beneficiary.clone()),
+                &current_ledger,
+            );
             balance::set_last_claim_ledger(&env, &beneficiary, current_ledger);
             let total_stakers = balance::get_total_stakers(&env);
             balance::set_total_stakers(&env, total_stakers + 1);
@@ -1300,7 +1372,12 @@ impl VaultContract {
     /// Admin: slash a user's staked principal. Can be called while paused.
     /// `admin_addr` must equal the stored admin address; mismatches return `Unauthorized`.
     /// Returns the actual slashed token amount.
-    pub fn slash(env: Env, admin_addr: Address, user: Address, amount: i128) -> Result<i128, VaultError> {
+    pub fn slash(
+        env: Env,
+        admin_addr: Address,
+        user: Address,
+        amount: i128,
+    ) -> Result<i128, VaultError> {
         let stored_admin = admin::get_admin(&env)?;
         if admin_addr != stored_admin {
             return Err(VaultError::Unauthorized);
@@ -1327,11 +1404,15 @@ impl VaultContract {
         }
 
         // actual_slash_amount = min(requested, position_amount)
-        let actual = if amount > position_amount { position_amount } else { amount };
+        let actual = if amount > position_amount {
+            position_amount
+        } else {
+            amount
+        };
 
         // compute shares to remove corresponding to `actual` (may round)
-        let mut shares_to_remove = balance::amount_to_shares(total_shares, total_deposited, actual)
-            .unwrap_or(user_shares);
+        let mut shares_to_remove =
+            balance::amount_to_shares(total_shares, total_deposited, actual).unwrap_or(user_shares);
         if shares_to_remove > user_shares {
             shares_to_remove = user_shares;
         }
@@ -1477,18 +1558,18 @@ impl VaultContract {
             .checked_div(denominator)
             .ok_or(VaultError::ArithmeticError)?;
 
-        Ok(if ledgers > u32::MAX as i128 { u32::MAX } else { ledgers as u32 })
+        Ok(if ledgers > u32::MAX as i128 {
+            u32::MAX
+        } else {
+            ledgers as u32
+        })
     }
 
     /// Read-only estimate of days remaining until `user` accumulates `target_reward` tokens.
     ///
     /// Uses 5 seconds per ledger (Stellar's approximate close time) and 86 400 seconds per day.
     /// Returns `u32::MAX` when `ledgers_to_target` returns `u32::MAX`.
-    pub fn days_to_target(
-        env: Env,
-        user: Address,
-        target_reward: i128,
-    ) -> Result<u32, VaultError> {
+    pub fn days_to_target(env: Env, user: Address, target_reward: i128) -> Result<u32, VaultError> {
         let ledgers = Self::ledgers_to_target(env, user, target_reward)?;
         if ledgers == u32::MAX {
             return Ok(u32::MAX);
@@ -1603,9 +1684,8 @@ impl VaultContract {
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let position_amount =
-            balance::shares_to_amount(total_shares, total_deposited, from_shares)
-                .ok_or(VaultError::ArithmeticError)?;
+        let position_amount = balance::shares_to_amount(total_shares, total_deposited, from_shares)
+            .ok_or(VaultError::ArithmeticError)?;
 
         // Settle pending rewards so `from` can still claim them after the transfer
         Self::accrue_rewards(&env, &from, from_shares)?;
@@ -1679,7 +1759,9 @@ impl VaultContract {
                     trimmed.push_back(board.get(i).unwrap());
                     i += 1;
                 }
-                env.storage().instance().set(&DataKey::Leaderboard, &trimmed);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::Leaderboard, &trimmed);
             }
         }
         Ok(())
@@ -1771,8 +1853,7 @@ impl VaultContract {
                 continue;
             }
             let other_amount =
-                balance::shares_to_amount(total_shares, total_deposited, other_shares)
-                    .unwrap_or(0);
+                balance::shares_to_amount(total_shares, total_deposited, other_shares).unwrap_or(0);
 
             let other_ranks_higher = if other_amount != user_amount {
                 other_amount > user_amount
@@ -1788,6 +1869,28 @@ impl VaultContract {
         }
 
         Some(rank)
+    }
+
+    // --- Auto-restake (Issue #113) ---
+
+    /// Enable or disable automatic reward compounding for the calling user.
+    ///
+    /// When enabled, any pending reward that would normally accumulate in the
+    /// claimable `AccruedReward` balance is instead silently re-invested into
+    /// the user's staking position on every implicit settlement (i.e., during
+    /// `stake` top-ups and `unstake`). Direct `claim` always transfers rewards
+    /// out regardless of this setting.
+    ///
+    /// Requires authentication from `user`.
+    pub fn set_auto_restake(env: Env, user: Address, enabled: bool) {
+        user.require_auth();
+        balance::set_auto_restake(&env, &user, enabled);
+    }
+
+    /// Read-only: returns `true` when the user has auto-restake enabled.
+    /// No authentication required.
+    pub fn is_auto_restake_enabled(env: Env, user: Address) -> bool {
+        balance::get_auto_restake(&env, &user)
     }
 
     // --- Simulation functions (Issue #54) ---
@@ -1832,8 +1935,13 @@ impl VaultContract {
             } else {
                 claim_interval
             };
-            let reward =
-                Self::reward_for_ledgers(current_amount, rate_bps, multiplier, BOOST_BPS_BASE, interval)?;
+            let reward = Self::reward_for_ledgers(
+                current_amount,
+                rate_bps,
+                multiplier,
+                BOOST_BPS_BASE,
+                interval,
+            )?;
             total_reward = total_reward
                 .checked_add(reward)
                 .ok_or(VaultError::ArithmeticError)?;
@@ -1860,7 +1968,8 @@ impl VaultContract {
             return Ok((0, 0));
         }
 
-        let base_reward = Self::reward_for_ledgers(amount, rate_bps, BOOST_BPS_BASE, BOOST_BPS_BASE, ledgers)?;
+        let base_reward =
+            Self::reward_for_ledgers(amount, rate_bps, BOOST_BPS_BASE, BOOST_BPS_BASE, ledgers)?;
 
         let schedule = balance::get_boost_schedule(&env).unwrap_or(Vec::new(&env));
         let mut boosted_reward: i128 = 0;
@@ -1879,8 +1988,13 @@ impl VaultContract {
                 break;
             }
             let segment = tier_ledger - cursor;
-            let segment_reward =
-                Self::reward_for_ledgers(amount, rate_bps, current_multiplier, BOOST_BPS_BASE, segment)?;
+            let segment_reward = Self::reward_for_ledgers(
+                amount,
+                rate_bps,
+                current_multiplier,
+                BOOST_BPS_BASE,
+                segment,
+            )?;
             boosted_reward = boosted_reward
                 .checked_add(segment_reward)
                 .ok_or(VaultError::ArithmeticError)?;
@@ -1998,9 +2112,22 @@ impl VaultContract {
         Self::require_min_stake(env, current_shares, total_shares, total_deposited, amount)?;
         Self::accrue_rewards(env, staker, current_shares)?;
 
+        // Auto-compound rewards ONLY if auto_restake is enabled
+        let mut adjusted_total_shares = total_shares;
+        let mut adjusted_total_deposited = total_deposited;
+        if balance::get_auto_restake(env, staker) {
+            let accrued = balance::get_accrued_reward(env, staker);
+            if accrued > 0 {
+                Self::maybe_restake_rewards(env, staker)?;
+                // Reload totals after compounding
+                adjusted_total_shares = balance::get_total_shares(env);
+                adjusted_total_deposited = balance::get_total_deposited(env);
+            }
+        }
+
         let cap = balance::get_pool_cap(env);
         if cap > 0 {
-            let new_total_deposited = total_deposited
+            let new_total_deposited = adjusted_total_deposited
                 .checked_add(amount)
                 .ok_or(VaultError::ArithmeticError)?;
             if new_total_deposited > cap {
@@ -2008,16 +2135,19 @@ impl VaultContract {
             }
         }
 
-        let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
-            .ok_or(VaultError::ArithmeticError)?;
+        let shares =
+            balance::amount_to_shares(adjusted_total_shares, adjusted_total_deposited, amount)
+                .ok_or(VaultError::ArithmeticError)?;
 
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(staker, &env.current_contract_address(), &amount);
 
-        let new_shares = current_shares + shares;
+        // Get current shares AFTER potential compounding
+        let updated_current_shares = balance::get_shares(env, staker);
+        let new_shares = updated_current_shares + shares;
         balance::set_shares(env, staker, new_shares);
-        balance::set_total_shares(env, total_shares + shares);
-        balance::set_total_deposited(env, total_deposited + amount);
+        balance::set_total_shares(env, adjusted_total_shares + shares);
+        balance::set_total_deposited(env, adjusted_total_deposited + amount);
 
         let current_ledger = env.ledger().sequence();
         if current_shares == 0 {
@@ -2068,7 +2198,11 @@ impl VaultContract {
         Self::require_not_paused(env)?;
 
         // If cooldown is enabled, force use of request_unstake/execute_unstake flow
-        let cooldown: u32 = env.storage().instance().get(&DataKey::CooldownPeriod).unwrap_or(0);
+        let cooldown: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CooldownPeriod)
+            .unwrap_or(0);
         if cooldown > 0 {
             return Err(VaultError::UseCooldownFlow);
         }
@@ -2089,6 +2223,14 @@ impl VaultContract {
         }
 
         Self::accrue_rewards(env, staker, user_shares)?;
+
+        // Auto-compound rewards ONLY if auto_restake is enabled
+        if balance::get_auto_restake(env, staker) {
+            let accrued = balance::get_accrued_reward(env, staker);
+            if accrued > 0 {
+                Self::maybe_restake_rewards(env, staker)?;
+            }
+        }
 
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
@@ -2200,6 +2342,9 @@ impl VaultContract {
 
         events::withdraw(env, staker, shares, amount_returned);
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
+
+        // Issue #129: auto-pause if reward balance drops below threshold
+        Self::check_auto_pause(env)?;
 
         Ok(amount_returned)
     }
@@ -2317,8 +2462,14 @@ impl VaultContract {
             return Ok(());
         }
         let checkpoint = balance::get_reward_checkpoint_ledger(env, user).unwrap_or(current_ledger);
-        let additional_reward =
-            Self::reward_between_ledgers(env, user, current_shares, checkpoint, current_ledger, true)?;
+        let additional_reward = Self::reward_between_ledgers(
+            env,
+            user,
+            current_shares,
+            checkpoint,
+            current_ledger,
+            true,
+        )?;
 
         if additional_reward > 0 {
             let accrued = balance::get_accrued_reward(env, user);
@@ -2329,6 +2480,49 @@ impl VaultContract {
         }
 
         balance::set_reward_checkpoint_ledger(env, user, current_ledger);
+        Ok(())
+    }
+
+    /// If auto_restake is enabled for this user, take any accrued reward and
+    /// convert it to additional shares (compounding). Emit auto_restaked event.
+    /// Otherwise, do nothing. This should be called after accrue_rewards in
+    /// stake and unstake flows.
+    fn maybe_restake_rewards(env: &Env, user: &Address) -> Result<(), VaultError> {
+        if !balance::get_auto_restake(env, user) {
+            return Ok(());
+        }
+
+        let accrued = balance::get_accrued_reward(env, user);
+        if accrued == 0 {
+            return Ok(());
+        }
+
+        // Rewards come from the reward pool, not new deposits
+        // We treat the accrued reward as if it was deposited into the staking pool
+        let total_shares = balance::get_total_shares(env);
+        let total_deposited = balance::get_total_deposited(env);
+
+        // Convert accrued reward to shares based on current ratio
+        let reward_shares = balance::amount_to_shares(total_shares, total_deposited, accrued)
+            .ok_or(VaultError::ArithmeticError)?;
+
+        // Update user's shares
+        let current_shares = balance::get_shares(env, user);
+        let new_shares = current_shares
+            .checked_add(reward_shares)
+            .ok_or(VaultError::ArithmeticError)?;
+        balance::set_shares(env, user, new_shares);
+
+        // Update pool totals: treat compounded reward as additional deposited amount
+        balance::set_total_shares(env, total_shares + reward_shares);
+        balance::set_total_deposited(env, total_deposited + accrued);
+
+        // Clear accrued reward since it's been compounded
+        balance::set_accrued_reward(env, user, 0);
+
+        // Emit event
+        events::auto_restaked(env, user, accrued);
+
         Ok(())
     }
 
@@ -2389,8 +2583,7 @@ impl VaultContract {
                 u32::MAX
             };
 
-            let (campaign_mult, next_campaign_boundary) =
-                Self::campaign_info_at(cursor, &campaign);
+            let (campaign_mult, next_campaign_boundary) = Self::campaign_info_at(cursor, &campaign);
 
             let seg_end = next_tier_boundary
                 .min(next_campaign_boundary)
@@ -2579,7 +2772,9 @@ impl VaultContract {
         }
         if reward_dec > stake_dec {
             let factor = 10i128.pow(reward_dec - stake_dec);
-            amount.checked_mul(factor).ok_or(VaultError::ArithmeticError)
+            amount
+                .checked_mul(factor)
+                .ok_or(VaultError::ArithmeticError)
         } else {
             let factor = 10i128.pow(stake_dec - reward_dec);
             Ok(amount / factor)
@@ -2674,7 +2869,9 @@ impl VaultContract {
                     final_board.pop_back();
                 }
 
-                env.storage().instance().set(&DataKey::Leaderboard, &final_board);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::Leaderboard, &final_board);
                 return;
             }
         }
@@ -2707,6 +2904,32 @@ impl VaultContract {
         } else {
             Ok(())
         }
+    }
+
+    /// Issue #129: check if reward balance dropped below threshold and auto-pause if needed.
+    fn check_auto_pause(env: &Env) -> Result<(), VaultError> {
+        let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
+        let threshold: i128 = env.storage().instance().get(&threshold_key).unwrap_or(0);
+
+        if threshold == 0 {
+            return Ok(()); // Auto-pause disabled
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+
+        let token_client = token::Client::new(env, &token_addr);
+        let reward_balance = token_client.balance(&env.current_contract_address());
+
+        if reward_balance < threshold {
+            env.storage().instance().set(&DataKey::Paused, &true);
+            events::auto_paused(env, reward_balance, threshold);
+        }
+
+        Ok(())
     }
 
     /// Append one entry to the user's stake/unstake history ring buffer (max 5).
@@ -2816,8 +3039,14 @@ impl VaultContract {
         let paid = balance::get_total_rewards_paid(env);
         balance::set_total_rewards_paid(env, paid + reward);
 
+        // Issue #135: track per-user cumulative claimed for staking_efficiency_score
+        balance::add_user_total_claimed(env, staker, reward);
+
         events::claimed(env, staker, reward);
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
+
+        // Issue #129: auto-pause if reward balance drops below threshold
+        Self::check_auto_pause(env)?;
 
         Ok(reward)
     }
@@ -2859,12 +3088,23 @@ impl VaultContract {
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
 
-        let total_shares = balance::get_total_shares(env);
-        let total_deposited = balance::get_total_deposited(env);
+        let mut total_shares = balance::get_total_shares(env);
+        let mut total_deposited = balance::get_total_deposited(env);
         let current_shares = balance::get_shares(env, staker);
 
         Self::require_min_stake(env, current_shares, total_shares, total_deposited, amount)?;
         Self::accrue_rewards(env, staker, current_shares)?;
+
+        // Auto-compound rewards ONLY if auto_restake is enabled
+        if balance::get_auto_restake(env, staker) {
+            let accrued = balance::get_accrued_reward(env, staker);
+            if accrued > 0 {
+                Self::maybe_restake_rewards(env, staker)?;
+                // Reload totals after compounding
+                total_shares = balance::get_total_shares(env);
+                total_deposited = balance::get_total_deposited(env);
+            }
+        }
 
         let cap = balance::get_pool_cap(env);
         if cap > 0 {
@@ -2882,7 +3122,9 @@ impl VaultContract {
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(staker, &env.current_contract_address(), &amount);
 
-        let new_shares = current_shares + shares;
+        // Get current shares AFTER potential compounding
+        let updated_current_shares = balance::get_shares(env, staker);
+        let new_shares = updated_current_shares + shares;
         balance::set_shares(env, staker, new_shares);
         balance::set_total_shares(env, total_shares + shares);
         balance::set_total_deposited(env, total_deposited + amount);
@@ -2999,10 +3241,16 @@ impl VaultContract {
     /// since their last activity can be flagged by `flag_frozen`. Pass `0` to
     /// disable the threshold (threshold is informational only — no automatic
     /// freezing occurs).
-    pub fn set_inactivity_threshold(env: Env, admin: Address, ledgers: u32) -> Result<(), VaultError> {
+    pub fn set_inactivity_threshold(
+        env: Env,
+        admin: Address,
+        ledgers: u32,
+    ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         let _ = admin;
-        env.storage().instance().set(&DataKey::InactivityThreshold, &ledgers);
+        env.storage()
+            .instance()
+            .set(&DataKey::InactivityThreshold, &ledgers);
         Ok(())
     }
 
@@ -3028,18 +3276,14 @@ impl VaultContract {
 
     /// Read-only: returns `true` when the user's position carries a frozen flag.
     pub fn is_frozen(env: Env, user: Address) -> bool {
-        env.storage()
-            .persistent()
-            .has(&DataKey::FrozenAt(user))
+        env.storage().persistent().has(&DataKey::FrozenAt(user))
     }
 
     /// Admin: remove the frozen flag from a user's position.
     pub fn unfreeze(env: Env, admin: Address, user: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         let _ = admin;
-        env.storage()
-            .persistent()
-            .remove(&DataKey::FrozenAt(user));
+        env.storage().persistent().remove(&DataKey::FrozenAt(user));
         Ok(())
     }
 
@@ -3063,8 +3307,7 @@ impl VaultContract {
         if total_staked == 0 {
             return 0;
         }
-        (rate_bps as i128)
-            / (BOOST_BPS_BASE as i128 * STELLAR_LEDGERS_PER_YEAR as i128)
+        (rate_bps as i128) / (BOOST_BPS_BASE as i128 * STELLAR_LEDGERS_PER_YEAR as i128)
     }
 
     // --- Issue #103: user_summary aggregated query ---
@@ -3073,11 +3316,11 @@ impl VaultContract {
     /// pool-share fraction (in basis points) in a single contract call.
     ///
     /// `pool_share_bps` is `user_shares * 10_000 / total_shares` (0 when no
-    /// shares exist globally). Returns `UserSummary { position: None,
+    /// shares exist globally). Returns `UserSummary { position: [] (empty),
     /// pending_reward: 0, pool_share_bps: 0 }` for users with no stake.
     /// No auth required.
     pub fn user_summary(env: Env, user: Address) -> Result<UserSummary, VaultError> {
-        let position = Self::build_position(&env, &user)?;
+        let position_opt = Self::build_position(&env, &user)?;
         let pending_reward = Self::pending_reward(&env, &user)?;
         let user_shares = balance::get_shares(&env, &user);
         let total_shares = balance::get_total_shares(&env);
@@ -3090,11 +3333,12 @@ impl VaultContract {
                 .checked_div(total_shares)
                 .unwrap_or(0)
         };
+        let mut position: Vec<StakePosition> = Vec::new(&env);
+        if let Some(p) = position_opt {
+            position.push_back(p);
+        }
         Ok(UserSummary {
-            position: match position {
-                Some(p) => OptionalPosition::Some(p),
-                None => OptionalPosition::None,
-            },
+            position,
             pending_reward,
             pool_share_bps,
         })
@@ -3606,11 +3850,11 @@ impl VaultContract {
             return 0;
         }
 
-        let user_amount = match balance::shares_to_amount(total_shares, total_deposited, user_shares)
-        {
-            Some(a) => a,
-            None => return 0,
-        };
+        let user_amount =
+            match balance::shares_to_amount(total_shares, total_deposited, user_shares) {
+                Some(a) => a,
+                None => return 0,
+            };
 
         user_amount
             .checked_mul(BOOST_BPS_BASE as i128)
@@ -3663,12 +3907,11 @@ impl VaultContract {
                 j += 1;
             }
             if !found {
-                let mut streak =
-                    balance::get_user_streak(&env, &staker).unwrap_or(StakeStreak {
-                        current_streak: 0,
-                        longest_streak: 0,
-                        last_active_wave: 0,
-                    });
+                let mut streak = balance::get_user_streak(&env, &staker).unwrap_or(StakeStreak {
+                    current_streak: 0,
+                    longest_streak: 0,
+                    last_active_wave: 0,
+                });
                 if streak.current_streak > 0 {
                     streak.current_streak = 0;
                     balance::set_user_streak(&env, &staker, &streak);

@@ -63,14 +63,8 @@ pub enum VaultError {
     MaxPositionsReached = 37,
     /// set_max_positions_per_user rejected because max exceeds 10.
     MaxPositionsTooHigh = 38,
-    /// User has 10 active VestingEntry items.
-    VestingQueueFull = 39,
-    /// No matured vesting entries to withdraw.
-    NothingToWithdraw = 40,
-    /// Operation conflicts with the active epoch mode configuration.
-    EpochModeConflict = 41,
-    /// Historical epoch info cannot be calculated because it is not finalized.
-    EpochNotFinalized = 42,
-    /// User has already claimed rewards for this epoch.
-    EpochAlreadyClaimed = 43,
+    /// bulk_set_kyc was called with more than 50 entries (issue #130).
+    BatchKycTooLarge = 39,
+    /// Caller-supplied exchange rate is zero or negative (issue #132).
+    InvalidRate = 40,
 }
