@@ -6,13 +6,10 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        CampaignInfo, ClaimWindow, ContractMetadata, DataKey, InterfaceId, LeaderboardEntry,
-        OptionalPosition, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, StakingEfficiency, UnbondingPosition, UnstakeCheckResult, UserStats,
-        UserSummary,
         CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
         LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary, VestingEntry,
+        StakeStreak, StakingEfficiency, UnbondingPosition, UnstakeCheckResult, UserStats,
+        UserSummary, VestingEntry,
     },
 };
 
@@ -23,7 +20,8 @@ pub(crate) const MAX_CHANGELOG_ENTRIES: u32 = 10;
 
 pub(crate) const CONTRACT_VERSION: &str = "0.1.0";
 pub(crate) const CONTRACT_NAME: &str = "stellar-staking-pool";
-pub(crate) const CONTRACT_DESCRIPTION: &str = "A staking pool contract for Stellar DeFi vault positions.";
+pub(crate) const CONTRACT_DESCRIPTION: &str =
+    "A staking pool contract for Stellar DeFi vault positions.";
 pub(crate) const BOOST_BPS_BASE: u32 = 10_000;
 pub(crate) const MAX_BOOST_TIERS: u32 = 5;
 pub(crate) const MAX_HISTORY_SNAPSHOTS: u32 = 100;
@@ -891,7 +889,6 @@ impl VaultContract {
         let mut weighted_sum: u64 = 0;
         let total_ledgers: u64 = window_ledgers as u64;
 
-
         // Each history entry (L, old_rate) means "at L, rate changed FROM old_rate".
         // The rate active FROM ledger L is the old_rate of the NEXT entry, or current_rate if last.
         // Find the first entry strictly after start_ledger.
@@ -941,7 +938,9 @@ impl VaultContract {
         weighted_sum += (final_duration as u64) * (current_rate as u64);
 
         // Calculate average using checked_div to avoid manual zero checks
-        let avg = weighted_sum.checked_div(total_ledgers).unwrap_or(current_rate as u64);
+        let avg = weighted_sum
+            .checked_div(total_ledgers)
+            .unwrap_or(current_rate as u64);
         Ok(avg as u32)
     }
 
@@ -1841,8 +1840,7 @@ impl VaultContract {
                 continue;
             }
             let other_amount =
-                balance::shares_to_amount(total_shares, total_deposited, other_shares)
-                    .unwrap_or(0);
+                balance::shares_to_amount(total_shares, total_deposited, other_shares).unwrap_or(0);
 
             let other_ranks_higher = if other_amount != user_amount {
                 other_amount > user_amount
@@ -1858,6 +1856,28 @@ impl VaultContract {
         }
 
         Some(rank)
+    }
+
+    // --- Auto-restake (Issue #113) ---
+
+    /// Enable or disable automatic reward compounding for the calling user.
+    ///
+    /// When enabled, any pending reward that would normally accumulate in the
+    /// claimable `AccruedReward` balance is instead silently re-invested into
+    /// the user's staking position on every implicit settlement (i.e., during
+    /// `stake` top-ups and `unstake`). Direct `claim` always transfers rewards
+    /// out regardless of this setting.
+    ///
+    /// Requires authentication from `user`.
+    pub fn set_auto_restake(env: Env, user: Address, enabled: bool) {
+        user.require_auth();
+        balance::set_auto_restake(&env, &user, enabled);
+    }
+
+    /// Read-only: returns `true` when the user has auto-restake enabled.
+    /// No authentication required.
+    pub fn is_auto_restake_enabled(env: Env, user: Address) -> bool {
+        balance::get_auto_restake(&env, &user)
     }
 
     // --- Simulation functions (Issue #54) ---
@@ -2079,9 +2099,22 @@ impl VaultContract {
         Self::require_min_stake(env, current_shares, total_shares, total_deposited, amount)?;
         Self::accrue_rewards(env, staker, current_shares)?;
 
+        // Auto-compound rewards ONLY if auto_restake is enabled
+        let mut adjusted_total_shares = total_shares;
+        let mut adjusted_total_deposited = total_deposited;
+        if balance::get_auto_restake(env, staker) {
+            let accrued = balance::get_accrued_reward(env, staker);
+            if accrued > 0 {
+                Self::maybe_restake_rewards(env, staker)?;
+                // Reload totals after compounding
+                adjusted_total_shares = balance::get_total_shares(env);
+                adjusted_total_deposited = balance::get_total_deposited(env);
+            }
+        }
+
         let cap = balance::get_pool_cap(env);
         if cap > 0 {
-            let new_total_deposited = total_deposited
+            let new_total_deposited = adjusted_total_deposited
                 .checked_add(amount)
                 .ok_or(VaultError::ArithmeticError)?;
             if new_total_deposited > cap {
@@ -2089,16 +2122,19 @@ impl VaultContract {
             }
         }
 
-        let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
-            .ok_or(VaultError::ArithmeticError)?;
+        let shares =
+            balance::amount_to_shares(adjusted_total_shares, adjusted_total_deposited, amount)
+                .ok_or(VaultError::ArithmeticError)?;
 
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(staker, &env.current_contract_address(), &amount);
 
-        let new_shares = current_shares + shares;
+        // Get current shares AFTER potential compounding
+        let updated_current_shares = balance::get_shares(env, staker);
+        let new_shares = updated_current_shares + shares;
         balance::set_shares(env, staker, new_shares);
-        balance::set_total_shares(env, total_shares + shares);
-        balance::set_total_deposited(env, total_deposited + amount);
+        balance::set_total_shares(env, adjusted_total_shares + shares);
+        balance::set_total_deposited(env, adjusted_total_deposited + amount);
 
         let current_ledger = env.ledger().sequence();
         if current_shares == 0 {
@@ -2174,6 +2210,14 @@ impl VaultContract {
         }
 
         Self::accrue_rewards(env, staker, user_shares)?;
+
+        // Auto-compound rewards ONLY if auto_restake is enabled
+        if balance::get_auto_restake(env, staker) {
+            let accrued = balance::get_accrued_reward(env, staker);
+            if accrued > 0 {
+                Self::maybe_restake_rewards(env, staker)?;
+            }
+        }
 
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
@@ -2414,6 +2458,49 @@ impl VaultContract {
         }
 
         balance::set_reward_checkpoint_ledger(env, user, current_ledger);
+        Ok(())
+    }
+
+    /// If auto_restake is enabled for this user, take any accrued reward and
+    /// convert it to additional shares (compounding). Emit auto_restaked event.
+    /// Otherwise, do nothing. This should be called after accrue_rewards in
+    /// stake and unstake flows.
+    fn maybe_restake_rewards(env: &Env, user: &Address) -> Result<(), VaultError> {
+        if !balance::get_auto_restake(env, user) {
+            return Ok(());
+        }
+
+        let accrued = balance::get_accrued_reward(env, user);
+        if accrued == 0 {
+            return Ok(());
+        }
+
+        // Rewards come from the reward pool, not new deposits
+        // We treat the accrued reward as if it was deposited into the staking pool
+        let total_shares = balance::get_total_shares(env);
+        let total_deposited = balance::get_total_deposited(env);
+
+        // Convert accrued reward to shares based on current ratio
+        let reward_shares = balance::amount_to_shares(total_shares, total_deposited, accrued)
+            .ok_or(VaultError::ArithmeticError)?;
+
+        // Update user's shares
+        let current_shares = balance::get_shares(env, user);
+        let new_shares = current_shares
+            .checked_add(reward_shares)
+            .ok_or(VaultError::ArithmeticError)?;
+        balance::set_shares(env, user, new_shares);
+
+        // Update pool totals: treat compounded reward as additional deposited amount
+        balance::set_total_shares(env, total_shares + reward_shares);
+        balance::set_total_deposited(env, total_deposited + accrued);
+
+        // Clear accrued reward since it's been compounded
+        balance::set_accrued_reward(env, user, 0);
+
+        // Emit event
+        events::auto_restaked(env, user, accrued);
+
         Ok(())
     }
 
@@ -2800,12 +2887,8 @@ impl VaultContract {
     /// Issue #129: check if reward balance dropped below threshold and auto-pause if needed.
     fn check_auto_pause(env: &Env) -> Result<(), VaultError> {
         let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
-        let threshold: i128 = env
-            .storage()
-            .instance()
-            .get(&threshold_key)
-            .unwrap_or(0);
-        
+        let threshold: i128 = env.storage().instance().get(&threshold_key).unwrap_or(0);
+
         if threshold == 0 {
             return Ok(()); // Auto-pause disabled
         }
@@ -2815,7 +2898,7 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
-        
+
         let token_client = token::Client::new(env, &token_addr);
         let reward_balance = token_client.balance(&env.current_contract_address());
 
@@ -2950,12 +3033,23 @@ impl VaultContract {
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
 
-        let total_shares = balance::get_total_shares(env);
-        let total_deposited = balance::get_total_deposited(env);
+        let mut total_shares = balance::get_total_shares(env);
+        let mut total_deposited = balance::get_total_deposited(env);
         let current_shares = balance::get_shares(env, staker);
 
         Self::require_min_stake(env, current_shares, total_shares, total_deposited, amount)?;
         Self::accrue_rewards(env, staker, current_shares)?;
+
+        // Auto-compound rewards ONLY if auto_restake is enabled
+        if balance::get_auto_restake(env, staker) {
+            let accrued = balance::get_accrued_reward(env, staker);
+            if accrued > 0 {
+                Self::maybe_restake_rewards(env, staker)?;
+                // Reload totals after compounding
+                total_shares = balance::get_total_shares(env);
+                total_deposited = balance::get_total_deposited(env);
+            }
+        }
 
         let cap = balance::get_pool_cap(env);
         if cap > 0 {
@@ -2973,7 +3067,9 @@ impl VaultContract {
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(staker, &env.current_contract_address(), &amount);
 
-        let new_shares = current_shares + shares;
+        // Get current shares AFTER potential compounding
+        let updated_current_shares = balance::get_shares(env, staker);
+        let new_shares = updated_current_shares + shares;
         balance::set_shares(env, staker, new_shares);
         balance::set_total_shares(env, total_shares + shares);
         balance::set_total_deposited(env, total_deposited + amount);
@@ -3186,7 +3282,11 @@ impl VaultContract {
         if let Some(p) = position_opt {
             position.push_back(p);
         }
-        Ok(UserSummary { position, pending_reward, pool_share_bps })
+        Ok(UserSummary {
+            position,
+            pending_reward,
+            pool_share_bps,
+        })
     }
 
     // ── Issue #105: stake history ─────────────────────────────────────────────
@@ -3685,9 +3785,8 @@ impl VaultContract {
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let position_amount =
-            balance::shares_to_amount(total_shares, total_deposited, shares)
-                .ok_or(VaultError::ArithmeticError)?;
+        let position_amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
 
         position_amount
             .checked_mul(rate_bps)
@@ -3727,8 +3826,7 @@ impl VaultContract {
             .get::<_, CampaignInfo>(&DataKey::BoostCampaign)
         {
             Some(c)
-                if current_ledger >= c.starts_at_ledger
-                    && current_ledger < c.ends_at_ledger =>
+                if current_ledger >= c.starts_at_ledger && current_ledger < c.ends_at_ledger =>
             {
                 c.multiplier_bps
             }
@@ -3772,9 +3870,8 @@ impl VaultContract {
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let position_amount =
-            balance::shares_to_amount(total_shares, total_deposited, from_shares)
-                .ok_or(VaultError::ArithmeticError)?;
+        let position_amount = balance::shares_to_amount(total_shares, total_deposited, from_shares)
+            .ok_or(VaultError::ArithmeticError)?;
 
         // Compute pending reward for the event (informational; not settled)
         let pending_reward_estimate = Self::pending_reward(&env, &from)?;
@@ -3869,9 +3966,8 @@ impl VaultContract {
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let position_amount =
-            balance::shares_to_amount(total_shares, total_deposited, shares)
-                .ok_or(VaultError::ArithmeticError)?;
+        let position_amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
 
         let staked_at: u32 = env
             .storage()
@@ -3941,7 +4037,6 @@ impl VaultContract {
         })
     }
 
-}
     // ── Issue #117: pool_uptime_ledgers ───────────────────────────────────────
 
     /// Read-only query for how many ledgers the pool has been active.

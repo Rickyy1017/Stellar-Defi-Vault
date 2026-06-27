@@ -164,9 +164,18 @@ fn test_contract_metadata_returns_constants() {
     let f = VaultFixture::new();
     let metadata = f.vault.contract_metadata();
 
-    assert_eq!(metadata.name, soroban_sdk::String::from_str(&f.env, CONTRACT_NAME));
-    assert_eq!(metadata.version, soroban_sdk::String::from_str(&f.env, CONTRACT_VERSION));
-    assert_eq!(metadata.description, soroban_sdk::String::from_str(&f.env, CONTRACT_DESCRIPTION));
+    assert_eq!(
+        metadata.name,
+        soroban_sdk::String::from_str(&f.env, CONTRACT_NAME)
+    );
+    assert_eq!(
+        metadata.version,
+        soroban_sdk::String::from_str(&f.env, CONTRACT_VERSION)
+    );
+    assert_eq!(
+        metadata.description,
+        soroban_sdk::String::from_str(&f.env, CONTRACT_DESCRIPTION)
+    );
 }
 
 // ── deposit ───────────────────────────────────────────────────────────────────
@@ -2778,11 +2787,23 @@ fn test_get_staker_rank_largest_of_three_is_rank_1() {
     f.vault.stake(&charlie, &500_000);
 
     // Charlie deposited the most — rank 1.
-    assert_eq!(f.vault.get_staker_rank(&charlie), Some(1), "charlie (largest) should be rank 1");
+    assert_eq!(
+        f.vault.get_staker_rank(&charlie),
+        Some(1),
+        "charlie (largest) should be rank 1"
+    );
     // Alice is second.
-    assert_eq!(f.vault.get_staker_rank(&f.alice), Some(2), "alice should be rank 2");
+    assert_eq!(
+        f.vault.get_staker_rank(&f.alice),
+        Some(2),
+        "alice should be rank 2"
+    );
     // Bob is third.
-    assert_eq!(f.vault.get_staker_rank(&f.bob), Some(3), "bob should be rank 3");
+    assert_eq!(
+        f.vault.get_staker_rank(&f.bob),
+        Some(3),
+        "bob should be rank 3"
+    );
 }
 
 /// User with no active position returns None.
@@ -2821,11 +2842,17 @@ fn test_get_staker_rank_ties_broken_deterministically() {
     f.vault.stake(&f.alice, &500_000);
     f.vault.stake(&f.bob, &500_000);
 
-    let alice_rank = f.vault.get_staker_rank(&f.alice).expect("alice has a position");
+    let alice_rank = f
+        .vault
+        .get_staker_rank(&f.alice)
+        .expect("alice has a position");
     let bob_rank = f.vault.get_staker_rank(&f.bob).expect("bob has a position");
 
     // Ranks must be distinct (1 and 2) and stable.
-    assert_ne!(alice_rank, bob_rank, "tied stakers must have different ranks");
+    assert_ne!(
+        alice_rank, bob_rank,
+        "tied stakers must have different ranks"
+    );
     assert!(
         (alice_rank == 1 && bob_rank == 2) || (alice_rank == 2 && bob_rank == 1),
         "tied stakers must occupy ranks 1 and 2"
@@ -2835,12 +2862,154 @@ fn test_get_staker_rank_ties_broken_deterministically() {
     let alice_str = f.alice.to_string();
     let bob_str = f.bob.to_string();
     if alice_str < bob_str {
-        assert_eq!(alice_rank, 1, "alice (lower address) should rank above bob when tied");
+        assert_eq!(
+            alice_rank, 1,
+            "alice (lower address) should rank above bob when tied"
+        );
         assert_eq!(bob_rank, 2);
     } else {
-        assert_eq!(bob_rank, 1, "bob (lower address) should rank above alice when tied");
+        assert_eq!(
+            bob_rank, 1,
+            "bob (lower address) should rank above alice when tied"
+        );
         assert_eq!(alice_rank, 2);
     }
+}
+
+// ── Issue #113: auto_restake ──────────────────────────────────────────────────
+
+/// When auto_restake is enabled and the user stakes again, any pending reward
+/// should be silently added to the position instead of transferred out.
+#[test]
+fn test_auto_restake_compounds_reward_into_position() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &2_000_000);
+    f.token_admin.mint(&f.admin, &10_000_000);
+    f.vault.fund_reward_pool(&f.admin, &10_000_000);
+
+    // Alice stakes 1M
+    f.vault.stake(&f.alice, &1_000_000);
+    let initial_pos = f.vault.position_of(&f.alice).unwrap().amount;
+
+    // Enable auto_restake
+    f.vault.set_auto_restake(&f.alice, &true);
+    assert!(f.vault.is_auto_restake_enabled(&f.alice));
+
+    // Advance ledger so rewards accrue
+    set_ledger(&f.env, 10_000);
+    let pending = f.vault.calc_pending_reward(&f.alice);
+    assert!(pending > 0, "rewards should have accrued");
+
+    // Stake more — rewards should compound into position
+    f.vault.stake(&f.alice, &1_000_000);
+    let new_pos = f.vault.position_of(&f.alice).unwrap().amount;
+
+    // Position should be: initial + new_stake + compounded_reward
+    let expected = initial_pos + 1_000_000 + pending;
+    assert_eq!(new_pos, expected, "auto_restake should compound rewards");
+
+    // Pending reward should be zero after compounding
+    let after_pending = f.vault.calc_pending_reward(&f.alice);
+    assert_eq!(after_pending, 0, "no pending rewards after compound");
+}
+
+/// When auto_restake is disabled (the default), rewards should NOT transfer out automatically.
+/// They remain accrued and must be claimed explicitly.
+#[test]
+fn test_auto_restake_off_transfers_reward_normally() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &2_000_000);
+    f.token_admin.mint(&f.admin, &10_000_000);
+    f.vault.fund_reward_pool(&f.admin, &10_000_000);
+
+    f.vault.stake(&f.alice, &1_000_000);
+    let initial_pos = f.vault.position_of(&f.alice).unwrap().amount;
+
+    // auto_restake is off by default
+    assert!(!f.vault.is_auto_restake_enabled(&f.alice));
+
+    set_ledger(&f.env, 10_000);
+    let pending = f.vault.calc_pending_reward(&f.alice);
+    assert!(pending > 0);
+
+    // Stake more — rewards should remain accrued, not transferred or compounded
+    f.vault.stake(&f.alice, &1_000_000);
+
+    // Position should be: initial + new_stake (no reward compounding)
+    let new_pos = f.vault.position_of(&f.alice).unwrap().amount;
+    assert_eq!(
+        new_pos,
+        initial_pos + 1_000_000,
+        "no auto-compound when off"
+    );
+
+    // Pending reward should still be available to claim explicitly
+    let still_pending = f.vault.calc_pending_reward(&f.alice);
+    assert!(
+        still_pending > 0,
+        "reward remains accrued for explicit claim"
+    );
+}
+
+/// User can toggle auto_restake on and off mid-position.
+#[test]
+fn test_auto_restake_toggle_mid_position() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &3_000_000);
+    f.token_admin.mint(&f.admin, &10_000_000);
+    f.vault.fund_reward_pool(&f.admin, &10_000_000);
+
+    f.vault.stake(&f.alice, &1_000_000);
+
+    // Start with auto_restake off
+    assert!(!f.vault.is_auto_restake_enabled(&f.alice));
+
+    // Toggle on
+    f.vault.set_auto_restake(&f.alice, &true);
+    assert!(f.vault.is_auto_restake_enabled(&f.alice));
+
+    set_ledger(&f.env, 5_000);
+    f.vault.stake(&f.alice, &1_000_000);
+    // Rewards should have compounded
+
+    // Toggle off
+    f.vault.set_auto_restake(&f.alice, &false);
+    assert!(!f.vault.is_auto_restake_enabled(&f.alice));
+
+    set_ledger(&f.env, 10_000);
+    f.vault.stake(&f.alice, &1_000_000);
+    // Rewards should have transferred out this time
+}
+
+/// When rewards are restaked, total_staked must increase by the restaked amount.
+#[test]
+fn test_auto_restake_reflected_in_total_staked() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&500);
+    f.token_admin.mint(&f.alice, &2_000_000);
+    f.token_admin.mint(&f.admin, &10_000_000);
+    f.vault.fund_reward_pool(&f.admin, &10_000_000);
+
+    f.vault.stake(&f.alice, &1_000_000);
+    let initial_total = f.vault.total_staked();
+
+    f.vault.set_auto_restake(&f.alice, &true);
+
+    set_ledger(&f.env, 10_000);
+    let pending = f.vault.calc_pending_reward(&f.alice);
+    assert!(pending > 0);
+
+    f.vault.stake(&f.alice, &1_000_000);
+
+    let new_total = f.vault.total_staked();
+    let expected_total = initial_total + 1_000_000 + pending;
+    assert_eq!(
+        new_total, expected_total,
+        "total_staked should include compounded reward"
+    );
 }
 
 // ── Issue #132: position_value_in_reward_token ────────────────────────────────
@@ -2944,7 +3113,10 @@ fn test_transfer_position_with_rewards_recipient_inherits_pending_reward() {
 
     // bob can claim the inherited rewards
     let claimed = f.vault.claim(&f.bob);
-    assert!(claimed > 0, "bob should be able to claim alice's inherited rewards");
+    assert!(
+        claimed > 0,
+        "bob should be able to claim alice's inherited rewards"
+    );
 }
 
 #[test]
@@ -3040,8 +3212,14 @@ fn test_staking_efficiency_score_claimed_increases_efficiency() {
 
     let eff = f.vault.staking_efficiency_score(&f.alice);
     assert!(eff.total_claimed > 0, "claimed amount must be recorded");
-    assert!(eff.efficiency_bps > 0, "efficiency must be positive after claiming");
-    assert!(eff.efficiency_bps <= 10_000, "efficiency must not exceed 10000 bps");
+    assert!(
+        eff.efficiency_bps > 0,
+        "efficiency must be positive after claiming"
+    );
+    assert!(
+        eff.efficiency_bps <= 10_000,
+        "efficiency must not exceed 10000 bps"
+    );
 }
 
 #[test]
@@ -3057,7 +3235,12 @@ fn test_staking_efficiency_score_never_exceeds_10000_bps() {
     f.vault.claim(&f.alice);
 
     let eff = f.vault.staking_efficiency_score(&f.alice);
-    assert!(eff.efficiency_bps <= 10_000, "efficiency is capped at 10_000 bps");
+    assert!(
+        eff.efficiency_bps <= 10_000,
+        "efficiency is capped at 10_000 bps"
+    );
+}
+
 // ── Issue #114: get_changelog ────────────────────────────────────────────────
 
 #[test]

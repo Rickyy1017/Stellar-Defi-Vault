@@ -315,6 +315,8 @@ pub struct StakingEfficiency {
     pub total_claimed: i128,
     pub estimated_if_compounded: i128,
     pub efficiency_bps: i128,
+}
+
 // ── Issue #114: on-chain changelog ───────────────────────────────────────────
 
 /// One entry in the rolling admin configuration changelog (issue #114).
