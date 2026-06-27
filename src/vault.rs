@@ -11,8 +11,9 @@ use crate::{
         StakeStreak, StakingEfficiency, UnbondingPosition, UnstakeCheckResult, UserStats,
         UserSummary,
         CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
-        LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary, VestingEntry,
+        LeaderboardEntry, PoolConfig, PoolStats, RateHistoryEntry, StakeAction, StakeHistoryEntry,
+        StakePosition, StakeStreak, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary,
+        VestingEntry,
     },
 };
 
@@ -3939,6 +3940,62 @@ impl VaultContract {
             estimated_if_compounded,
             efficiency_bps,
         })
+    }
+
+    // ── Issue #118: relayer approval ─────────────────────────────────────────
+
+    /// Approve a relayer address to claim rewards on behalf of the caller.
+    ///
+    /// A user can have at most one approved relayer — calling this again
+    /// overwrites the previous approval. The user must sign this transaction.
+    pub fn approve_relayer(env: Env, user: Address, relayer: Address) -> Result<(), VaultError> {
+        user.require_auth();
+        balance::set_approved_relayer(&env, &user, &relayer);
+        events::relayer_approved(&env, &user, &relayer);
+        Ok(())
+    }
+
+    /// Revoke a previously approved relayer for the caller.
+    ///
+    /// After revocation, the relayer can no longer call `claim_on_behalf` for
+    /// this user. The user must sign this transaction.
+    pub fn revoke_relayer(env: Env, user: Address, relayer: Address) -> Result<(), VaultError> {
+        user.require_auth();
+        balance::remove_approved_relayer(&env, &user);
+        events::relayer_revoked(&env, &user, &relayer);
+        Ok(())
+    }
+
+    /// Read-only query: returns whether `relayer` is the approved relayer for `user`.
+    pub fn is_approved_relayer(env: Env, user: Address, relayer: Address) -> bool {
+        balance::get_approved_relayer(&env, &user)
+            .map(|r| r == relayer)
+            .unwrap_or(false)
+    }
+
+    /// Claim staking rewards on behalf of `user`, sending the reward to `user`.
+    ///
+    /// The caller (`relayer`) must be the approved relayer for `user`. Only
+    /// the relayer needs to sign — the user does not need to co-sign. The
+    /// reward is always transferred to `user`, never to the relayer.
+    pub fn claim_on_behalf(env: Env, relayer: Address, user: Address) -> Result<i128, VaultError> {
+        relayer.require_auth();
+
+        // Verify the caller is the approved relayer for this user.
+        let approved = balance::get_approved_relayer(&env, &user)
+            .ok_or(VaultError::RelayerNotApproved)?;
+        if approved != relayer {
+            return Err(VaultError::RelayerNotApproved);
+        }
+
+        // Reuse the standard claim logic (which sends reward to `user`).
+        let reward = Self::do_claim(&env, &user)?;
+
+        if reward > 0 {
+            events::claimed_on_behalf(&env, &relayer, &user, reward);
+        }
+
+        Ok(reward)
     }
 
 }
