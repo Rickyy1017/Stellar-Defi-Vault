@@ -218,6 +218,13 @@ impl VaultContract {
         Self::build_position(&env, &user)
     }
 
+    /// Check whether a user has an active stake position.
+    pub fn has_position(env: Env, user: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::StakedAtLedger(user))
+    }
+
     /// Returns positions for a list of addresses in a single contract call.
     ///
     /// Results are returned in the same order as the input list. `None` is returned

@@ -192,6 +192,19 @@ fn test_contract_balance_equals_staked_amount() {
 }
 
 #[test]
+fn test_has_position_returns_false_for_no_position() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.has_position(&f.bob), false);
+}
+
+#[test]
+fn test_has_position_returns_true_after_stake() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    assert_eq!(f.vault.has_position(&f.alice), true);
+}
+
+#[test]
 fn test_deposit_zero_fails() {
     let f = VaultFixture::new();
     let result = f.vault.try_deposit(&f.alice, &0);
