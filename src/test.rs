@@ -185,6 +185,13 @@ fn test_first_deposit_mints_1to1_shares() {
 }
 
 #[test]
+fn test_contract_balance_equals_staked_amount() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    assert_eq!(f.vault.contract_balance(), 100_000);
+}
+
+#[test]
 fn test_deposit_zero_fails() {
     let f = VaultFixture::new();
     let result = f.vault.try_deposit(&f.alice, &0);

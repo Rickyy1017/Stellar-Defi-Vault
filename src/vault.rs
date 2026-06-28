@@ -266,6 +266,17 @@ impl VaultContract {
         Ok(balance::get_total_shares(&env))
     }
 
+    /// Read-only query for the contract's current stake token balance.
+    pub fn contract_balance(env: Env) -> Result<i128, VaultError> {
+        let stake_token = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        let token_client = token::Client::new(&env, &stake_token);
+        Ok(token_client.balance(&env.current_contract_address()))
+    }
+
     /// Read-only query for the total rewards paid out since deployment.
     pub fn total_rewards_paid(env: Env) -> i128 {
         balance::get_total_rewards_paid(&env)
