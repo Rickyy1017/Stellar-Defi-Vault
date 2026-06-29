@@ -365,3 +365,12 @@ pub fn yield_source_removed(env: &Env, admin: &Address, source: &Address) {
     env.events()
         .publish(topics, (source.clone(), env.ledger().sequence()));
 }
+
+// ── Issue #157: pool name events ──────────────────────────────────────────────
+
+/// Emitted when the admin sets or updates the pool name via `set_pool_name`.
+pub fn pool_name_updated(env: &Env, admin: &Address, name: &soroban_sdk::String) {
+    let topics = (symbol_short!("nm_upd"), admin);
+    env.events()
+        .publish(topics, (name.clone(), env.ledger().sequence()));
+}
