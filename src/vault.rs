@@ -3972,7 +3972,7 @@ impl VaultContract {
             &(current_epoch_state.epoch_number - 1),
         );
 
-        events::claimed(&env, &user, total_accumulated);
+        events::claimed(&env, &user, total_accumulated, env.ledger().sequence());
         Ok(total_accumulated)
     }
 
@@ -3981,6 +3981,37 @@ impl VaultContract {
             .instance()
             .get(&DataKey::CurrentEpoch)
             .ok_or(VaultError::NotInitialized)
+    }
+
+    pub fn get_next_epoch_start(env: Env) -> Result<u32, VaultError> {
+        let is_epoch_mode = env
+            .storage()
+            .instance()
+            .get(&DataKey::EpochMode)
+            .unwrap_or(false);
+        if !is_epoch_mode {
+            return Err(VaultError::NotInEpochMode);
+        }
+
+        let state: EpochState = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentEpoch)
+            .ok_or(VaultError::NotInitialized)?;
+
+        let epoch_ledgers = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::EpochLedgers)
+            .unwrap_or(0);
+
+        Ok(state.started_at.saturating_add(epoch_ledgers))
+    }
+
+    pub fn ledgers_until_next_epoch(env: Env) -> Result<u32, VaultError> {
+        let next_start = Self::get_next_epoch_start(env.clone())?;
+        let current_ledger = env.ledger().sequence();
+        Ok(next_start.saturating_sub(current_ledger))
     }
 
     // ── Issue #104: interface detection ──────────────────────────────────────
@@ -4361,50 +4392,84 @@ impl VaultContract {
         Ok(())
     }
 
-    // ── Issue #117: pool_uptime_ledgers ───────────────────────────────────────
+    // ── Issue #118: relayer approval ─────────────────────────────────────────────
 
-    /// Read-only query for how many ledgers the pool has been active.
-    ///
-    /// Returns `current_ledger - initialized_at_ledger`. Approximate days:
-    /// `uptime_ledgers / 17280` (assuming ~5 s per ledger). Reverts with
-    /// `NotInitialized` if `initialize` has not been called. No auth required.
-    pub fn pool_uptime_ledgers(env: Env) -> Result<u32, VaultError> {
-        let initialized_at =
-            balance::get_initialized_at_ledger(&env).ok_or(VaultError::NotInitialized)?;
-        Ok(env.ledger().sequence().saturating_sub(initialized_at))
+    pub fn approve_relayer(env: Env, user: Address, relayer: Address) {
+        user.require_auth();
+        balance::set_approved_relayer(&env, &user, &relayer);
+        events::relayer_approved(&env, &user, &relayer);
     }
 
-    // ── Custom error messages (frontend metadata) ────────────────────────────
+    pub fn revoke_relayer(env: Env, user: Address, relayer: Address) {
+        user.require_auth();
+        if let Some(existing) = balance::get_approved_relayer(&env, &user) {
+            if existing == relayer {
+                balance::remove_approved_relayer(&env, &user);
+                events::relayer_revoked(&env, &user, &relayer);
+            }
+        }
+    }
 
-    /// Admin: set a custom human-readable message for a specific error code.
-    ///
-    /// This is purely a metadata layer for frontends to display friendly error
-    /// messages. It does not change contract error behavior. Error codes
-    /// correspond to `VaultError` repr values (e.g., `VaultPaused = 6`).
-    ///
-    /// - Maximum message length: 150 characters (reverts with `MessageTooLong`)
-    /// - Maximum stored messages: 20 (oldest overwritten when exceeded)
-    /// - Admin auth required
-    ///
-    /// Returns `Ok(())` on success.
-    pub fn set_error_message(env: Env, error_code: u32, message: String) -> Result<(), VaultError> {
-        admin::require_admin(&env)?;
+    pub fn is_approved_relayer(env: Env, user: Address, relayer: Address) -> bool {
+        if let Some(existing) = balance::get_approved_relayer(&env, &user) {
+            existing == relayer
+        } else {
+            false
+        }
+    }
 
-        // Validate message length
-        if message.len() as u32 > balance::MAX_ERROR_MESSAGE_LENGTH {
-            return Err(VaultError::MessageTooLong);
+    pub fn claim_on_behalf(env: Env, relayer: Address, user: Address) -> Result<i128, VaultError> {
+        relayer.require_auth();
+
+        if !Self::is_approved_relayer(env.clone(), user.clone(), relayer.clone()) {
+            return Err(VaultError::RelayerNotApproved);
         }
 
-        balance::set_error_message(&env, error_code, &message);
+        let reward = Self::do_claim(&env, &user)?;
+        events::claimed_on_behalf(&env, &relayer, &user, reward);
+        Ok(reward)
+    }
+
+    // ── Issue #126: yield source whitelist and reward notification ────────────
+
+    pub fn add_yield_source(env: Env, source: Address) -> Result<(), VaultError> {
+        let admin = admin::get_admin(&env)?;
+        admin.require_auth();
+        balance::set_yield_source(&env, &source, true);
+        events::yield_source_added(&env, &admin, &source);
         Ok(())
     }
 
-    /// Read-only: get the custom error message for a specific error code.
-    ///
-    /// Returns `None` if no custom message has been set for this error code.
-    /// No auth required.
-    pub fn get_error_message(env: Env, error_code: u32) -> Option<String> {
-        balance::get_error_message(&env, error_code)
+    pub fn remove_yield_source(env: Env, source: Address) -> Result<(), VaultError> {
+        let admin = admin::get_admin(&env)?;
+        admin.require_auth();
+        balance::set_yield_source(&env, &source, false);
+        events::yield_source_removed(&env, &admin, &source);
+        Ok(())
+    }
+
+    pub fn is_yield_source(env: Env, source: Address) -> bool {
+        balance::is_yield_source(&env, &source)
+    }
+
+    pub fn notify_reward_added(env: Env, caller: Address, amount: i128) -> Result<(), VaultError> {
+        caller.require_auth();
+
+        if !balance::is_yield_source(&env, &caller) {
+            return Err(VaultError::NotYieldSource);
+        }
+        if amount <= 0 {
+            return Err(VaultError::InvalidRewardAmount);
+        }
+
+        let new_total = balance::get_total_rewards_added(&env).saturating_add(amount);
+        balance::set_total_rewards_added(&env, new_total);
+        events::reward_added(&env, &caller, amount);
+        Ok(())
+    }
+
+    pub fn get_total_rewards_added(env: Env) -> i128 {
+        balance::get_total_rewards_added(&env)
     }
 
 }

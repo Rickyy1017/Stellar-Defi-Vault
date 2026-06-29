@@ -137,11 +137,11 @@ pub enum VaultError {
     /// Returned when an epoch cannot be finalized because the configured window has not elapsed.
     EpochNotFinalized = 44,
     /// Caller is not an approved relayer for the target user (issue #118).
-    RelayerNotApproved = 41,
+    RelayerNotApproved = 45,
     /// Caller is not on the yield source whitelist (issue #126).
-    NotYieldSource = 42,
+    NotYieldSource = 46,
     /// notify_reward_added called with a zero or negative amount (issue #126).
-    InvalidRewardAmount = 43,
-    /// Returned by `set_pool_name()` when the name exceeds 50 characters (issue #157).
-    NameTooLong = 45,
+    InvalidRewardAmount = 47,
+    /// Reverts with NotInEpochMode error if pool is not configured for epoch mode.
+    NotInEpochMode = 48,
 }

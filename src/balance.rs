@@ -648,7 +648,6 @@ pub fn set_auto_restake(env: &Env, user: &Address, enabled: bool) {
 }
 
 // ── Issue #118: relayer approval ─────────────────────────────────────────────
-
 pub fn get_approved_relayer(env: &Env, user: &Address) -> Option<Address> {
     let key = (Symbol::new(env, "app_rlyr"), user.clone());
     env.storage().persistent().get(&key)
@@ -665,7 +664,6 @@ pub fn remove_approved_relayer(env: &Env, user: &Address) {
 }
 
 // ── Issue #124: rich reward-rate history ─────────────────────────────────────
-
 pub const MAX_RICH_RATE_HISTORY: u32 = 20;
 
 pub fn get_reward_rate_history(env: &Env) -> Vec<RateHistoryEntry> {
@@ -682,10 +680,12 @@ pub fn set_reward_rate_history(env: &Env, history: &Vec<RateHistoryEntry>) {
 }
 
 // ── Issue #126: yield source whitelist ───────────────────────────────────────
-
 pub fn is_yield_source(env: &Env, source: &Address) -> bool {
     let key = (Symbol::new(env, "y_source"), source.clone());
-    env.storage().persistent().get(&key).unwrap_or(false)
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(false)
 }
 
 pub fn set_yield_source(env: &Env, source: &Address, approved: bool) {
@@ -705,21 +705,4 @@ pub fn get_total_rewards_added(env: &Env) -> i128 {
 pub fn set_total_rewards_added(env: &Env, total: i128) {
     let key = (Symbol::new(env, "tot_rwds"),);
     env.storage().instance().set(&key, &total);
-}
-
-// ── Governance checkpoints: snapshot_total_staked ────────────────────────────
-
-pub const MAX_STAKED_SNAPSHOTS: u32 = 50;
-
-pub fn get_staked_snapshots(env: &Env) -> Vec<TotalStakedSnapshot> {
-    let key = (Symbol::new(env, "stk_snps"),);
-    env.storage()
-        .instance()
-        .get(&key)
-        .unwrap_or_else(|| Vec::new(env))
-}
-
-pub fn set_staked_snapshots(env: &Env, snapshots: &Vec<TotalStakedSnapshot>) {
-    let key = (Symbol::new(env, "stk_snps"),);
-    env.storage().instance().set(&key, snapshots);
 }
