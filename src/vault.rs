@@ -6,10 +6,10 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
-        LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, StakingEfficiencyScore, UnbondingPosition, UnstakeCheckResult, UserStats,
-        UserSummary, VestingEntry, EpochState,
+        BoostTierProgress, CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey,
+        InterfaceId, LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry,
+        StakePosition, StakeStreak, StakingEfficiencyScore, UnbondingPosition,
+        UnstakeCheckResult, UserStats, UserSummary, VestingEntry, EpochState,
     },
 };
 
@@ -1084,6 +1084,53 @@ impl VaultContract {
             &user,
             env.ledger().sequence(),
         ))
+    }
+
+    /// Read-only: returns how far a user is toward the next boost tier.
+    ///
+    /// Computes the user's elapsed staking ledgers and walks the boost schedule
+    /// to find which tier they currently qualify for and how many ledgers remain
+    /// until the next one.  No auth required.
+    pub fn get_boost_tier_progress(env: Env, user: Address) -> BoostTierProgress {
+        let schedule = balance::get_boost_schedule(&env).unwrap_or(Vec::new(&env));
+        let current_ledger = env.ledger().sequence();
+
+        let staked_at: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StakedAtLedger(user.clone()))
+            .unwrap_or(current_ledger);
+
+        let elapsed = current_ledger.saturating_sub(staked_at);
+
+        // Walk tiers to find which one the user currently qualifies for
+        let mut current_tier: u32 = 0;
+        let mut current_multiplier_bps: i128 = BOOST_BPS_BASE as i128;
+        let mut next_tier_in_ledgers: Option<u32> = None;
+        let mut next_multiplier_bps: Option<i128> = None;
+
+        let mut i: u32 = 0;
+        while i < schedule.len() {
+            let (tier_threshold, tier_mult) = schedule.get(i).unwrap();
+            if elapsed >= tier_threshold {
+                // User has crossed this tier
+                current_tier = i + 1;
+                current_multiplier_bps = tier_mult as i128;
+            } else {
+                // This is the next tier the user hasn't reached yet
+                next_tier_in_ledgers = Some(tier_threshold.saturating_sub(elapsed));
+                next_multiplier_bps = Some(tier_mult as i128);
+                break;
+            }
+            i += 1;
+        }
+
+        BoostTierProgress {
+            current_tier,
+            current_multiplier_bps,
+            next_tier_in_ledgers,
+            next_multiplier_bps,
+        }
     }
 
     // --- Issue #39: rescue stuck tokens ---

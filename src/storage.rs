@@ -346,3 +346,21 @@ pub struct EpochState {
     pub reward_pool: i128,
     pub total_staked_snapshot: i128,
 }
+
+/// Governance checkpoint: total staked recorded at a specific ledger.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TotalStakedSnapshot {
+    pub total_staked: i128,
+    pub ledger: u32,
+}
+
+/// Progress toward the next reward-boost tier.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoostTierProgress {
+    pub current_tier: u32,
+    pub current_multiplier_bps: i128,
+    pub next_tier_in_ledgers: Option<u32>,
+    pub next_multiplier_bps: Option<i128>,
+}
