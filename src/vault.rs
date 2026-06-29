@@ -6,9 +6,9 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        BoostTierProgress, CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey,
-        InterfaceId, LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry,
-        StakePosition, StakeStreak, StakingEfficiencyScore, UnbondingPosition,
+        CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
+        LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
+        StakeStreak, StakingEfficiencyScore, TotalStakedSnapshot, UnbondingPosition,
         UnstakeCheckResult, UserStats, UserSummary, VestingEntry, EpochState,
     },
 };
@@ -4361,200 +4361,61 @@ impl VaultContract {
         Ok(())
     }
 
-    // ── Issue #154: reward drain rate ────────────────────────────────────────
+    // ── Governance checkpoints: snapshot_total_staked ─────────────────────────────
 
-    /// Read-only: token rewards consumed per ledger at current TVL and rate.
+    /// Admin: record the current total staked as a governance checkpoint.
     ///
-    /// Formula: `total_staked * reward_rate_bps / (BPS_DENOMINATOR * LEDGERS_PER_YEAR)`
-    /// Returns 0 when there are no stakers or the reward rate is 0. No auth required.
-    pub fn reward_drain_rate(env: Env) -> i128 {
-        Self::compute_reward_drain_rate(&env)
-    }
-
-    /// Read-only: estimated ledgers until the reward pool is depleted at the
-    /// current drain rate. Returns `u32::MAX` when the drain rate is 0 (pool
-    /// will never empty). No auth required.
-    pub fn ledgers_until_empty(env: Env) -> u32 {
-        let drain_rate = Self::compute_reward_drain_rate(&env);
-        if drain_rate == 0 {
-            return u32::MAX;
-        }
-        let token_addr = match env.storage().instance().get::<_, Address>(&DataKey::Token) {
-            Some(a) => a,
-            None => return u32::MAX,
-        };
-        let balance = token::Client::new(&env, &token_addr).balance(&env.current_contract_address());
-        if balance <= 0 {
-            return 0;
-        }
-        let ledgers = balance / drain_rate;
-        if ledgers > u32::MAX as i128 {
-            u32::MAX
-        } else {
-            ledgers as u32
-        }
-    }
-
-    fn compute_reward_drain_rate(env: &Env) -> i128 {
-        let total_staked = balance::get_total_deposited(env);
-        let rate_bps = balance::get_reward_rate_bps(env);
-        if total_staked == 0 || rate_bps == 0 {
-            return 0;
-        }
-        total_staked
-            .checked_mul(rate_bps as i128)
-            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
-            .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
-            .unwrap_or(0)
-    }
-
-    // ── Issue #155: admin-configurable token decimals ─────────────────────────
-
-    /// Admin: update the decimal precision of the stake and reward tokens.
-    ///
-    /// Both values default to 7 (Stellar standard) when not explicitly set.
-    /// Use this to correct the initial values or to support pools whose tokens
-    /// use non-standard decimal counts.
-    pub fn set_token_decimals(
-        env: Env,
-        admin: Address,
-        stake_decimals: u32,
-        reward_decimals: u32,
-    ) -> Result<(), VaultError> {
-        admin::require_admin(&env)?;
-        let _ = admin;
-        balance::set_stake_decimals(&env, stake_decimals);
-        balance::set_reward_decimals(&env, reward_decimals);
-        Ok(())
-    }
-
-    /// Read-only: returns `(stake_decimals, reward_decimals)` configured for this pool.
-    /// Both values default to 7 (Stellar standard) when not explicitly set.
-    pub fn get_token_decimals(env: Env) -> (u32, u32) {
-        (
-            balance::get_stake_decimals(&env),
-            balance::get_reward_decimals(&env),
-        )
-    }
-
-    // ── Issue #156: cooldown progress ────────────────────────────────────────
-
-    /// Read-only: how far through the unbonding cooldown the user is, in basis
-    /// points (0–10000, where 10000 = 100% = cooldown fully elapsed).
-    ///
-    /// Returns 0 when the user has no pending unbonding position or when the
-    /// cooldown period is 0. Returns 10000 when the cooldown has fully elapsed.
-    /// No auth required.
-    pub fn cooldown_progress(env: Env, user: Address) -> u32 {
-        let cooldown: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::CooldownPeriod)
-            .unwrap_or(0);
-        if cooldown == 0 {
-            return 0;
-        }
-        let pos: Option<UnbondingPosition> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::UnbondingPosition(user));
-        match pos {
-            None => 0,
-            Some(p) => {
-                let current = env.ledger().sequence();
-                let end_ledger = p.unbonding_since.saturating_add(cooldown);
-                if current >= end_ledger {
-                    10_000
-                } else {
-                    let elapsed = current.saturating_sub(p.unbonding_since);
-                    ((elapsed as u64) * 10_000 / (cooldown as u64)) as u32
-                }
-            }
-        }
-    }
-
-    // ── Issue #157: pool name ─────────────────────────────────────────────────
-
-    /// Admin: set a short human-readable name for this pool (max 50 characters).
-    ///
-    /// The name is stored in instance storage and can be queried by anyone via
-    /// `get_pool_name`. Emits a `pool_name_updated` event on every change.
-    /// Reverts with `NameTooLong` when the name exceeds 50 characters.
-    pub fn set_pool_name(
-        env: Env,
-        admin: Address,
-        name: String,
-    ) -> Result<(), VaultError> {
-        admin::require_admin(&env)?;
-        let _ = admin;
-        if name.len() > 50 {
-            return Err(VaultError::NameTooLong);
-        }
-        env.storage().instance().set(&DataKey::PoolName, &name);
-        let admin_addr = admin::get_admin(&env)?;
-        events::pool_name_updated(&env, &admin_addr, &name);
-        Ok(())
-    }
-
-    /// Read-only: returns the pool name set by the admin, or `None` if never set.
-    pub fn get_pool_name(env: Env) -> Option<String> {
-        env.storage().instance().get(&DataKey::PoolName)
-    }
-
-    // ── Reward refill alert helper ─────────────────────────────────────────────
-
-    /// Number of ledgers that make up the refill alert threshold (30 days).
-    fn refill_alert_threshold_ledgers() -> u32 {
-        REFILL_ALERT_DAYS * LEDGERS_PER_DAY
-    }
-
-    /// Check runway and emit a `refill_alert` event when below 30 days,
-    /// rate-limited to at most once per day (17 280 ledgers).
-    fn check_refill_alert(env: &Env) {
-        let runway = Self::compute_runway(env);
-        if runway >= Self::refill_alert_threshold_ledgers() {
-            return;
-        }
+    /// Appends a `TotalStakedSnapshot { total_staked, ledger }` to instance
+    /// storage.  The list is capped at 50 entries; if the cap is exceeded the
+    /// oldest entry is dropped.  Requires admin auth.
+    pub fn take_snapshot(env: Env) -> Result<(), VaultError> {
+        let admin = admin::get_admin(&env)?;
+        admin.require_auth();
 
         let current_ledger = env.ledger().sequence();
-        let last_alert: u32 = env
-            .storage()
-            .instance()
-            .get(&symbol_short!("lstalt"))
-            .unwrap_or(0);
+        let total_staked = balance::get_total_deposited(&env);
 
-        // Emit at most once per day
-        if current_ledger.saturating_sub(last_alert) < LEDGERS_PER_DAY {
-            return;
+        let mut snapshots = balance::get_staked_snapshots(&env);
+        snapshots.push_back(TotalStakedSnapshot {
+            total_staked,
+            ledger: current_ledger,
+        });
+
+        while snapshots.len() > balance::MAX_STAKED_SNAPSHOTS {
+            snapshots.pop_front();
         }
 
-        // Read reward pool balance for the event payload
-        let reward_balance = balance::get_reward_pool_balance(env);
-
-        events::refill_alert(env, reward_balance, runway, current_ledger);
-
-        env.storage()
-            .instance()
-            .set(&symbol_short!("lstalt"), &current_ledger);
+        balance::set_staked_snapshots(&env, &snapshots);
+        Ok(())
     }
 
-    /// Internal runway computation (ledgers until reward pool depleted).
-    /// Returns `u32::MAX` when drain rate is zero.
-    fn compute_runway(env: &Env) -> u32 {
-        let drain_rate = Self::compute_reward_drain_rate(env);
-        if drain_rate == 0 {
-            return u32::MAX;
+    /// Read-only: returns the nearest snapshot at or before `ledger`.
+    ///
+    /// Scans from the end (most recent) towards the front and returns the first
+    /// entry whose `ledger` field is ≤ the requested ledger.  Returns `None`
+    /// if no snapshot has been taken yet or all recorded ledgers are after the
+    /// requested one.
+    pub fn get_snapshot_at(env: Env, ledger: u32) -> Option<TotalStakedSnapshot> {
+        let snapshots = balance::get_staked_snapshots(&env);
+        let len = snapshots.len();
+        if len == 0 {
+            return None;
         }
-        let reward_pool = balance::get_reward_pool_balance(env);
-        if reward_pool <= 0 {
-            return 0;
+        // Iterate from newest to oldest
+        let mut i = len;
+        while i > 0 {
+            i -= 1;
+            let snap = snapshots.get(i).unwrap();
+            if snap.ledger <= ledger {
+                return Some(snap);
+            }
         }
-        let ledgers = reward_pool / drain_rate;
-        if ledgers > u32::MAX as i128 {
-            u32::MAX
-        } else {
-            ledgers as u32
-        }
+        None
+    }
+
+    /// Read-only: returns the full snapshot history, oldest first.
+    pub fn get_all_snapshots(env: Env) -> Vec<TotalStakedSnapshot> {
+        balance::get_staked_snapshots(&env)
     }
 
 }
