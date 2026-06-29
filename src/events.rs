@@ -1,28 +1,27 @@
 use crate::storage::AdminAction;
 use soroban_sdk::{symbol_short, Address, Env};
 
-pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128) {
+pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128, ledger: u32) {
     let topics = (symbol_short!("deposit"), depositor);
-    env.events()
-        .publish(topics, (amount, shares_minted, env.ledger().sequence()));
+    env.events().publish(topics, (amount, shares_minted, ledger));
 }
 
-pub fn withdraw(env: &Env, withdrawer: &Address, shares_burned: i128, amount_returned: i128) {
+pub fn withdraw(env: &Env, withdrawer: &Address, shares_burned: i128, amount_returned: i128, ledger: u32) {
     let topics = (symbol_short!("withdraw"), withdrawer);
     env.events().publish(
         topics,
-        (shares_burned, amount_returned, env.ledger().sequence()),
+        (shares_burned, amount_returned, ledger),
     );
 }
 
-pub fn paused(env: &Env, admin: &Address) {
+pub fn paused(env: &Env, admin: &Address, ledger: u32) {
     let topics = (symbol_short!("paused"), admin);
-    env.events().publish(topics, (env.ledger().sequence(),));
+    env.events().publish(topics, (ledger,));
 }
 
-pub fn unpaused(env: &Env, admin: &Address) {
+pub fn unpaused(env: &Env, admin: &Address, ledger: u32) {
     let topics = (symbol_short!("unpaused"), admin);
-    env.events().publish(topics, (env.ledger().sequence(),));
+    env.events().publish(topics, (ledger,));
 }
 
 pub fn yield_added(env: &Env, admin: &Address, amount: i128) {
@@ -247,10 +246,10 @@ pub fn campaign_ended(env: &Env, admin: &Address) {
 }
 
 /// Emitted when a user claims staking rewards (via `claim` or `stake_and_claim`).
-pub fn claimed(env: &Env, user: &Address, reward: i128) {
+pub fn claimed(env: &Env, user: &Address, reward: i128, ledger: u32) {
     let topics = (symbol_short!("claimed"), user);
     env.events()
-        .publish(topics, (reward, env.ledger().sequence()));
+        .publish(topics, (reward, ledger));
 }
 
 /// Emitted by `initialize` so indexers can detect new pool deployments on-chain.

@@ -230,6 +230,13 @@ impl VaultContract {
         Self::build_position(&env, &user)
     }
 
+    /// Check whether a user has an active stake position.
+    pub fn has_position(env: Env, user: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::StakedAtLedger(user))
+    }
+
     /// Returns positions for a list of addresses in a single contract call.
     ///
     /// Results are returned in the same order as the input list. `None` is returned
@@ -276,6 +283,17 @@ impl VaultContract {
     pub fn total_staked(env: Env) -> Result<i128, VaultError> {
         let _ = admin::get_admin(&env)?;
         Ok(balance::get_total_shares(&env))
+    }
+
+    /// Read-only query for the contract's current stake token balance.
+    pub fn contract_balance(env: Env) -> Result<i128, VaultError> {
+        let stake_token = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        let token_client = token::Client::new(&env, &stake_token);
+        Ok(token_client.balance(&env.current_contract_address()))
     }
 
     /// Read-only query for the total rewards paid out since deployment.
@@ -350,7 +368,7 @@ impl VaultContract {
         Self::require_not_stopped(&env)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         let admin = admin::get_admin(&env)?;
-        events::paused(&env, &admin);
+        events::paused(&env, &admin, env.ledger().sequence());
         events::admin_action_pause(&env, &admin);
         balance::increment_admin_action_count(&env);
         balance::set_last_updated_ledger(&env, env.ledger().sequence()); // Issue #69
@@ -365,7 +383,7 @@ impl VaultContract {
         Self::require_not_stopped(&env)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         let admin = admin::get_admin(&env)?;
-        events::unpaused(&env, &admin);
+        events::unpaused(&env, &admin, env.ledger().sequence());
         events::admin_action_unpause(&env, &admin);
         balance::increment_admin_action_count(&env);
         balance::set_last_updated_ledger(&env, env.ledger().sequence()); // Issue #69
@@ -1390,7 +1408,7 @@ impl VaultContract {
         Self::record_stake_snapshot(&env, &beneficiary, new_shares);
         Self::update_leaderboard(&env, &beneficiary, new_shares);
 
-        events::deposit(&env, &beneficiary, amount, shares);
+        events::deposit(&env, &beneficiary, amount, shares, env.ledger().sequence());
 
         Ok(shares)
     }
@@ -2213,7 +2231,7 @@ impl VaultContract {
         Self::update_leaderboard(env, staker, new_shares);
         Self::append_stake_history(env, staker, StakeAction::Stake, amount);
 
-        events::deposit(env, staker, amount, shares);
+        events::deposit(env, staker, amount, shares, env.ledger().sequence());
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
 
         Ok(shares)
@@ -2366,7 +2384,7 @@ impl VaultContract {
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &amount_returned);
 
-        events::withdraw(env, staker, shares, amount_returned);
+        events::withdraw(env, staker, shares, amount_returned, env.ledger().sequence());
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
 
         // Issue #129: auto-pause if reward balance drops below threshold
@@ -3065,10 +3083,7 @@ impl VaultContract {
         let paid = balance::get_total_rewards_paid(env);
         balance::set_total_rewards_paid(env, paid + reward);
 
-        // Issue #135: track per-user cumulative claimed for staking_efficiency_score
-        balance::add_user_total_claimed(env, staker, reward);
-
-        events::claimed(env, staker, reward);
+        events::claimed(env, staker, reward, env.ledger().sequence());
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
 
         // Issue #129: auto-pause if reward balance drops below threshold
@@ -3170,7 +3185,7 @@ impl VaultContract {
         }
         Self::record_stake_snapshot(env, staker, new_shares);
 
-        events::deposit(env, staker, amount, shares);
+        events::deposit(env, staker, amount, shares, env.ledger().sequence());
 
         Ok(shares)
     }

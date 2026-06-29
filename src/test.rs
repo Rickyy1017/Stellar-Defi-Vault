@@ -193,6 +193,26 @@ fn test_first_deposit_mints_1to1_shares() {
 }
 
 #[test]
+fn test_contract_balance_equals_staked_amount() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    assert_eq!(f.vault.contract_balance(), 100_000);
+}
+
+#[test]
+fn test_has_position_returns_false_for_no_position() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.has_position(&f.bob), false);
+}
+
+#[test]
+fn test_has_position_returns_true_after_stake() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    assert_eq!(f.vault.has_position(&f.alice), true);
+}
+
+#[test]
 fn test_deposit_zero_fails() {
     let f = VaultFixture::new();
     let result = f.vault.try_deposit(&f.alice, &0);
@@ -516,6 +536,8 @@ fn test_deposit_emits_event() {
         Address::try_from_val(&f.env, &event.1.get(1).unwrap()).unwrap(),
         f.alice
     );
+    let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &event.2).unwrap();
+    let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(2).unwrap()).unwrap();
 }
 
 #[test]
@@ -537,6 +559,8 @@ fn test_withdraw_emits_event() {
         Address::try_from_val(&f.env, &event.1.get(1).unwrap()).unwrap(),
         f.alice
     );
+    let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &event.2).unwrap();
+    let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(2).unwrap()).unwrap();
 }
 
 #[test]
@@ -552,6 +576,8 @@ fn test_pause_emits_event() {
         .collect();
 
     assert_eq!(paused_events.len(), 1);
+    let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &paused_events[0].2).unwrap();
+    let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(0).unwrap()).unwrap();
 }
 
 #[test]
@@ -568,6 +594,28 @@ fn test_unpause_emits_event() {
         .collect();
 
     assert_eq!(unpaused_events.len(), 1);
+    let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &unpaused_events[0].2).unwrap();
+    let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(0).unwrap()).unwrap();
+}
+
+#[test]
+fn test_claim_emits_event() {
+    let f = VaultFixture::new();
+    setup_reward_pool(&f);
+
+    f.vault.stake(&f.alice, &1_000_000);
+    set_ledger(&f.env, STELLAR_LEDGERS_PER_YEAR);
+    f.vault.claim(&f.alice);
+
+    let events = f.env.events().all();
+    let claimed_events: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "claimed"))
+        .collect();
+
+    assert_eq!(claimed_events.len(), 1);
+    let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &claimed_events[0].2).unwrap();
+    let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(1).unwrap()).unwrap();
 }
 
 #[test]
