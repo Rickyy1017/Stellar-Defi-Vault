@@ -2284,6 +2284,16 @@ impl VaultContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::StakedAtLedger(staker.clone()), &current_ledger);
+            // Write-once: record the very first time this address ever staked.
+            if !env
+                .storage()
+                .persistent()
+                .has(&DataKey::FirstStakedAt(staker.clone()))
+            {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::FirstStakedAt(staker.clone()), &current_ledger);
+            }
             balance::set_last_claim_ledger(env, staker, current_ledger);
             let total_stakers = balance::get_total_stakers(env);
             balance::set_total_stakers(env, total_stakers + 1);
@@ -4060,6 +4070,21 @@ impl VaultContract {
             .instance()
             .get(&DataKey::ShuttingDown)
             .unwrap_or(false)
+    }
+
+    /// Returns the ledger sequence at which `user` first ever opened a staking
+    /// position, or `None` if the user has never staked.
+    ///
+    /// This value is write-once: it is recorded on the user's very first stake
+    /// and never updated on subsequent top-ups or re-entries after a full exit.
+    /// Contrast with `staked_at_ledger` inside `StakePosition`, which resets
+    /// every time the user opens a new position.
+    ///
+    /// No auth required.
+    pub fn staker_joined_at(env: Env, user: Address) -> Option<u32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::FirstStakedAt(user))
     }
 
     // ── Issue #98: can_unstake pre-flight check ────────────────────────────────

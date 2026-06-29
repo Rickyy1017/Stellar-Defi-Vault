@@ -3880,3 +3880,36 @@ fn test_graceful_shutdown_non_admin_rejected() {
     assert!(result.is_err());
     assert!(!f.vault.is_shutting_down());
 }
+
+// ── staker_joined_at tests ────────────────────────────────────────────────────
+
+#[test]
+fn test_staker_joined_at_records_first_stake_ledger() {
+    let f = VaultFixture::new();
+    set_ledger(&f.env, 500);
+    f.vault.stake(&f.alice, &1_000_000);
+    assert_eq!(f.vault.staker_joined_at(&f.alice), Some(500));
+}
+
+#[test]
+fn test_staker_joined_at_not_overwritten_after_full_exit_and_reentry() {
+    let f = VaultFixture::new();
+    set_ledger(&f.env, 200);
+    f.vault.stake(&f.alice, &1_000_000);
+
+    // Full exit.
+    f.vault.unstake(&f.alice, &1_000_000);
+
+    // Re-enter at a much later ledger.
+    set_ledger(&f.env, 10_000);
+    f.vault.stake(&f.alice, &500_000);
+
+    // Original join ledger must be preserved.
+    assert_eq!(f.vault.staker_joined_at(&f.alice), Some(200));
+}
+
+#[test]
+fn test_staker_joined_at_returns_none_for_never_staked() {
+    let f = VaultFixture::new();
+    assert_eq!(f.vault.staker_joined_at(&f.bob), None);
+}
