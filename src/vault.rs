@@ -1629,13 +1629,33 @@ impl VaultContract {
             return 0;
         }
 
-        position
+        let raw = position
             .amount
             .checked_mul(rate_bps as i128)
             .and_then(|v| v.checked_mul(LEDGERS_PER_DAY as i128))
             .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
             .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::normalize_to_reward_decimals(&env, raw).unwrap_or(raw)
+    }
+
+    /// Estimated annual reward for the user at the current APR, normalized to reward
+    /// token decimals. Returns 0 when there is no position or rate is 0.
+    pub fn get_estimated_annual_reward(env: Env, user: Address) -> i128 {
+        let position = match Self::build_position(&env, &user).ok().flatten() {
+            Some(p) => p,
+            None => return 0,
+        };
+        let rate_bps = balance::get_reward_rate_bps(&env);
+        if rate_bps == 0 {
+            return 0;
+        }
+        let raw = position
+            .amount
+            .checked_mul(rate_bps as i128)
+            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
+            .unwrap_or(0);
+        Self::normalize_to_reward_decimals(&env, raw).unwrap_or(raw)
     }
 
     // --- Boost campaign (#48) ---
@@ -4287,6 +4307,146 @@ impl VaultContract {
         events::positions_merged(&env, &user, 1, total_amount);
 
         Ok(())
+    }
+
+    // ── Issue #154: reward drain rate ────────────────────────────────────────
+
+    /// Read-only: token rewards consumed per ledger at current TVL and rate.
+    ///
+    /// Formula: `total_staked * reward_rate_bps / (BPS_DENOMINATOR * LEDGERS_PER_YEAR)`
+    /// Returns 0 when there are no stakers or the reward rate is 0. No auth required.
+    pub fn reward_drain_rate(env: Env) -> i128 {
+        Self::compute_reward_drain_rate(&env)
+    }
+
+    /// Read-only: estimated ledgers until the reward pool is depleted at the
+    /// current drain rate. Returns `u32::MAX` when the drain rate is 0 (pool
+    /// will never empty). No auth required.
+    pub fn ledgers_until_empty(env: Env) -> u32 {
+        let drain_rate = Self::compute_reward_drain_rate(&env);
+        if drain_rate == 0 {
+            return u32::MAX;
+        }
+        let token_addr = match env.storage().instance().get::<_, Address>(&DataKey::Token) {
+            Some(a) => a,
+            None => return u32::MAX,
+        };
+        let balance = token::Client::new(&env, &token_addr).balance(&env.current_contract_address());
+        if balance <= 0 {
+            return 0;
+        }
+        let ledgers = balance / drain_rate;
+        if ledgers > u32::MAX as i128 {
+            u32::MAX
+        } else {
+            ledgers as u32
+        }
+    }
+
+    fn compute_reward_drain_rate(env: &Env) -> i128 {
+        let total_staked = balance::get_total_deposited(env);
+        let rate_bps = balance::get_reward_rate_bps(env);
+        if total_staked == 0 || rate_bps == 0 {
+            return 0;
+        }
+        total_staked
+            .checked_mul(rate_bps as i128)
+            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
+            .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
+            .unwrap_or(0)
+    }
+
+    // ── Issue #155: admin-configurable token decimals ─────────────────────────
+
+    /// Admin: update the decimal precision of the stake and reward tokens.
+    ///
+    /// Both values default to 7 (Stellar standard) when not explicitly set.
+    /// Use this to correct the initial values or to support pools whose tokens
+    /// use non-standard decimal counts.
+    pub fn set_token_decimals(
+        env: Env,
+        admin: Address,
+        stake_decimals: u32,
+        reward_decimals: u32,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+        balance::set_stake_decimals(&env, stake_decimals);
+        balance::set_reward_decimals(&env, reward_decimals);
+        Ok(())
+    }
+
+    /// Read-only: returns `(stake_decimals, reward_decimals)` configured for this pool.
+    /// Both values default to 7 (Stellar standard) when not explicitly set.
+    pub fn get_token_decimals(env: Env) -> (u32, u32) {
+        (
+            balance::get_stake_decimals(&env),
+            balance::get_reward_decimals(&env),
+        )
+    }
+
+    // ── Issue #156: cooldown progress ────────────────────────────────────────
+
+    /// Read-only: how far through the unbonding cooldown the user is, in basis
+    /// points (0–10000, where 10000 = 100% = cooldown fully elapsed).
+    ///
+    /// Returns 0 when the user has no pending unbonding position or when the
+    /// cooldown period is 0. Returns 10000 when the cooldown has fully elapsed.
+    /// No auth required.
+    pub fn cooldown_progress(env: Env, user: Address) -> u32 {
+        let cooldown: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CooldownPeriod)
+            .unwrap_or(0);
+        if cooldown == 0 {
+            return 0;
+        }
+        let pos: Option<UnbondingPosition> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UnbondingPosition(user));
+        match pos {
+            None => 0,
+            Some(p) => {
+                let current = env.ledger().sequence();
+                let end_ledger = p.unbonding_since.saturating_add(cooldown);
+                if current >= end_ledger {
+                    10_000
+                } else {
+                    let elapsed = current.saturating_sub(p.unbonding_since);
+                    ((elapsed as u64) * 10_000 / (cooldown as u64)) as u32
+                }
+            }
+        }
+    }
+
+    // ── Issue #157: pool name ─────────────────────────────────────────────────
+
+    /// Admin: set a short human-readable name for this pool (max 50 characters).
+    ///
+    /// The name is stored in instance storage and can be queried by anyone via
+    /// `get_pool_name`. Emits a `pool_name_updated` event on every change.
+    /// Reverts with `NameTooLong` when the name exceeds 50 characters.
+    pub fn set_pool_name(
+        env: Env,
+        admin: Address,
+        name: String,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+        if name.len() > 50 {
+            return Err(VaultError::NameTooLong);
+        }
+        env.storage().instance().set(&DataKey::PoolName, &name);
+        let admin_addr = admin::get_admin(&env)?;
+        events::pool_name_updated(&env, &admin_addr, &name);
+        Ok(())
+    }
+
+    /// Read-only: returns the pool name set by the admin, or `None` if never set.
+    pub fn get_pool_name(env: Env) -> Option<String> {
+        env.storage().instance().get(&DataKey::PoolName)
     }
 
 }
