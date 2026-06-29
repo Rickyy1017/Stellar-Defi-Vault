@@ -582,3 +582,63 @@ pub fn set_auto_restake(env: &Env, user: &Address, enabled: bool) {
     let key = (Symbol::new(env, "auto_rst"), user.clone());
     env.storage().persistent().set(&key, &enabled);
 }
+
+// ── Issue #118: relayer approval ─────────────────────────────────────────────
+pub fn get_approved_relayer(env: &Env, user: &Address) -> Option<Address> {
+    let key = (Symbol::new(env, "app_rlyr"), user.clone());
+    env.storage().persistent().get(&key)
+}
+
+pub fn set_approved_relayer(env: &Env, user: &Address, relayer: &Address) {
+    let key = (Symbol::new(env, "app_rlyr"), user.clone());
+    env.storage().persistent().set(&key, relayer);
+}
+
+pub fn remove_approved_relayer(env: &Env, user: &Address) {
+    let key = (Symbol::new(env, "app_rlyr"), user.clone());
+    env.storage().persistent().remove(&key);
+}
+
+// ── Issue #124: rich reward-rate history ─────────────────────────────────────
+pub const MAX_RICH_RATE_HISTORY: u32 = 20;
+
+pub fn get_reward_rate_history(env: &Env) -> Vec<RateHistoryEntry> {
+    let key = (Symbol::new(env, "r_history"),);
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn set_reward_rate_history(env: &Env, history: &Vec<RateHistoryEntry>) {
+    let key = (Symbol::new(env, "r_history"),);
+    env.storage().instance().set(&key, history);
+}
+
+// ── Issue #126: yield source whitelist ───────────────────────────────────────
+pub fn is_yield_source(env: &Env, source: &Address) -> bool {
+    let key = (Symbol::new(env, "y_source"), source.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(false)
+}
+
+pub fn set_yield_source(env: &Env, source: &Address, approved: bool) {
+    let key = (Symbol::new(env, "y_source"), source.clone());
+    if approved {
+        env.storage().persistent().set(&key, &true);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+}
+
+pub fn get_total_rewards_added(env: &Env) -> i128 {
+    let key = (Symbol::new(env, "tot_rwds"),);
+    env.storage().instance().get(&key).unwrap_or(0)
+}
+
+pub fn set_total_rewards_added(env: &Env, total: i128) {
+    let key = (Symbol::new(env, "tot_rwds"),);
+    env.storage().instance().set(&key, &total);
+}

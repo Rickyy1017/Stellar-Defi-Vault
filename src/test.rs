@@ -3706,3 +3706,37 @@ fn test_notify_reward_added_fails_for_zero_amount() {
     let result = f.vault.try_notify_reward_added(&source, &0);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_get_next_epoch_start_not_in_epoch_mode() {
+    let f = VaultFixture::new();
+    let res = f.vault.try_get_next_epoch_start();
+    assert_eq!(res, Err(Ok(VaultError::NotInEpochMode)));
+
+    let res_until = f.vault.try_ledgers_until_next_epoch();
+    assert_eq!(res_until, Err(Ok(VaultError::NotInEpochMode)));
+}
+
+#[test]
+fn test_get_next_epoch_start_and_until() {
+    let f = VaultFixture::new();
+    
+    // Set epoch mode: epoch_ledgers = 1000, reward = 10000
+    f.vault.set_epoch_mode(&f.admin, &1000, &10000);
+    
+    let next_epoch_start = f.vault.get_next_epoch_start();
+    assert_eq!(next_epoch_start, 1000);
+    
+    let until = f.vault.ledgers_until_next_epoch();
+    assert_eq!(until, 1000);
+    
+    // advance ledger to 400
+    set_ledger(&f.env, 400);
+    let until_400 = f.vault.ledgers_until_next_epoch();
+    assert_eq!(until_400, 600);
+    
+    // advance ledger past next epoch start (e.g. 1200)
+    set_ledger(&f.env, 1200);
+    let until_1200 = f.vault.ledgers_until_next_epoch();
+    assert_eq!(until_1200, 0);
+}

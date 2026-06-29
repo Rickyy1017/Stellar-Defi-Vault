@@ -335,6 +335,15 @@ pub struct VestingEntry {
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
+pub struct RateHistoryEntry {
+    pub old_rate_bps: i128,
+    pub new_rate_bps: i128,
+    pub changed_at_ledger: u32,
+    pub changed_by: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EpochState {
     pub epoch_number: u32,
     pub started_at: u32,
