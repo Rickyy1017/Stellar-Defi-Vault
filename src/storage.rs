@@ -68,6 +68,11 @@ pub enum DataKey {
     EpochRewardFactor(u32),
     UserEpochSnapshot(UserEpochSnapshotKey),
     UserLastClaimedEpoch(Address),
+    // Issue #155: token decimal precision — stored in instance storage.
+    StakeDecimals,
+    RewardDecimals,
+    // Issue #157: human-readable pool name, max 50 chars.
+    PoolName,
 }
 
 /// Storage key for an individual epoch snapshot.
@@ -349,4 +354,12 @@ pub struct EpochState {
     pub started_at: u32,
     pub reward_pool: i128,
     pub total_staked_snapshot: i128,
+}
+
+/// Governance checkpoint: total staked recorded at a specific ledger (issue snapshot_total_staked).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TotalStakedSnapshot {
+    pub total_staked: i128,
+    pub ledger: u32,
 }

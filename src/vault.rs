@@ -8,8 +8,8 @@ use crate::{
     storage::{
         CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
         LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, StakingEfficiencyScore, UnbondingPosition, UnstakeCheckResult, UserStats,
-        UserSummary, VestingEntry, EpochState,
+        StakeStreak, StakingEfficiencyScore, TotalStakedSnapshot, UnbondingPosition,
+        UnstakeCheckResult, UserStats, UserSummary, VestingEntry, EpochState,
     },
 };
 
@@ -29,6 +29,8 @@ pub(crate) const STELLAR_LEDGERS_PER_YEAR: u32 = 6_307_200;
 pub(crate) const MAX_UNSTAKE_FEE_BPS: u32 = 500;
 /// Approximate number of Stellar ledgers in one day at 5 s/ledger (issue #133).
 pub(crate) const LEDGERS_PER_DAY: u32 = 17_280;
+/// Days of runway below which a refill alert is emitted.
+pub(crate) const REFILL_ALERT_DAYS: u32 = 30;
 
 #[contract]
 pub struct VaultContract;
@@ -1084,6 +1086,53 @@ impl VaultContract {
         ))
     }
 
+    /// Read-only: returns how far a user is toward the next boost tier.
+    ///
+    /// Computes the user's elapsed staking ledgers and walks the boost schedule
+    /// to find which tier they currently qualify for and how many ledgers remain
+    /// until the next one.  No auth required.
+    pub fn get_boost_tier_progress(env: Env, user: Address) -> BoostTierProgress {
+        let schedule = balance::get_boost_schedule(&env).unwrap_or(Vec::new(&env));
+        let current_ledger = env.ledger().sequence();
+
+        let staked_at: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StakedAtLedger(user.clone()))
+            .unwrap_or(current_ledger);
+
+        let elapsed = current_ledger.saturating_sub(staked_at);
+
+        // Walk tiers to find which one the user currently qualifies for
+        let mut current_tier: u32 = 0;
+        let mut current_multiplier_bps: i128 = BOOST_BPS_BASE as i128;
+        let mut next_tier_in_ledgers: Option<u32> = None;
+        let mut next_multiplier_bps: Option<i128> = None;
+
+        let mut i: u32 = 0;
+        while i < schedule.len() {
+            let (tier_threshold, tier_mult) = schedule.get(i).unwrap();
+            if elapsed >= tier_threshold {
+                // User has crossed this tier
+                current_tier = i + 1;
+                current_multiplier_bps = tier_mult as i128;
+            } else {
+                // This is the next tier the user hasn't reached yet
+                next_tier_in_ledgers = Some(tier_threshold.saturating_sub(elapsed));
+                next_multiplier_bps = Some(tier_mult as i128);
+                break;
+            }
+            i += 1;
+        }
+
+        BoostTierProgress {
+            current_tier,
+            current_multiplier_bps,
+            next_tier_in_ledgers,
+            next_multiplier_bps,
+        }
+    }
+
     // --- Issue #39: rescue stuck tokens ---
 
     /// Admin: register a separate reward token address (distinct from the stake token).
@@ -1629,13 +1678,33 @@ impl VaultContract {
             return 0;
         }
 
-        position
+        let raw = position
             .amount
             .checked_mul(rate_bps as i128)
             .and_then(|v| v.checked_mul(LEDGERS_PER_DAY as i128))
             .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
             .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::normalize_to_reward_decimals(&env, raw).unwrap_or(raw)
+    }
+
+    /// Estimated annual reward for the user at the current APR, normalized to reward
+    /// token decimals. Returns 0 when there is no position or rate is 0.
+    pub fn get_estimated_annual_reward(env: Env, user: Address) -> i128 {
+        let position = match Self::build_position(&env, &user).ok().flatten() {
+            Some(p) => p,
+            None => return 0,
+        };
+        let rate_bps = balance::get_reward_rate_bps(&env);
+        if rate_bps == 0 {
+            return 0;
+        }
+        let raw = position
+            .amount
+            .checked_mul(rate_bps as i128)
+            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
+            .unwrap_or(0);
+        Self::normalize_to_reward_decimals(&env, raw).unwrap_or(raw)
     }
 
     // --- Boost campaign (#48) ---
@@ -3168,6 +3237,9 @@ impl VaultContract {
 
         // Issue #129: auto-pause if reward balance drops below threshold
         Self::check_auto_pause(env)?;
+
+        // Reward refill alert: emit if runway < 30 days, rate-limited to once per day
+        Self::check_refill_alert(env);
 
         Ok(reward)
     }

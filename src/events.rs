@@ -365,3 +365,24 @@ pub fn yield_source_removed(env: &Env, admin: &Address, source: &Address) {
     env.events()
         .publish(topics, (source.clone(), env.ledger().sequence()));
 }
+
+// ── Issue #157: pool name events ──────────────────────────────────────────────
+
+/// Emitted when the admin sets or updates the pool name via `set_pool_name`.
+pub fn pool_name_updated(env: &Env, admin: &Address, name: &soroban_sdk::String) {
+    let topics = (symbol_short!("nm_upd"), admin);
+    env.events()
+        .publish(topics, (name.clone(), env.ledger().sequence()));
+}
+
+// ── Reward refill alert ───────────────────────────────────────────────────────
+
+/// Emitted when the reward pool runway drops below 30 days after a claim.
+///
+/// Topics: `("rfil_alt",)`.
+/// Data: `(reward_balance: i128, ledgers_until_empty: u32, ledger: u32)`.
+pub fn refill_alert(env: &Env, reward_balance: i128, ledgers_until_empty: u32, ledger: u32) {
+    let topics = (symbol_short!("rfil_alt"),);
+    env.events()
+        .publish(topics, (reward_balance, ledgers_until_empty, ledger));
+}

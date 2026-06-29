@@ -1,4 +1,4 @@
-use crate::storage::{ChangelogEntry, ClaimWindow, DataKey, RateHistoryEntry, VestingEntry};
+use crate::storage::{ChangelogEntry, ClaimWindow, DataKey, RateHistoryEntry, TotalStakedSnapshot, VestingEntry};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 pub fn get_shares(env: &Env, user: &Address) -> i128 {
@@ -568,6 +568,70 @@ pub fn set_initialized_at_ledger(env: &Env, ledger: u32) {
     env.storage()
         .instance()
         .set(&symbol_short!("inal"), &ledger);
+}
+
+// ── Custom error messages (frontend metadata) ────────────────────────────────
+
+/// Maximum length for custom error messages (150 characters).
+pub const MAX_ERROR_MESSAGE_LENGTH: u32 = 150;
+
+/// Maximum number of custom error messages stored (20 messages).
+pub const MAX_ERROR_MESSAGES: u32 = 20;
+
+/// Get list of all error codes that have custom messages set.
+pub fn get_error_message_codes(env: &Env) -> Vec<u32> {
+    let key = symbol_short!("err_codes");
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env))
+}
+
+/// Set the list of error codes that have custom messages.
+fn set_error_message_codes(env: &Env, codes: &Vec<u32>) {
+    let key = symbol_short!("err_codes");
+    env.storage().persistent().set(&key, codes);
+}
+
+/// Get custom error message for a specific error code.
+/// Uses tuple key to avoid DataKey enum limit.
+pub fn get_error_message(env: &Env, error_code: u32) -> Option<soroban_sdk::String> {
+    let key = (Symbol::new(env, "err_msg"), error_code);
+    env.storage().persistent().get(&key)
+}
+
+/// Set custom error message for a specific error code.
+/// Enforces MAX_ERROR_MESSAGES limit by removing oldest when full.
+/// Uses tuple key to avoid DataKey enum limit.
+pub fn set_error_message(env: &Env, error_code: u32, message: &soroban_sdk::String) {
+    // Store the message using tuple key
+    let key = (Symbol::new(env, "err_msg"), error_code);
+    env.storage().persistent().set(&key, message);
+
+    // Update the codes list
+    let mut codes = get_error_message_codes(env);
+
+    // Check if this error code is already in the list
+    let mut found = false;
+    for i in 0..codes.len() {
+        if codes.get(i).unwrap() == error_code {
+            found = true;
+            break;
+        }
+    }
+
+    // If not found, add it to the list
+    if !found {
+        // If at capacity, remove the oldest (first) entry
+        if codes.len() >= MAX_ERROR_MESSAGES {
+            let oldest_code = codes.get(0).unwrap();
+            let oldest_key = (Symbol::new(env, "err_msg"), oldest_code);
+            env.storage().persistent().remove(&oldest_key);
+            codes.remove(0);
+        }
+        codes.push_back(error_code);
+        set_error_message_codes(env, &codes);
+    }
 }
 
 // ── Issue #113: auto-restake toggle ───────────────────────────────────────────
