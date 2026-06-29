@@ -68,13 +68,7 @@ pub enum DataKey {
     EpochLedgers,
     EpochRewardPerEpoch,
     EpochRewardFactor(u32),
-    UserEpochSnapshot(UserEpochSnapshotKey),
-    UserLastClaimedEpoch(Address),
-    // Issue #155: token decimal precision — stored in instance storage.
-    StakeDecimals,
-    RewardDecimals,
-    // Issue #157: human-readable pool name, max 50 chars.
-    PoolName,
+
 }
 
 /// Storage key for an individual epoch snapshot.
@@ -383,14 +377,6 @@ pub struct VestingEntry {
     pub claimable_at_ledger: u32,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct RateHistoryEntry {
-    pub old_rate_bps: i128,
-    pub new_rate_bps: i128,
-    pub changed_at_ledger: u32,
-    pub changed_by: Address,
-}
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -407,4 +393,14 @@ pub struct EpochState {
 pub struct TotalStakedSnapshot {
     pub total_staked: i128,
     pub ledger: u32,
+}
+
+/// Progress toward the next reward-boost tier.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoostTierProgress {
+    pub current_tier: u32,
+    pub current_multiplier_bps: i128,
+    pub next_tier_in_ledgers: Option<u32>,
+    pub next_multiplier_bps: Option<i128>,
 }

@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Vec, symbol_short};
 
 use crate::{
     admin, balance,
@@ -6,14 +6,11 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
+        BoostTierProgress, CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
         LeaderboardEntry, PoolConfig, PoolHealthReport, PoolStats, RateHistoryEntry,
         ReferralLeaderboardEntry, StakeAction, StakeHistoryEntry, StakePosition, StakeStreak,
         StakingEfficiencyScore, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary,
         VestingEntry, EpochState,
-        LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, StakingEfficiencyScore, TotalStakedSnapshot, UnbondingPosition,
-        UnstakeCheckResult, UserStats, UserSummary, VestingEntry, EpochState,
     },
 };
 
@@ -3915,10 +3912,7 @@ impl VaultContract {
             if shares > 0 && total_shares > 0 {
                 let staker_staked = balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
                 env.storage().persistent().set(
-                    &DataKey::UserEpochSnapshot(crate::storage::UserEpochSnapshotKey {
-                        user: staker,
-                        epoch: state.epoch_number,
-                    }),
+                    &(soroban_sdk::Symbol::new(&env, "uep_snp"), staker, state.epoch_number),
                     &staker_staked,
                 );
             }
@@ -3956,10 +3950,7 @@ impl VaultContract {
         let user_staked: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::UserEpochSnapshot(crate::storage::UserEpochSnapshotKey {
-                user,
-                epoch: epoch_number,
-            }))
+            .get(&(soroban_sdk::Symbol::new(&env, "uep_snp"), user.clone(), epoch_number))
             .unwrap_or(0);
 
         user_staked
@@ -3980,7 +3971,7 @@ impl VaultContract {
         let last_claimed = env
             .storage()
             .persistent()
-            .get::<_, u32>(&DataKey::UserLastClaimedEpoch(user.clone()))
+            .get::<_, u32>(&(soroban_sdk::Symbol::new(&env, "ulc_ep"), user.clone()))
             .unwrap_or(0);
 
         let mut total_accumulated: i128 = 0;
@@ -4034,7 +4025,7 @@ impl VaultContract {
         balance::set_total_rewards_paid(&env, paid + total_accumulated);
 
         env.storage().persistent().set(
-            &DataKey::UserLastClaimedEpoch(user.clone()),
+            &(soroban_sdk::Symbol::new(&env, "ulc_ep"), user.clone()),
             &(current_epoch_state.epoch_number - 1),
         );
 
@@ -4740,6 +4731,67 @@ impl VaultContract {
 
     pub fn get_total_rewards_added(env: Env) -> i128 {
         balance::get_total_rewards_added(&env)
+    }
+
+    // ── Reward refill alert helper ─────────────────────────────────────────────
+
+    fn refill_alert_threshold_ledgers() -> u32 {
+        REFILL_ALERT_DAYS * LEDGERS_PER_DAY
+    }
+
+    fn check_refill_alert(env: &Env) {
+        let runway = Self::compute_runway(env);
+        if runway >= Self::refill_alert_threshold_ledgers() {
+            return;
+        }
+
+        let current_ledger = env.ledger().sequence();
+        let last_alert: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("lstalt"))
+            .unwrap_or(0);
+
+        if current_ledger.saturating_sub(last_alert) < LEDGERS_PER_DAY {
+            return;
+        }
+
+        let reward_balance = balance::get_reward_pool_balance(env);
+        events::refill_alert(env, reward_balance, runway, current_ledger);
+
+        env.storage()
+            .instance()
+            .set(&symbol_short!("lstalt"), &current_ledger);
+    }
+
+    fn compute_runway(env: &Env) -> u32 {
+        let drain_rate = Self::compute_reward_drain_rate(env);
+        if drain_rate == 0 {
+            return u32::MAX;
+        }
+        let reward_pool = balance::get_reward_pool_balance(env);
+        if reward_pool <= 0 {
+            return 0;
+        }
+        let ledgers = reward_pool / drain_rate;
+        if ledgers > u32::MAX as i128 {
+            u32::MAX
+        } else {
+            ledgers as u32
+        }
+    }
+
+    fn compute_reward_drain_rate(env: &Env) -> i128 {
+        let total_staked = balance::get_total_deposited(env);
+        let rate_bps = balance::get_reward_rate_bps(env);
+        if total_staked == 0 || rate_bps == 0 {
+            return 0;
+        }
+        total_staked
+            .checked_mul(rate_bps as i128)
+            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
+            .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
+            .unwrap_or(0)
     }
 
 }
