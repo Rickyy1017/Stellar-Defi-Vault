@@ -374,3 +374,15 @@ pub fn pool_name_updated(env: &Env, admin: &Address, name: &soroban_sdk::String)
     env.events()
         .publish(topics, (name.clone(), env.ledger().sequence()));
 }
+
+// ── Reward refill alert ───────────────────────────────────────────────────────
+
+/// Emitted when the reward pool runway drops below 30 days after a claim.
+///
+/// Topics: `("rfil_alt",)`.
+/// Data: `(reward_balance: i128, ledgers_until_empty: u32, ledger: u32)`.
+pub fn refill_alert(env: &Env, reward_balance: i128, ledgers_until_empty: u32, ledger: u32) {
+    let topics = (symbol_short!("rfil_alt"),);
+    env.events()
+        .publish(topics, (reward_balance, ledgers_until_empty, ledger));
+}

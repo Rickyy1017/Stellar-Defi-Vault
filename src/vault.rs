@@ -29,6 +29,8 @@ pub(crate) const STELLAR_LEDGERS_PER_YEAR: u32 = 6_307_200;
 pub(crate) const MAX_UNSTAKE_FEE_BPS: u32 = 500;
 /// Approximate number of Stellar ledgers in one day at 5 s/ledger (issue #133).
 pub(crate) const LEDGERS_PER_DAY: u32 = 17_280;
+/// Days of runway below which a refill alert is emitted.
+pub(crate) const REFILL_ALERT_DAYS: u32 = 30;
 
 #[contract]
 pub struct VaultContract;
@@ -3189,6 +3191,9 @@ impl VaultContract {
         // Issue #129: auto-pause if reward balance drops below threshold
         Self::check_auto_pause(env)?;
 
+        // Reward refill alert: emit if runway < 30 days, rate-limited to once per day
+        Self::check_refill_alert(env);
+
         Ok(reward)
     }
 
@@ -4447,6 +4452,62 @@ impl VaultContract {
     /// Read-only: returns the pool name set by the admin, or `None` if never set.
     pub fn get_pool_name(env: Env) -> Option<String> {
         env.storage().instance().get(&DataKey::PoolName)
+    }
+
+    // ── Reward refill alert helper ─────────────────────────────────────────────
+
+    /// Number of ledgers that make up the refill alert threshold (30 days).
+    fn refill_alert_threshold_ledgers() -> u32 {
+        REFILL_ALERT_DAYS * LEDGERS_PER_DAY
+    }
+
+    /// Check runway and emit a `refill_alert` event when below 30 days,
+    /// rate-limited to at most once per day (17 280 ledgers).
+    fn check_refill_alert(env: &Env) {
+        let runway = Self::compute_runway(env);
+        if runway >= Self::refill_alert_threshold_ledgers() {
+            return;
+        }
+
+        let current_ledger = env.ledger().sequence();
+        let last_alert: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("lstalt"))
+            .unwrap_or(0);
+
+        // Emit at most once per day
+        if current_ledger.saturating_sub(last_alert) < LEDGERS_PER_DAY {
+            return;
+        }
+
+        // Read reward pool balance for the event payload
+        let reward_balance = balance::get_reward_pool_balance(env);
+
+        events::refill_alert(env, reward_balance, runway, current_ledger);
+
+        env.storage()
+            .instance()
+            .set(&symbol_short!("lstalt"), &current_ledger);
+    }
+
+    /// Internal runway computation (ledgers until reward pool depleted).
+    /// Returns `u32::MAX` when drain rate is zero.
+    fn compute_runway(env: &Env) -> u32 {
+        let drain_rate = Self::compute_reward_drain_rate(env);
+        if drain_rate == 0 {
+            return u32::MAX;
+        }
+        let reward_pool = balance::get_reward_pool_balance(env);
+        if reward_pool <= 0 {
+            return 0;
+        }
+        let ledgers = reward_pool / drain_rate;
+        if ledgers > u32::MAX as i128 {
+            u32::MAX
+        } else {
+            ledgers as u32
+        }
     }
 
 }
