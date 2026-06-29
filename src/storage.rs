@@ -5,8 +5,7 @@ use soroban_sdk::{contracttype, Address, String, Vec};
 /// Instance keys (fast, small): Admin, Token, TotalShares, TotalDeposited,
 /// MinStake, RewardRateBps, RewardPoolBalance, BoostSchedule, Paused,
 /// WithdrawalLimit, LockPeriod, EarlyExitPenaltyBps, TotalStakers,
-/// TotalRewardsPaid, SlashTreasury, WhitelistEnabled, CooldownPeriod,
-/// PoolCap, ClaimCap, ClaimCapWindow, StakeDecimals, RewardDecimals,
+/// TotalRewardsPaid, WhitelistEnabled, CooldownPeriod,
 /// UnstakeFeeBps, AllStakers, InactivityThreshold, Changelog,
 /// LastRateChangeLedger, InitializedAtLedger.
 ///
@@ -38,30 +37,16 @@ pub enum DataKey {
     TotalStakers,
     TotalRewardsPaid,
     Delegate(Address),
-    // Issue #39: rescue token
-    RewardToken,
-    // Issue #40: NFT receipt
-    NftContract,
-    // Issue #41: restake grace window
-    RestakeWindow,
     LastUnstakeLedger(Address),
     Restaked(Address),
-    // Issue #42: admin action audit log
-    AdminActionCount,
-    // Keys used throughout vault.rs / balance.rs
-    SlashTreasury,
     WhitelistEnabled,
     Whitelisted(Address),
     CooldownPeriod,
     UnbondingPosition(Address),
     RewardRemainder(Address),
     UserClaimWindow(Address),
-    StakeDecimals,
-    RewardDecimals,
     UnstakeFeeBps,
     AllStakers,
-    ClaimCap,
-    ClaimCapWindow,
     RateHistory,
     BoostCampaign,
     Leaderboard,
@@ -72,7 +57,6 @@ pub enum DataKey {
     KycRequired,
     KycApproved(Address),
     Stopped,
-    PoolCap,
     // Task 2: Vesting
     VestingPeriod,
     VestingEntries(Address),
@@ -82,8 +66,20 @@ pub enum DataKey {
     EpochLedgers,
     EpochRewardPerEpoch,
     EpochRewardFactor(u32),
-    UserEpochSnapshot(Address, u32),
+    UserEpochSnapshot(UserEpochSnapshotKey),
     UserLastClaimedEpoch(Address),
+}
+
+/// Storage key for an individual epoch snapshot.
+///
+/// Soroban's enum contracttype support is stricter for tuple variants, so we
+/// keep the address and epoch together in a dedicated struct instead of a
+/// multi-field enum variant.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UserEpochSnapshotKey {
+    pub user: Address,
+    pub epoch: u32,
 }
 
 /// Issue #42: enum of all admin actions for the audit log.
@@ -228,6 +224,24 @@ pub struct ContractMetadata {
 pub struct ClaimWindow {
     pub claimed_in_window: i128,
     pub window_started_at: u32,
+}
+
+/// Single entry in the on-chain changelog exposed by `get_changelog`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChangelogEntry {
+    pub change_type: String,
+    pub old_value: i128,
+    pub new_value: i128,
+}
+
+/// Aggregate score used by `staking_efficiency_score`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StakingEfficiencyScore {
+    pub total_claimed: i128,
+    pub estimated_if_compounded: i128,
+    pub efficiency_bps: i128,
 }
 
 /// Aggregated user state returned by `user_summary` (issue #103).

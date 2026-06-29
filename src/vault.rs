@@ -6,10 +6,10 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        CampaignInfo, ClaimWindow, ContractMetadata, DataKey, InterfaceId, LeaderboardEntry,
-        OptionalPosition, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary, VestingEntry,
-        EpochState,
+        CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
+        LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
+        StakeStreak, StakingEfficiencyScore, UnbondingPosition, UnstakeCheckResult, UserStats,
+        UserSummary, VestingEntry, EpochState,
     },
 };
 
@@ -73,9 +73,7 @@ impl VaultContract {
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Paused, &false);
         // By default, set the slash treasury to the admin address. Can be updated by admin later.
-        env.storage()
-            .instance()
-            .set(&DataKey::SlashTreasury, &admin);
+        balance::set_slash_treasury(&env, &admin);
         // Issue #117: record initialization ledger for pool_uptime_ledgers.
         balance::set_initialized_at_ledger(&env, env.ledger().sequence());
 
@@ -192,12 +190,30 @@ impl VaultContract {
         }
     }
 
-    /// Read-only query for the token address that users must deposit to stake.
-    pub fn get_stake_token(env: Env) -> Result<Address, VaultError> {
+    /// Shared accessor for the vault token address stored during initialization.
+    fn token_address(env: &Env) -> Result<Address, VaultError> {
         env.storage()
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)
+    }
+
+    /// Shared accessor for the paused flag to keep pause/unpause reads uniform.
+    fn paused(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Shared writer for the paused flag so pause/unpause stay symmetric.
+    fn set_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&DataKey::Paused, &paused);
+    }
+
+    /// Read-only query for the token address that users must deposit to stake.
+    pub fn get_stake_token(env: Env) -> Result<Address, VaultError> {
+        Self::token_address(&env)
     }
 
     /// Read-only query for the reward token address.
@@ -213,12 +229,16 @@ impl VaultContract {
         balance::get_last_updated_ledger(&env)
     }
 
+    /// Read-only uptime metric measured in ledgers since initialization.
+    pub fn pool_uptime_ledgers(env: Env) -> u32 {
+        let initialized_at =
+            balance::get_initialized_at_ledger(&env).unwrap_or(env.ledger().sequence());
+        env.ledger().sequence().saturating_sub(initialized_at)
+    }
+
     /// Returns true when the pool is paused, false otherwise.
     pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false)
+        Self::paused(&env)
     }
 
     /// Read-only query for the caller's active stake position.
@@ -301,6 +321,11 @@ impl VaultContract {
         balance::get_total_rewards_paid(&env)
     }
 
+    /// Read-only view of the bounded admin changelog.
+    pub fn get_changelog(env: Env) -> Vec<ChangelogEntry> {
+        balance::get_changelog(&env)
+    }
+
     /// Pool-wide governance vote weight.
     pub fn total_vote_weight(env: Env) -> Result<i128, VaultError> {
         Self::total_staked(env)
@@ -366,7 +391,7 @@ impl VaultContract {
         admin::require_admin(&env)?;
         // Issue #107: stopped contracts cannot be re-paused or unpaused.
         Self::require_not_stopped(&env)?;
-        env.storage().instance().set(&DataKey::Paused, &true);
+        Self::set_paused(&env, true);
         let admin = admin::get_admin(&env)?;
         events::paused(&env, &admin, env.ledger().sequence());
         events::admin_action_pause(&env, &admin);
@@ -381,7 +406,7 @@ impl VaultContract {
         admin::require_admin(&env)?;
         // Issue #107: stopped contracts cannot be re-paused or unpaused.
         Self::require_not_stopped(&env)?;
-        env.storage().instance().set(&DataKey::Paused, &false);
+        Self::set_paused(&env, false);
         let admin = admin::get_admin(&env)?;
         events::unpaused(&env, &admin, env.ledger().sequence());
         events::admin_action_unpause(&env, &admin);
@@ -400,12 +425,7 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
-
+        let token_addr = Self::token_address(&env)?;
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&admin_addr, &env.current_contract_address(), &amount);
 
@@ -441,9 +461,7 @@ impl VaultContract {
     /// Admin: set the address that receives slashed tokens. Defaults to admin at initialize.
     pub fn set_slash_treasury(env: Env, treasury: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        env.storage()
-            .instance()
-            .set(&DataKey::SlashTreasury, &treasury);
+        balance::set_slash_treasury(&env, &treasury);
         Ok(())
     }
 
@@ -605,11 +623,7 @@ impl VaultContract {
         // If cooldown == 0, optionally auto-execute withdrawal immediately
         if cooldown == 0 {
             // transfer tokens immediately
-            let token_addr: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Token)
-                .ok_or(VaultError::NotInitialized)?;
+            let token_addr = Self::token_address(&env)?;
             let token_client = token::Client::new(&env, &token_addr);
             token_client.transfer(&env.current_contract_address(), &user, &amount_removed);
             // remove unbonding position since executed
@@ -646,11 +660,7 @@ impl VaultContract {
         }
 
         // transfer tokens to user and remove unbonding record
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &user, &pos.amount);
 
@@ -784,21 +794,15 @@ impl VaultContract {
     ///
     /// Reduces frontend RPC overhead by aggregating `admin`, `stake_token`,
     /// `reward_token`, `reward_rate_bps`, and `paused` into one `PoolConfig`.
+    /// The shared state helpers below keep the storage layout and read logic in
+    /// one place so this query stays simple.
     /// This is a pure read — no state is modified. Reverts with `NotInitialized`
     /// if the contract has not yet been initialised.
     pub fn get_pool_config(env: Env) -> Result<PoolConfig, VaultError> {
         let admin = admin::get_admin(&env)?;
-        let token: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token = Self::token_address(&env)?;
         let reward_rate_bps = balance::get_reward_rate_bps(&env);
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
+        let paused = Self::paused(&env);
         Ok(PoolConfig {
             admin,
             stake_token: token.clone(),
@@ -1014,11 +1018,7 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&admin_addr, &env.current_contract_address(), &amount);
@@ -1116,11 +1116,7 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        let stake_token: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let stake_token = Self::token_address(&env)?;
 
         if token == stake_token {
             return Err(VaultError::CannotRescueStakeToken);
@@ -1149,11 +1145,7 @@ impl VaultContract {
     /// allowing integrators to assess whether the pool can sustain its current
     /// reward rate before staking. No auth required.
     pub fn reward_token_balance(env: Env) -> Result<i128, VaultError> {
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
         let balance =
             token::Client::new(&env, &token_addr).balance(&env.current_contract_address());
         Ok(balance)
@@ -1235,24 +1227,15 @@ impl VaultContract {
     /// Aggregate pool statistics for frontend dashboards.
     pub fn pool_stats(env: Env) -> Result<PoolStats, VaultError> {
         let _ = admin::get_admin(&env)?;
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
         let token_client = token::Client::new(&env, &token_addr);
         let reward_token_balance = token_client.balance(&env.current_contract_address());
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
         Ok(PoolStats {
             total_staked: balance::get_total_deposited(&env),
             total_stakers: balance::get_total_stakers(&env),
             reward_rate_bps: balance::get_reward_rate_bps(&env) as i128,
             reward_token_balance,
-            paused,
+            paused: Self::paused(&env),
             total_rewards_paid: balance::get_total_rewards_paid(&env),
         })
     }
@@ -1336,11 +1319,7 @@ impl VaultContract {
             }
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
@@ -1462,16 +1441,8 @@ impl VaultContract {
         }
 
         // token and treasury addresses
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
-        let treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::SlashTreasury)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
+        let treasury = balance::get_slash_treasury(&env).ok_or(VaultError::NotInitialized)?;
 
         // update user shares and totals
         let new_user_shares = user_shares - shares_to_remove;
@@ -1624,6 +1595,49 @@ impl VaultContract {
         Ok(days.min(u32::MAX as u64) as u32)
     }
 
+    /// Convert a staked position to its value in reward-token units at a supplied rate.
+    pub fn position_value_in_reward_token(
+        env: Env,
+        user: Address,
+        reward_rate_bps: u32,
+    ) -> Result<i128, VaultError> {
+        let position = Self::build_position(&env, &user)?;
+        let position = match position {
+            Some(p) => p,
+            None => return Ok(0),
+        };
+        if reward_rate_bps == 0 {
+            return Err(VaultError::InvalidRate);
+        }
+
+        position
+            .amount
+            .checked_mul(reward_rate_bps as i128)
+            .ok_or(VaultError::ArithmeticError)?
+            .checked_div(BOOST_BPS_BASE as i128)
+            .ok_or(VaultError::ArithmeticError)
+    }
+
+    /// Estimate a user's rewards over one day at the current APR.
+    pub fn daily_reward_estimate(env: Env, user: Address) -> i128 {
+        let position = match Self::build_position(&env, &user).ok().flatten() {
+            Some(position) => position,
+            None => return 0,
+        };
+        let rate_bps = balance::get_reward_rate_bps(&env);
+        if rate_bps == 0 {
+            return 0;
+        }
+
+        position
+            .amount
+            .checked_mul(rate_bps as i128)
+            .and_then(|v| v.checked_mul(LEDGERS_PER_DAY as i128))
+            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
+            .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
+            .unwrap_or(0)
+    }
+
     // --- Boost campaign (#48) ---
 
     /// Admin: activate a time-limited reward boost for all stakers.
@@ -1773,6 +1787,72 @@ impl VaultContract {
         Self::update_leaderboard(&env, &to, from_shares);
 
         events::position_transferred(&env, &from, &to, position_amount);
+        Ok(())
+    }
+
+    /// Transfer a position while preserving any accrued reward state for the recipient.
+    pub fn transfer_position_with_rewards(
+        env: Env,
+        from: Address,
+        to: Address,
+    ) -> Result<(), VaultError> {
+        from.require_auth();
+        Self::require_not_paused(&env)?;
+
+        let from_shares = balance::get_shares(&env, &from);
+        if from_shares == 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+        if balance::get_shares(&env, &to) > 0 {
+            return Err(VaultError::RecipientAlreadyStaking);
+        }
+
+        let staked_at = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::StakedAtLedger(from.clone()))
+            .unwrap_or(env.ledger().sequence());
+        let last_claim = balance::get_last_claim_ledger(&env, &from);
+        let checkpoint = balance::get_reward_checkpoint_ledger(&env, &from)
+            .unwrap_or(env.ledger().sequence());
+        let accrued = balance::get_accrued_reward(&env, &from);
+        let pending_estimate = Self::pending_reward(&env, &from).unwrap_or(accrued);
+
+        balance::set_shares(&env, &to, from_shares);
+        balance::set_shares(&env, &from, 0);
+        balance::set_accrued_reward(&env, &to, accrued);
+        balance::set_accrued_reward(&env, &from, 0);
+        balance::set_reward_checkpoint_ledger(&env, &to, checkpoint);
+        balance::set_reward_checkpoint_ledger(&env, &from, env.ledger().sequence());
+        balance::set_last_claim_ledger(&env, &to, last_claim);
+        balance::set_last_claim_ledger(&env, &from, env.ledger().sequence());
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::StakedAtLedger(to.clone()), &staked_at);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::StakedAtLedger(from.clone()));
+
+        Self::record_stake_snapshot(&env, &from, 0);
+        Self::record_stake_snapshot(&env, &to, from_shares);
+        Self::update_leaderboard(&env, &from, 0);
+        Self::update_leaderboard(&env, &to, from_shares);
+
+        let position_amount = balance::shares_to_amount(
+            balance::get_total_shares(&env),
+            balance::get_total_deposited(&env),
+            from_shares,
+        )
+        .unwrap_or(0);
+        events::position_transferred_with_rewards(
+            &env,
+            &from,
+            &to,
+            position_amount,
+            pending_estimate,
+            env.ledger().sequence(),
+        );
         Ok(())
     }
 
@@ -2131,11 +2211,7 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
@@ -2282,11 +2358,7 @@ impl VaultContract {
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let lock_period: u32 = env
             .storage()
@@ -2825,6 +2897,28 @@ impl VaultContract {
         }
     }
 
+    /// Append one changelog entry and keep the history bounded.
+    fn append_changelog(
+        env: &Env,
+        _admin: &Address,
+        change_type: String,
+        old_value: i128,
+        new_value: i128,
+    ) {
+        let mut log = balance::get_changelog(env);
+        log.push_back(ChangelogEntry {
+            change_type,
+            old_value,
+            new_value,
+        });
+
+        while log.len() > MAX_CHANGELOG_ENTRIES {
+            let _ = log.pop_front();
+        }
+
+        balance::set_changelog(env, &log);
+    }
+
     /// Update the on-chain leaderboard after a stake or unstake operation (#46).
     ///
     /// Rebuilds the sorted `Vec<LeaderboardEntry>` (descending by amount) removing the old entry
@@ -2924,12 +3018,7 @@ impl VaultContract {
     }
 
     fn require_not_paused(env: &Env) -> Result<(), VaultError> {
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
-        if paused {
+        if Self::paused(env) {
             Err(VaultError::VaultPaused)
         } else {
             Ok(())
@@ -2959,17 +3048,12 @@ impl VaultContract {
             return Ok(()); // Auto-pause disabled
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
-
+        let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
         let reward_balance = token_client.balance(&env.current_contract_address());
 
         if reward_balance < threshold {
-            env.storage().instance().set(&DataKey::Paused, &true);
+            Self::set_paused(env, true);
             events::auto_paused(env, reward_balance, threshold);
         }
 
@@ -3038,11 +3122,7 @@ impl VaultContract {
             return Err(VaultError::InsufficientRewardPool);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let vesting_period: u32 = env
             .storage()
@@ -3123,11 +3203,7 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let mut total_shares = balance::get_total_shares(env);
         let mut total_deposited = balance::get_total_deposited(env);
@@ -3351,6 +3427,29 @@ impl VaultContract {
         (rate_bps as i128) / (BOOST_BPS_BASE as i128 * STELLAR_LEDGERS_PER_YEAR as i128)
     }
 
+    /// Count active stakers who joined at or after the most recent rate change.
+    pub fn staker_count_at_rate(env: Env) -> u32 {
+        let last_rate_change = balance::get_last_rate_change_ledger(&env);
+        let all_stakers = balance::get_all_stakers(&env);
+        let mut count = 0u32;
+        let mut i = 0u32;
+        while i < all_stakers.len() {
+            let staker = all_stakers.get(i).unwrap();
+            if balance::get_shares(&env, &staker) > 0 {
+                let staked_at = env
+                    .storage()
+                    .persistent()
+                    .get::<_, u32>(&DataKey::StakedAtLedger(staker))
+                    .unwrap_or(0);
+                if staked_at >= last_rate_change {
+                    count += 1;
+                }
+            }
+            i += 1;
+        }
+        count
+    }
+
     // --- Issue #103: user_summary aggregated query ---
 
     /// Read-only aggregate: returns the user's position, pending reward, and
@@ -3385,6 +3484,53 @@ impl VaultContract {
         })
     }
 
+    /// Read-only score showing how much of a user's earned reward has already been claimed.
+    pub fn staking_efficiency_score(env: Env, user: Address) -> StakingEfficiencyScore {
+        let total_claimed = balance::get_user_total_claimed(&env, &user);
+        let _position = match Self::build_position(&env, &user).ok().flatten() {
+            Some(position) => position,
+            None => {
+                return StakingEfficiencyScore {
+                    total_claimed: 0,
+                    estimated_if_compounded: 0,
+                    efficiency_bps: 0,
+                };
+            }
+        };
+
+        if balance::get_reward_rate_bps(&env) == 0 {
+            return StakingEfficiencyScore {
+                total_claimed: 0,
+                estimated_if_compounded: 0,
+                efficiency_bps: 0,
+            };
+        }
+
+        let pending_reward = Self::pending_reward(&env, &user).unwrap_or(0);
+        let estimated_if_compounded = total_claimed.checked_add(pending_reward).unwrap_or(0);
+
+        if estimated_if_compounded == 0 {
+            return StakingEfficiencyScore {
+                total_claimed,
+                estimated_if_compounded: 0,
+                efficiency_bps: 0,
+            };
+        }
+
+        let efficiency_bps = total_claimed
+            .checked_mul(BOOST_BPS_BASE as i128)
+            .unwrap_or(0)
+            .checked_div(estimated_if_compounded)
+            .unwrap_or(0)
+            .clamp(0, BOOST_BPS_BASE as i128);
+
+        StakingEfficiencyScore {
+            total_claimed,
+            estimated_if_compounded,
+            efficiency_bps,
+        }
+    }
+
     // ── Issue #105: stake history ─────────────────────────────────────────────
 
     /// Returns the last (up to 5) stake/unstake actions for `user`.
@@ -3405,6 +3551,33 @@ impl VaultContract {
         Ok(())
     }
 
+    /// Admin: append a vesting entry for a user.
+    pub fn schedule_vesting(
+        env: Env,
+        user: Address,
+        amount: i128,
+        claimable_at_ledger: u32,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        let mut entries: Vec<VestingEntry> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VestingEntries(user.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        entries.push_back(VestingEntry {
+            amount,
+            claimable_at_ledger,
+        });
+        env.storage()
+            .persistent()
+            .set(&DataKey::VestingEntries(user), &entries);
+        Ok(())
+    }
+
     pub fn vesting_balance(env: Env, user: Address) -> Vec<VestingEntry> {
         env.storage()
             .persistent()
@@ -3412,15 +3585,66 @@ impl VaultContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
-    pub fn withdraw_vested(env: Env, user: Address) -> Result<i128, VaultError> {
+    /// Convenience alias retained for older callers.
+    pub fn withdraw_all_vested(env: Env, user: Address) -> Result<i128, VaultError> {
         user.require_auth();
 
-        let mut entries: Vec<VestingEntry> = env
+        let entries: Vec<VestingEntry> = env
             .storage()
             .persistent()
             .get(&DataKey::VestingEntries(user.clone()))
-            .ok_or(VaultError::NothingToWithdraw)?;
+            .unwrap_or_else(|| Vec::new(&env));
+        if entries.is_empty() {
+            return Ok(0);
+        }
 
+        let current_ledger = env.ledger().sequence();
+        let mut matured_total: i128 = 0;
+        let mut remaining_entries = Vec::new(&env);
+
+        let mut i = 0;
+        while i < entries.len() {
+            let entry = entries.get(i).unwrap();
+            if current_ledger >= entry.claimable_at_ledger {
+                matured_total = matured_total
+                    .checked_add(entry.amount)
+                    .ok_or(VaultError::ArithmeticError)?;
+            } else {
+                remaining_entries.push_back(entry);
+            }
+            i += 1;
+        }
+
+        if matured_total == 0 {
+            return Ok(0);
+        }
+
+        let reward_pool = balance::get_reward_pool_balance(&env);
+        if reward_pool < matured_total {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
+        if remaining_entries.is_empty() {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::VestingEntries(user.clone()));
+        } else {
+            env.storage()
+                .persistent()
+                .set(&DataKey::VestingEntries(user.clone()), &remaining_entries);
+        }
+
+        let token_addr = Self::token_address(&env)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&env.current_contract_address(), &user, &matured_total);
+
+        Ok(matured_total)
+    }
+
+    pub fn withdraw_vested(env: Env, user: Address) -> Result<i128, VaultError> {
+        user.require_auth();
+
+        let entries = balance::get_vesting_entries(&env, &user);
         let current_ledger = env.ledger().sequence();
         let mut matured_total: i128 = 0;
         let mut remaining_entries = Vec::new(&env);
@@ -3442,21 +3666,20 @@ impl VaultContract {
             return Err(VaultError::NothingToWithdraw);
         }
 
+        let reward_pool = balance::get_reward_pool_balance(&env);
+        if reward_pool < matured_total {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
         if remaining_entries.is_empty() {
             env.storage()
                 .persistent()
                 .remove(&DataKey::VestingEntries(user.clone()));
         } else {
-            env.storage()
-                .persistent()
-                .set(&DataKey::VestingEntries(user.clone()), &remaining_entries);
+            balance::set_vesting_entries(&env, &user, &remaining_entries);
         }
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(VaultError::NotInitialized)?;
+        let token_addr = Self::token_address(&env)?;
 
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &user, &matured_total);
@@ -3554,7 +3777,10 @@ impl VaultContract {
             if shares > 0 && total_shares > 0 {
                 let staker_staked = balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
                 env.storage().persistent().set(
-                    &DataKey::UserEpochSnapshot(staker, state.epoch_number),
+                    &DataKey::UserEpochSnapshot(crate::storage::UserEpochSnapshotKey {
+                        user: staker,
+                        epoch: state.epoch_number,
+                    }),
                     &staker_staked,
                 );
             }
@@ -3592,7 +3818,10 @@ impl VaultContract {
         let user_staked: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::UserEpochSnapshot(user, epoch_number))
+            .get(&DataKey::UserEpochSnapshot(crate::storage::UserEpochSnapshotKey {
+                user,
+                epoch: epoch_number,
+            }))
             .unwrap_or(0);
 
         user_staked
@@ -3643,11 +3872,7 @@ impl VaultContract {
             .unwrap_or(0);
 
         if vesting_period > 0 {
-            let mut entries: Vec<VestingEntry> = env
-                .storage()
-                .persistent()
-                .get(&DataKey::VestingEntries(user.clone()))
-                .unwrap_or_else(|| Vec::new(&env));
+        let mut entries = balance::get_vesting_entries(&env, &user);
             if entries.len() >= 10 {
                 return Err(VaultError::VestingQueueFull);
             }
@@ -3660,11 +3885,7 @@ impl VaultContract {
                 .persistent()
                 .set(&DataKey::VestingEntries(user.clone()), &entries);
         } else {
-            let token_addr: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Token)
-                .ok_or(VaultError::NotInitialized)?;
+            let token_addr = Self::token_address(&env)?;
 
             let token_client = token::Client::new(&env, &token_addr);
             token_client.transfer(&env.current_contract_address(), &user, &total_accumulated);
@@ -3789,12 +4010,7 @@ impl VaultContract {
     /// Mirrors the exact same checks as `do_unstake` in the same order so the
     /// result accurately reflects what would happen on-chain.
     pub fn can_unstake(env: Env, user: Address, amount: i128) -> UnstakeCheckResult {
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
-        if paused {
+        if Self::paused(&env) {
             return UnstakeCheckResult::PoolPaused;
         }
 

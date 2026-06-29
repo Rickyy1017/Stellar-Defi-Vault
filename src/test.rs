@@ -10,7 +10,7 @@ use soroban_sdk::{
 use crate::{
     errors::VaultError,
     nft::{StakeReceiptNFT, StakeReceiptNFTClient},
-    storage::{ChangelogEntry, LeaderboardEntry, UnstakeCheckResult},
+    storage::{ChangelogEntry, UnstakeCheckResult},
     vault::{
         VaultContract, VaultContractClient, BOOST_BPS_BASE, CONTRACT_DESCRIPTION, CONTRACT_NAME,
         CONTRACT_VERSION, MAX_CHANGELOG_ENTRIES, STELLAR_LEDGERS_PER_YEAR,
@@ -3459,6 +3459,7 @@ fn test_schedule_vesting_requires_admin() {
     let f = VaultFixture::new();
     f.vault.schedule_vesting(&f.alice, &1_000, &100);
     assert_eq!(f.env.auths()[0].0, f.admin);
+    assert_eq!(f.vault.vesting_balance(&f.alice).len(), 1);
 }
 
 // ── Issue #117: pool_uptime_ledgers ──────────────────────────────────────────

@@ -102,11 +102,16 @@ pub fn set_withdrawal_limit(env: &Env, limit: i128) {
 }
 
 pub fn get_pool_cap(env: &Env) -> i128 {
-    env.storage().instance().get(&DataKey::PoolCap).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&symbol_short!("pool_cp"))
+        .unwrap_or(0)
 }
 
 pub fn set_pool_cap(env: &Env, cap: i128) {
-    env.storage().instance().set(&DataKey::PoolCap, &cap);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("pool_cp"), &cap);
 }
 
 pub fn get_unstake_fee_bps(env: &Env) -> u32 {
@@ -220,24 +225,40 @@ pub fn remove_delegate(env: &Env, user: &Address) {
         .remove(&DataKey::Delegate(user.clone()));
 }
 
+// ── Issue #38: slash treasury ────────────────────────────────────────────────
+
+pub fn get_slash_treasury(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&symbol_short!("sl_tr"))
+}
+
+pub fn set_slash_treasury(env: &Env, treasury: &Address) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("sl_tr"), treasury);
+}
+
 // ── Issue #39: reward token ───────────────────────────────────────────────────
 
 pub fn get_reward_token(env: &Env) -> Option<Address> {
-    env.storage().instance().get(&DataKey::RewardToken)
+    env.storage().instance().get(&symbol_short!("rwd_tok"))
 }
 
 pub fn set_reward_token(env: &Env, token: &Address) {
-    env.storage().instance().set(&DataKey::RewardToken, token);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("rwd_tok"), token);
 }
 
 // ── Issue #40: NFT contract ───────────────────────────────────────────────────
 
 pub fn get_nft_contract(env: &Env) -> Option<Address> {
-    env.storage().instance().get(&DataKey::NftContract)
+    env.storage().instance().get(&symbol_short!("nft_con"))
 }
 
 pub fn set_nft_contract(env: &Env, nft: &Address) {
-    env.storage().instance().set(&DataKey::NftContract, nft);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("nft_con"), nft);
 }
 
 // ── Issue #41: restake grace window ──────────────────────────────────────────
@@ -245,14 +266,14 @@ pub fn set_nft_contract(env: &Env, nft: &Address) {
 pub fn get_restake_window(env: &Env) -> u32 {
     env.storage()
         .instance()
-        .get(&DataKey::RestakeWindow)
+        .get(&symbol_short!("rst_wnd"))
         .unwrap_or(0)
 }
 
 pub fn set_restake_window(env: &Env, ledgers: u32) {
     env.storage()
         .instance()
-        .set(&DataKey::RestakeWindow, &ledgers);
+        .set(&symbol_short!("rst_wnd"), &ledgers);
 }
 
 pub fn get_last_unstake_ledger(env: &Env, user: &Address) -> Option<u32> {
@@ -292,7 +313,7 @@ pub fn remove_restaked(env: &Env, user: &Address) {
 pub fn get_admin_action_count(env: &Env) -> u32 {
     env.storage()
         .instance()
-        .get(&DataKey::AdminActionCount)
+        .get(&symbol_short!("adm_cnt"))
         .unwrap_or(0)
 }
 
@@ -300,7 +321,7 @@ pub fn increment_admin_action_count(env: &Env) {
     let count = get_admin_action_count(env);
     env.storage()
         .instance()
-        .set(&DataKey::AdminActionCount, &(count + 1));
+        .set(&symbol_short!("adm_cnt"), &(count + 1));
 }
 
 // ── Claim cap (issue #78) ─────────────────────────────────────────────────────
@@ -308,25 +329,27 @@ pub fn increment_admin_action_count(env: &Env) {
 pub fn get_claim_cap(env: &Env) -> i128 {
     env.storage()
         .instance()
-        .get(&DataKey::ClaimCap)
+        .get(&symbol_short!("clm_cap"))
         .unwrap_or(0)
 }
 
 pub fn set_claim_cap(env: &Env, cap: i128) {
-    env.storage().instance().set(&DataKey::ClaimCap, &cap);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("clm_cap"), &cap);
 }
 
 pub fn get_claim_cap_window(env: &Env) -> u32 {
     env.storage()
         .instance()
-        .get(&DataKey::ClaimCapWindow)
+        .get(&symbol_short!("clm_win"))
         .unwrap_or(0)
 }
 
 pub fn set_claim_cap_window(env: &Env, window_ledgers: u32) {
     env.storage()
         .instance()
-        .set(&DataKey::ClaimCapWindow, &window_ledgers);
+        .set(&symbol_short!("clm_win"), &window_ledgers);
 }
 
 pub fn get_user_claim_window(env: &Env, user: &Address) -> Option<ClaimWindow> {
@@ -350,27 +373,27 @@ pub const DEFAULT_TOKEN_DECIMALS: u32 = 7;
 pub fn get_stake_decimals(env: &Env) -> u32 {
     env.storage()
         .instance()
-        .get(&DataKey::StakeDecimals)
+        .get(&symbol_short!("stk_dec"))
         .unwrap_or(DEFAULT_TOKEN_DECIMALS)
 }
 
 pub fn set_stake_decimals(env: &Env, decimals: u32) {
     env.storage()
         .instance()
-        .set(&DataKey::StakeDecimals, &decimals);
+        .set(&symbol_short!("stk_dec"), &decimals);
 }
 
 pub fn get_reward_decimals(env: &Env) -> u32 {
     env.storage()
         .instance()
-        .get(&DataKey::RewardDecimals)
+        .get(&symbol_short!("rwd_dec"))
         .unwrap_or(DEFAULT_TOKEN_DECIMALS)
 }
 
 pub fn set_reward_decimals(env: &Env, decimals: u32) {
     env.storage()
         .instance()
-        .set(&DataKey::RewardDecimals, &decimals);
+        .set(&symbol_short!("rwd_dec"), &decimals);
 }
 
 // ── All-stakers list (issue #95) ──────────────────────────────────────────────

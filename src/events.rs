@@ -245,6 +245,20 @@ pub fn campaign_ended(env: &Env, admin: &Address) {
     env.events().publish(topics, (env.ledger().sequence(),));
 }
 
+/// Emitted when accrued rewards are automatically compounded back into stake.
+pub fn auto_restaked(env: &Env, user: &Address, amount: i128) {
+    let topics = (symbol_short!("auto_rst"), user);
+    env.events()
+        .publish(topics, (amount, env.ledger().sequence()));
+}
+
+/// Emitted when the contract automatically pauses because reward funding dropped too low.
+pub fn auto_paused(env: &Env, reward_balance: i128, threshold: i128) {
+    let topics = (symbol_short!("auto_ps"),);
+    env.events()
+        .publish(topics, (reward_balance, threshold, env.ledger().sequence()));
+}
+
 /// Emitted when a user claims staking rewards (via `claim` or `stake_and_claim`).
 pub fn claimed(env: &Env, user: &Address, reward: i128, ledger: u32) {
     let topics = (symbol_short!("claimed"), user);
