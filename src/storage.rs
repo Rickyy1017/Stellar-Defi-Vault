@@ -68,6 +68,11 @@ pub enum DataKey {
     EpochRewardFactor(u32),
     UserEpochSnapshot(UserEpochSnapshotKey),
     UserLastClaimedEpoch(Address),
+    // Issue #155: token decimal precision — stored in instance storage.
+    StakeDecimals,
+    RewardDecimals,
+    // Issue #157: human-readable pool name, max 50 chars.
+    PoolName,
 }
 
 /// Storage key for an individual epoch snapshot.

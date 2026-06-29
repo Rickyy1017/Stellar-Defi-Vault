@@ -139,4 +139,6 @@ pub enum VaultError {
     NotYieldSource = 42,
     /// notify_reward_added called with a zero or negative amount (issue #126).
     InvalidRewardAmount = 43,
+    /// Returned by `set_pool_name()` when the name exceeds 50 characters (issue #157).
+    NameTooLong = 45,
 }
