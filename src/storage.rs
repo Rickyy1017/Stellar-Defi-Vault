@@ -57,6 +57,7 @@ pub enum DataKey {
     KycRequired,
     KycApproved(Address),
     Stopped,
+    ShuttingDown,
     // Task 2: Vesting
     VestingPeriod,
     VestingEntries(Address),

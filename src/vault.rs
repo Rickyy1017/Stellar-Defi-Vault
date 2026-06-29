@@ -2179,6 +2179,7 @@ impl VaultContract {
     fn do_stake(env: &Env, staker: &Address, amount: i128) -> Result<i128, VaultError> {
         staker.require_auth();
         Self::require_not_stopped(env)?;
+        Self::require_not_shutting_down(env)?;
         Self::require_not_paused(env)?;
 
         // If whitelist is enabled, reject non-whitelisted stakers. Existing stakers can still unstake/claim.
@@ -3056,6 +3057,20 @@ impl VaultContract {
         }
     }
 
+    /// Returns `PoolShuttingDown` if graceful shutdown has been initiated.
+    fn require_not_shutting_down(env: &Env) -> Result<(), VaultError> {
+        let shutting_down: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ShuttingDown)
+            .unwrap_or(false);
+        if shutting_down {
+            Err(VaultError::PoolShuttingDown)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Issue #129: check if reward balance dropped below threshold and auto-pause if needed.
     fn check_auto_pause(env: &Env) -> Result<(), VaultError> {
         let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
@@ -3198,6 +3213,7 @@ impl VaultContract {
     /// have already authenticated the staker.
     fn do_stake_inner(env: &Env, staker: &Address, amount: i128) -> Result<i128, VaultError> {
         Self::require_not_stopped(env)?;
+        Self::require_not_shutting_down(env)?;
         Self::require_not_paused(env)?;
 
         let whitelist_enabled: bool = env
@@ -4015,6 +4031,34 @@ impl VaultContract {
         env.storage()
             .instance()
             .get(&DataKey::Stopped)
+            .unwrap_or(false)
+    }
+
+    /// Begin graceful shutdown — new stakes are blocked immediately, but
+    /// existing stakers may still `unstake`, `claim`, and `withdraw_vested`.
+    ///
+    /// **This action is irreversible.** Once triggered, no new principal can
+    /// enter the pool. Graceful shutdown is distinct from `emergency_stop`
+    /// (which also blocks unstake/claim) and from `pause` (which is
+    /// reversible). Both graceful shutdown and pause can be active at the same
+    /// time without conflict.
+    ///
+    /// Emits the `shutdown_started` event. Admin only.
+    pub fn start_graceful_shutdown(env: Env) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::ShuttingDown, &true);
+        let admin = admin::get_admin(&env)?;
+        events::shutdown_started(&env, &admin);
+        Ok(())
+    }
+
+    /// Returns `true` if graceful shutdown has been initiated.
+    ///
+    /// No auth required.
+    pub fn is_shutting_down(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::ShuttingDown)
             .unwrap_or(false)
     }
 

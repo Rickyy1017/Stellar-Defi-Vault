@@ -82,6 +82,72 @@ The `Token` key is written once during `initialize` and there is no setter for i
 
 ---
 
+## Shutdown Modes
+
+The vault has three distinct shutdown mechanisms. They differ in reversibility, scope, and intended use case.
+
+### `pause()` / `unpause()` — reversible, blocks all activity
+
+**Trigger:** Admin calls `pause()`.
+
+**Effect:** Both `stake` and `unstake` revert with `VaultError::VaultPaused` (error code 6). `claim` and `withdraw_vested` are also blocked. No funds move.
+
+**Reversible:** Yes. The admin can call `unpause()` at any time to restore full operation.
+
+**Storage flag:** `DataKey::Paused` in instance storage.
+
+**Intended use:** Routine maintenance, emergency hotfix window, or any situation where the admin needs a brief freeze with the intent to resume.
+
+---
+
+### `start_graceful_shutdown()` — irreversible, blocks new stakes only
+
+**Trigger:** Admin calls `start_graceful_shutdown()`.
+
+**Effect:** Any new call to `stake` or `stake_with_referral` reverts with `VaultError::PoolShuttingDown` (error code 45). Existing stakers are unaffected: `unstake`, `claim`, and `withdraw_vested` all continue to work normally. The pool winds down naturally as current positions exit.
+
+**Reversible:** No. The `ShuttingDown` flag is set to `true` and there is no function to clear it.
+
+**Coexistence:** Graceful shutdown and pause are independent flags. Both can be active simultaneously without conflict.
+
+**Storage flag:** `DataKey::ShuttingDown` in instance storage.
+
+**Event emitted:** `shutdown_started` — contains the admin address and the ledger sequence at which shutdown began.
+
+**Intended use:** Planned end-of-life for the pool. Lets existing participants exit at their own pace without forcing anything. No funds are lost; every staker can retrieve their principal and accrued rewards.
+
+**Query:** `is_shutting_down(env) -> bool` — read-only, no auth required.
+
+---
+
+### `emergency_stop()` — irreversible, blocks stake permanently
+
+**Trigger:** Admin calls `emergency_stop()`.
+
+**Effect:** `stake` and `stake_with_referral` revert with `VaultError::ContractStopped` (error code 9). Unlike graceful shutdown, `pause`/`unpause` also revert with `ContractStopped` once this flag is set — the contract cannot be paused or unpaused after an emergency stop. `unstake` and `claim` continue to work.
+
+**Reversible:** No.
+
+**Storage flag:** `DataKey::Stopped` in instance storage.
+
+**Event emitted:** `stopped` — contains the admin address.
+
+**Intended use:** Critical security incident where the admin needs to immediately and permanently prevent any new capital from entering the pool. Existing stakers can still exit.
+
+**Query:** `is_stopped(env) -> bool` — read-only, no auth required.
+
+---
+
+### Comparison table
+
+| Mode | Blocks stake | Blocks unstake/claim | Reversible | Event |
+|---|---|---|---|---|
+| `pause` | Yes | Yes | Yes | `paused` |
+| `start_graceful_shutdown` | Yes | No | No | `shutdown_started` |
+| `emergency_stop` | Yes | No | No | `stopped` |
+
+---
+
 ## Failure Scenarios
 
 ### Vault is paused

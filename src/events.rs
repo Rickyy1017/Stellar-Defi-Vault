@@ -304,6 +304,14 @@ pub fn stopped(env: &Env, admin: &Address) {
     env.events().publish(topics, env.ledger().sequence());
 }
 
+/// Emitted once when `start_graceful_shutdown` is triggered. New stakes are
+/// permanently blocked; existing stakers can still unstake, claim, and
+/// withdraw vested rewards normally.
+pub fn shutdown_started(env: &Env, admin: &Address) {
+    let topics = (symbol_short!("shutdown"), admin);
+    env.events().publish(topics, env.ledger().sequence());
+}
+
 // ── Issue #97: pool description event ────────────────────────────────────────
 
 /// Emitted when the admin updates the pool description.

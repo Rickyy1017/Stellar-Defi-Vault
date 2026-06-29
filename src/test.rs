@@ -3820,3 +3820,63 @@ fn test_referral_leaderboard_capped_at_10() {
     let board: soroban_sdk::Vec<ReferralLeaderboardEntry> = f.vault.referral_leaderboard();
     assert_eq!(board.len(), 10, "leaderboard must be capped at 10 entries");
 }
+
+// ── graceful_shutdown tests ───────────────────────────────────────────────────
+
+#[test]
+fn test_graceful_shutdown_blocks_new_stakes() {
+    let f = VaultFixture::new();
+    // Alice stakes successfully before shutdown.
+    f.vault.stake(&f.alice, &1_000_000);
+
+    f.vault.start_graceful_shutdown(&f.admin);
+
+    assert!(f.vault.is_shutting_down());
+
+    // New stake from bob must be rejected.
+    let result = f.vault.try_stake(&f.bob, &1_000_000);
+    assert_eq!(result, Err(Ok(VaultError::PoolShuttingDown)));
+}
+
+#[test]
+fn test_graceful_shutdown_existing_stakers_can_exit() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &1_000_000);
+
+    // Fund the reward pool so claim doesn't fail.
+    f.token_admin.mint(&f.admin, &100_000);
+    f.vault.fund_reward_pool(&f.admin, &100_000);
+
+    set_ledger(&f.env, 100_000);
+
+    f.vault.start_graceful_shutdown(&f.admin);
+
+    // Alice can still claim rewards.
+    let claimed = f.vault.claim(&f.alice);
+    assert!(claimed >= 0);
+
+    // Alice can still unstake.
+    f.vault.unstake(&f.alice, &1_000_000);
+}
+
+#[test]
+fn test_graceful_shutdown_is_irreversible() {
+    let f = VaultFixture::new();
+    f.vault.start_graceful_shutdown(&f.admin);
+
+    // There is no reverse operation; flag must remain true.
+    assert!(f.vault.is_shutting_down());
+
+    // A second call is idempotent and does not panic.
+    f.vault.start_graceful_shutdown(&f.admin);
+    assert!(f.vault.is_shutting_down());
+}
+
+#[test]
+fn test_graceful_shutdown_non_admin_rejected() {
+    let f = VaultFixture::new();
+
+    let result = f.vault.try_start_graceful_shutdown(&f.alice);
+    assert!(result.is_err());
+    assert!(!f.vault.is_shutting_down());
+}
