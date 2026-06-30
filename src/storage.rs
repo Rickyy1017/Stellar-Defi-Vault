@@ -38,6 +38,7 @@ pub enum DataKey {
     TotalRewardsPaid,
     Delegate(Address),
     LastUnstakeLedger(Address),
+    TotalEverClaimed,
     Restaked(Address),
     WhitelistEnabled,
     Whitelisted(Address),
@@ -407,4 +408,14 @@ pub struct EpochState {
 pub struct TotalStakedSnapshot {
     pub total_staked: i128,
     pub ledger: u32,
+}
+
+/// Issue #166: aggregated contract/token addresses for integration setup.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractAddresses {
+    pub contract: Address,
+    pub admin: Address,
+    pub stake_token: Address,
+    pub reward_token: Address,
 }

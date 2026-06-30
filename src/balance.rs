@@ -708,6 +708,7 @@ pub fn set_referral_registry(env: &Env, registry: &Vec<Address>) {
     env.storage()
         .instance()
         .set(&symbol_short!("ref_reg"), registry);
+}
 // ── Issue #118: relayer approval ─────────────────────────────────────────────
 pub fn get_approved_relayer(env: &Env, user: &Address) -> Option<Address> {
     let key = (Symbol::new(env, "app_rlyr"), user.clone());
