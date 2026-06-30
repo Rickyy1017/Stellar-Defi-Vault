@@ -38,6 +38,7 @@ pub enum DataKey {
     TotalRewardsPaid,
     Delegate(Address),
     LastUnstakeLedger(Address),
+    TotalEverClaimed,
     Restaked(Address),
     WhitelistEnabled,
     Whitelisted(Address),
@@ -395,12 +396,12 @@ pub struct TotalStakedSnapshot {
     pub ledger: u32,
 }
 
-/// Progress toward the next reward-boost tier.
+/// Issue #166: aggregated contract/token addresses for integration setup.
 #[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoostTierProgress {
-    pub current_tier: u32,
-    pub current_multiplier_bps: i128,
-    pub next_tier_in_ledgers: Option<u32>,
-    pub next_multiplier_bps: Option<i128>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractAddresses {
+    pub contract: Address,
+    pub admin: Address,
+    pub stake_token: Address,
+    pub reward_token: Address,
 }

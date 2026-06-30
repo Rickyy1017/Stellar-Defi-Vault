@@ -6,11 +6,11 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        BoostTierProgress, CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
+        CampaignInfo, ChangelogEntry, ClaimWindow, ContractAddresses, ContractMetadata, DataKey, InterfaceId,
         LeaderboardEntry, PoolConfig, PoolHealthReport, PoolStats, RateHistoryEntry,
         ReferralLeaderboardEntry, StakeAction, StakeHistoryEntry, StakePosition, StakeStreak,
-        StakingEfficiencyScore, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary,
-        VestingEntry, EpochState,
+        StakingEfficiencyScore, TotalStakedSnapshot, UnbondingPosition, UnstakeCheckResult,
+        UserStats, UserSummary, VestingEntry, EpochState,
     },
 };
 
@@ -841,6 +841,57 @@ impl VaultContract {
             reward_rate_bps,
             paused,
         })
+    }
+
+    /// Issue #166: Return contract, admin, stake token, and reward token
+    /// addresses in a single call to minimize RPC overhead during integration.
+    pub fn get_contract_addresses(env: Env) -> Result<ContractAddresses, VaultError> {
+        let admin = admin::get_admin(&env)?;
+        let stake_token = Self::token_address(&env)?;
+        let reward_token = balance::get_reward_token(&env).unwrap_or(stake_token.clone());
+        Ok(ContractAddresses {
+            contract: env.current_contract_address(),
+            admin,
+            stake_token,
+            reward_token,
+        })
+    }
+
+    /// Issue #165: Pre-flight check for whether `user` has approved enough
+    /// stake token allowance for the contract to pull `amount` on stake.
+    /// Pure read — no auth, no state changes.
+    pub fn stake_token_approval_check(env: Env, user: Address, amount: i128) -> bool {
+        let stake_token = match Self::token_address(&env) {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+        let token_client = token::Client::new(&env, &stake_token);
+        let allowance = token_client.allowance(&user, &env.current_contract_address());
+        allowance >= amount
+    }
+
+    /// Issue #164: Lifetime cumulative reward payout counter. Never decreases.
+    pub fn get_total_ever_claimed(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalEverClaimed)
+            .unwrap_or(0)
+    }
+
+    /// Issue #162: Estimate the ledger at which a user's lock period expires.
+    /// Returns `None` if no lock period is configured or the user has no position.
+    /// Returns the maturity ledger even if already past (lets frontends
+    /// distinguish "no lock" from "lock already expired").
+    pub fn get_position_maturity_ledger(env: Env, user: Address) -> Option<u32> {
+        let lock_period: u32 = env.storage().instance().get(&DataKey::LockPeriod).unwrap_or(0);
+        if lock_period == 0 {
+            return None;
+        }
+        let staked_at: Option<u32> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StakedAtLedger(user));
+        staked_at.map(|s| s.saturating_add(lock_period))
     }
 
     /// Admin: set the per-user reward claim cap and rolling window size.
@@ -3290,6 +3341,15 @@ impl VaultContract {
         }
 
         balance::set_reward_pool_balance(env, reward_pool - reward);
+        // Issue #164: lifetime cumulative reward payout counter, never decreases.
+        let total_ever_claimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalEverClaimed)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalEverClaimed, &(total_ever_claimed + reward));
         // Reduce accrued by the amount paid; cap-deferred remainder stays in accrued.
         let remaining_accrued = accrued
             .checked_sub(reward)
