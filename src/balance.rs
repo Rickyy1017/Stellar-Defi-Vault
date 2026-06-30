@@ -1,7 +1,7 @@
 use crate::storage::{
     ChangelogEntry, ClaimWindow, DataKey, RateHistoryEntry, ReferralStats, VestingEntry,
 };
-use crate::storage::{ChangelogEntry, ClaimWindow, DataKey, RateHistoryEntry, TotalStakedSnapshot, VestingEntry};
+
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 pub fn get_shares(env: &Env, user: &Address) -> i128 {
@@ -259,9 +259,7 @@ pub fn get_nft_contract(env: &Env) -> Option<Address> {
 }
 
 pub fn set_nft_contract(env: &Env, nft: &Address) {
-    env.storage()
-        .instance()
-        .set(&symbol_short!("nft_con"), nft);
+    env.storage().instance().set(&symbol_short!("nft_con"), nft);
 }
 
 // ── Issue #41: restake grace window ──────────────────────────────────────────
@@ -725,21 +723,6 @@ pub fn remove_approved_relayer(env: &Env, user: &Address) {
     env.storage().persistent().remove(&key);
 }
 
-// ── Issue #124: rich reward-rate history ─────────────────────────────────────
-pub const MAX_RICH_RATE_HISTORY: u32 = 20;
-
-pub fn get_reward_rate_history(env: &Env) -> Vec<RateHistoryEntry> {
-    let key = (Symbol::new(env, "r_history"),);
-    env.storage()
-        .instance()
-        .get(&key)
-        .unwrap_or_else(|| Vec::new(env))
-}
-
-pub fn set_reward_rate_history(env: &Env, history: &Vec<RateHistoryEntry>) {
-    let key = (Symbol::new(env, "r_history"),);
-    env.storage().instance().set(&key, history);
-}
 
 // ── Issue #126: yield source whitelist ───────────────────────────────────────
 pub fn is_yield_source(env: &Env, source: &Address) -> bool {

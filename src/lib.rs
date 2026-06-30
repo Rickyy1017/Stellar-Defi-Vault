@@ -4,11 +4,11 @@ mod admin;
 mod balance;
 mod errors;
 mod events;
+pub mod example_consumer;
+pub mod interface;
 pub mod nft;
 mod storage;
 mod vault;
-pub mod interface;
-pub mod example_consumer;
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;

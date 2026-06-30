@@ -3,15 +3,20 @@ use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128, ledger: u32) {
     let topics = (symbol_short!("deposit"), depositor);
-    env.events().publish(topics, (amount, shares_minted, ledger));
+    env.events()
+        .publish(topics, (amount, shares_minted, ledger));
 }
 
-pub fn withdraw(env: &Env, withdrawer: &Address, shares_burned: i128, amount_returned: i128, ledger: u32) {
+pub fn withdraw(
+    env: &Env,
+    withdrawer: &Address,
+    shares_burned: i128,
+    amount_returned: i128,
+    ledger: u32,
+) {
     let topics = (symbol_short!("withdraw"), withdrawer);
-    env.events().publish(
-        topics,
-        (shares_burned, amount_returned, ledger),
-    );
+    env.events()
+        .publish(topics, (shares_burned, amount_returned, ledger));
 }
 
 pub fn paused(env: &Env, admin: &Address, ledger: u32) {
@@ -262,8 +267,7 @@ pub fn auto_paused(env: &Env, reward_balance: i128, threshold: i128) {
 /// Emitted when a user claims staking rewards (via `claim` or `stake_and_claim`).
 pub fn claimed(env: &Env, user: &Address, reward: i128, ledger: u32) {
     let topics = (symbol_short!("claimed"), user);
-    env.events()
-        .publish(topics, (reward, ledger));
+    env.events().publish(topics, (reward, ledger));
 }
 
 /// Emitted by `initialize` so indexers can detect new pool deployments on-chain.
@@ -324,8 +328,10 @@ pub fn description_updated(env: &Env, admin: &Address, description: &soroban_sdk
 /// Emitted when a user merges their staking positions.
 pub fn positions_merged(env: &Env, user: &Address, count_merged: u32, total_amount: i128) {
     let topics = (symbol_short!("merge"), user);
-    env.events()
-        .publish(topics, (count_merged, total_amount, env.ledger().sequence()));
+    env.events().publish(
+        topics,
+        (count_merged, total_amount, env.ledger().sequence()),
+    );
 }
 
 // ── Issue #118: relayer approval events ───────────────────────────────────────

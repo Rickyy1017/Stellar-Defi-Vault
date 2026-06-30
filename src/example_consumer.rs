@@ -1,5 +1,5 @@
-use soroban_sdk::{contract, contractimpl, Address, Env};
 use crate::interface::IStakingPoolClient;
+use soroban_sdk::{contract, contractimpl, Address, Env};
 
 #[contract]
 pub struct ExampleConsumer;
