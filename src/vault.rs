@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Vec, symbol_short};
 
 use crate::{
     admin, balance,
@@ -6,14 +6,11 @@ use crate::{
     events,
     nft::StakeReceiptNFTClient,
     storage::{
-        CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
+        BoostTierProgress, CampaignInfo, ChangelogEntry, ClaimWindow, ContractMetadata, DataKey, InterfaceId,
         LeaderboardEntry, PoolConfig, PoolHealthReport, PoolStats, RateHistoryEntry,
         ReferralLeaderboardEntry, StakeAction, StakeHistoryEntry, StakePosition, StakeStreak,
         StakingEfficiencyScore, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary,
         VestingEntry, EpochState,
-        LeaderboardEntry, PoolConfig, PoolStats, StakeAction, StakeHistoryEntry, StakePosition,
-        StakeStreak, StakingEfficiencyScore, TotalStakedSnapshot, UnbondingPosition,
-        UnstakeCheckResult, UserStats, UserSummary, VestingEntry, EpochState,
     },
 };
 
@@ -78,6 +75,11 @@ impl VaultContract {
         admin::set_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Paused, &false);
+        // Store the original deployer address (write-once, never changes).
+        // Uses symbol_short! to avoid pushing DataKey over the contracttype variant limit.
+        env.storage()
+            .instance()
+            .set(&symbol_short!("deployer"), &admin);
         // By default, set the slash treasury to the admin address. Can be updated by admin later.
         balance::set_slash_treasury(&env, &admin);
         // Issue #117: record initialization ledger for pool_uptime_ledgers.
@@ -180,6 +182,21 @@ impl VaultContract {
     /// Read-only query for the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, VaultError> {
         admin::get_admin(&env)
+    }
+
+    /// Read-only query for the original deployer address.
+    ///
+    /// Returns the address that called `initialize` when the pool was first
+    /// deployed. This value is write-once and never changes, even if the
+    /// admin is transferred via `transfer_admin`.
+    ///
+    /// Reverts with `NotInitialized` if the pool has not been initialized.
+    /// No auth required.
+    pub fn pool_created_by(env: Env) -> Result<Address, VaultError> {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("deployer"))
+            .ok_or(VaultError::NotInitialized)
     }
 
     /// Read-only query for the deployed contract version.
@@ -1894,8 +1911,8 @@ impl VaultContract {
             .get::<_, u32>(&DataKey::StakedAtLedger(from.clone()))
             .unwrap_or(env.ledger().sequence());
         let last_claim = balance::get_last_claim_ledger(&env, &from);
-        let checkpoint = balance::get_reward_checkpoint_ledger(&env, &from)
-            .unwrap_or(env.ledger().sequence());
+        let checkpoint =
+            balance::get_reward_checkpoint_ledger(&env, &from).unwrap_or(env.ledger().sequence());
         let accrued = balance::get_accrued_reward(&env, &from);
         let pending_estimate = Self::pending_reward(&env, &from).unwrap_or(accrued);
 
@@ -2556,7 +2573,13 @@ impl VaultContract {
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &amount_returned);
 
-        events::withdraw(env, staker, shares, amount_returned, env.ledger().sequence());
+        events::withdraw(
+            env,
+            staker,
+            shares,
+            amount_returned,
+            env.ledger().sequence(),
+        );
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
 
         // Issue #129: auto-pause if reward balance drops below threshold
@@ -3665,7 +3688,9 @@ impl VaultContract {
     pub fn set_vesting_period(env: Env, admin: Address, ledgers: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         let _ = admin;
-        env.storage().instance().set(&DataKey::VestingPeriod, &ledgers);
+        env.storage()
+            .instance()
+            .set(&DataKey::VestingPeriod, &ledgers);
         Ok(())
     }
 
@@ -3818,7 +3843,9 @@ impl VaultContract {
         }
 
         env.storage().instance().set(&DataKey::EpochMode, &true);
-        env.storage().instance().set(&DataKey::EpochLedgers, &epoch_ledgers);
+        env.storage()
+            .instance()
+            .set(&DataKey::EpochLedgers, &epoch_ledgers);
         env.storage()
             .instance()
             .set(&DataKey::EpochRewardPerEpoch, &reward_per_epoch);
@@ -3881,9 +3908,10 @@ impl VaultContract {
             0
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::EpochRewardFactor(state.epoch_number), &reward_factor);
+        env.storage().persistent().set(
+            &DataKey::EpochRewardFactor(state.epoch_number),
+            &reward_factor,
+        );
 
         let all_stakers = balance::get_all_stakers(&env);
         let total_shares = balance::get_total_shares(&env);
@@ -3893,12 +3921,10 @@ impl VaultContract {
             let staker = all_stakers.get(i).unwrap();
             let shares = balance::get_shares(&env, &staker);
             if shares > 0 && total_shares > 0 {
-                let staker_staked = balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
+                let staker_staked =
+                    balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
                 env.storage().persistent().set(
-                    &DataKey::UserEpochSnapshot(crate::storage::UserEpochSnapshotKey {
-                        user: staker,
-                        epoch: state.epoch_number,
-                    }),
+                    &(soroban_sdk::Symbol::new(&env, "uep_snp"), staker, state.epoch_number),
                     &staker_staked,
                 );
             }
@@ -3936,10 +3962,7 @@ impl VaultContract {
         let user_staked: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::UserEpochSnapshot(crate::storage::UserEpochSnapshotKey {
-                user,
-                epoch: epoch_number,
-            }))
+            .get(&(soroban_sdk::Symbol::new(&env, "uep_snp"), user.clone(), epoch_number))
             .unwrap_or(0);
 
         user_staked
@@ -3960,7 +3983,7 @@ impl VaultContract {
         let last_claimed = env
             .storage()
             .persistent()
-            .get::<_, u32>(&DataKey::UserLastClaimedEpoch(user.clone()))
+            .get::<_, u32>(&(soroban_sdk::Symbol::new(&env, "ulc_ep"), user.clone()))
             .unwrap_or(0);
 
         let mut total_accumulated: i128 = 0;
@@ -3990,7 +4013,7 @@ impl VaultContract {
             .unwrap_or(0);
 
         if vesting_period > 0 {
-        let mut entries = balance::get_vesting_entries(&env, &user);
+            let mut entries = balance::get_vesting_entries(&env, &user);
             if entries.len() >= 10 {
                 return Err(VaultError::VestingQueueFull);
             }
@@ -4014,7 +4037,7 @@ impl VaultContract {
         balance::set_total_rewards_paid(&env, paid + total_accumulated);
 
         env.storage().persistent().set(
-            &DataKey::UserLastClaimedEpoch(user.clone()),
+            &(soroban_sdk::Symbol::new(&env, "ulc_ep"), user.clone()),
             &(current_epoch_state.epoch_number - 1),
         );
 
@@ -4628,7 +4651,8 @@ impl VaultContract {
         // In the current scalar model, we consolidate the single position.
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let total_amount = balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
+        let total_amount =
+            balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
 
         // Reset locking period by updating the staked_at sequence to current ledger sequence
         let current_ledger = env.ledger().sequence();
@@ -4720,6 +4744,67 @@ impl VaultContract {
 
     pub fn get_total_rewards_added(env: Env) -> i128 {
         balance::get_total_rewards_added(&env)
+    }
+
+    // ── Reward refill alert helper ─────────────────────────────────────────────
+
+    fn refill_alert_threshold_ledgers() -> u32 {
+        REFILL_ALERT_DAYS * LEDGERS_PER_DAY
+    }
+
+    fn check_refill_alert(env: &Env) {
+        let runway = Self::compute_runway(env);
+        if runway >= Self::refill_alert_threshold_ledgers() {
+            return;
+        }
+
+        let current_ledger = env.ledger().sequence();
+        let last_alert: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("lstalt"))
+            .unwrap_or(0);
+
+        if current_ledger.saturating_sub(last_alert) < LEDGERS_PER_DAY {
+            return;
+        }
+
+        let reward_balance = balance::get_reward_pool_balance(env);
+        events::refill_alert(env, reward_balance, runway, current_ledger);
+
+        env.storage()
+            .instance()
+            .set(&symbol_short!("lstalt"), &current_ledger);
+    }
+
+    fn compute_runway(env: &Env) -> u32 {
+        let drain_rate = Self::compute_reward_drain_rate(env);
+        if drain_rate == 0 {
+            return u32::MAX;
+        }
+        let reward_pool = balance::get_reward_pool_balance(env);
+        if reward_pool <= 0 {
+            return 0;
+        }
+        let ledgers = reward_pool / drain_rate;
+        if ledgers > u32::MAX as i128 {
+            u32::MAX
+        } else {
+            ledgers as u32
+        }
+    }
+
+    fn compute_reward_drain_rate(env: &Env) -> i128 {
+        let total_staked = balance::get_total_deposited(env);
+        let rate_bps = balance::get_reward_rate_bps(env);
+        if total_staked == 0 || rate_bps == 0 {
+            return 0;
+        }
+        total_staked
+            .checked_mul(rate_bps as i128)
+            .and_then(|v| v.checked_div(BOOST_BPS_BASE as i128))
+            .and_then(|v| v.checked_div(STELLAR_LEDGERS_PER_YEAR as i128))
+            .unwrap_or(0)
     }
 
 }

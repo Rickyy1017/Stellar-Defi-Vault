@@ -129,22 +129,21 @@ pub enum VaultError {
     MessageTooLong = 41,
 
     /// Returned by epoch-mode entrypoints when the contract is in the wrong mode.
-    EpochModeConflict = 41,
+    EpochModeConflict = 42,
     /// Returned when a vesting queue already holds the maximum supported entries.
-    VestingQueueFull = 42,
+    VestingQueueFull = 43,
     /// Returned when a vesting withdrawal is requested but nothing has matured yet.
-    NothingToWithdraw = 43,
+    NothingToWithdraw = 44,
     /// Returned when an epoch cannot be finalized because the configured window has not elapsed.
-    EpochNotFinalized = 44,
+    EpochNotFinalized = 45,
     /// Caller is not an approved relayer for the target user (issue #118).
-    RelayerNotApproved = 45,
+    RelayerNotApproved = 46,
     /// Caller is not on the yield source whitelist (issue #126).
-    NotYieldSource = 46,
+    NotYieldSource = 47,
     /// notify_reward_added called with a zero or negative amount (issue #126).
-    InvalidRewardAmount = 43,
+    InvalidRewardAmount = 48,
     /// Returned when a new stake is attempted after `start_graceful_shutdown` has been called.
-    PoolShuttingDown = 45,
-    InvalidRewardAmount = 47,
+    PoolShuttingDown = 49,
     /// Reverts with NotInEpochMode error if pool is not configured for epoch mode.
-    NotInEpochMode = 48,
+    NotInEpochMode = 50,
 }
