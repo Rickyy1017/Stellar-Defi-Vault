@@ -390,37 +390,6 @@ pub enum VaultFeatureError {
     NotRequestedCounterparty = 49,
     InsufficientAmount = 50,
 }
-    // --- Admin action nonce / governance comment thread (issues #374, #375) ---
-
-    /// Returned by `execute_admin_action_with_nonce` when the supplied nonce
-    /// does not match the admin's next expected nonce — either a stale,
-    /// already-consumed value (a replayed transaction) or one issued too far
-    /// ahead. Call `admin_action_nonce()` for the correct value.
-    NonceMismatch = 60,
-    /// Returned by `post_proposal_comment` when the comment text exceeds
-    /// `proposal_comment_thread::MAX_COMMENT_LENGTH`.
-    CommentTooLong = 61,
-    // --- Pool pre-sale (issue #369) ---
-    /// Returned by `reserve_presale_spot`, `redeem_presale_reservation`, and
-    /// `cancel_presale` when no pre-sale has been started, or the active one
-    /// was already cancelled.
-    PresaleNotActive = 60,
-    /// Returned by `start_presale` when a pre-sale is already active, and by
-    /// `reserve_presale_spot` once the pre-sale's `opens_at` ledger has been
-    /// reached (reservations are only accepted before the pool opens).
-    PresaleReservationClosed = 61,
-    /// Returned by `redeem_presale_reservation` when called before the
-    /// pre-sale's `opens_at` ledger.
-    PresaleNotYetOpen = 62,
-    /// Returned by `reserve_presale_spot` when the reservation would exceed
-    /// `max_reservation_per_user`.
-    PresaleReservationExceedsMax = 63,
-    /// Returned by `redeem_presale_reservation` when the caller has no
-    /// reservation (or reserved zero).
-    NoPresaleReservation = 64,
-    /// Returned by `redeem_presale_reservation` when the reservation was
-    /// already redeemed.
-    PresaleReservationAlreadyRedeemed = 65,
 
 // Fourth error enum for overflow errors beyond the Soroban 50-variant cap.
 // VaultFeatureError exceeded the cap; new errors go here.
@@ -571,17 +540,4 @@ impl From<VaultError> for VaultQuizError {
             _ => VaultQuizError::Unauthorized,
         }
     }
-    /// Returned by `sign_covenant` (issue #413) when the supplied
-    /// `terms_hash` does not match the currently published pool terms.
-    TermsMismatch = 71,
-    /// Returned by `stake_with_covenant` (issue #413) when the caller has
-    /// not signed the currently published pool terms.
-    CovenantRequired = 72,
-    /// Returned by `pin_ipfs_hash` (issue #439) when the caller's staked
-    /// position amount is below the configured `min_stake` for the
-    /// stake-gated IPFS storage service.
-    InsufficientStakeForStorage = 73,
-    /// Returned by `unstake` (issue #441) when the requested amount is below
-    /// the configured minimum unstake amount and is not a full position exit.
-    BelowMinimumUnstake = 74,
 }
