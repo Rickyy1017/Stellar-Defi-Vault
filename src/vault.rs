@@ -3421,7 +3421,9 @@ impl VaultContract {
     /// 
     /// **Note:** This is a simplified estimate that does not account for
     /// boost multipliers, campaign bonuses, or compounding effects. Actual
-    /// rewards will vary based on rate changes over time.
+    /// rewards will vary based on rate changes over time and pool conditions.
+    /// 
+    /// No authentication required. Works for any hypothetical amount.
     pub fn get_estimated_annual_reward(env: Env, amount: i128) -> i128 {
         if amount == 0 {
             return 0;
