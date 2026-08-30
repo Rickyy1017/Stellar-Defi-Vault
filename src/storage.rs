@@ -1414,6 +1414,8 @@ pub struct Quiz {
     pub answer_hash: soroban_sdk::Bytes,
     pub reward_tier_unlocked: u32,
     pub attempts_allowed: u32,
+}
+
 // ── Issue #377: position health alert ────────────────────────────────────────
 
 /// Result of `position_health_alert()`: a unified check across every

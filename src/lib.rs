@@ -26,6 +26,7 @@ pub mod price_oracle; // issue #290 — position price oracle
 pub mod reputation_decay; // reputation score time-decay mechanism
 pub mod validator_rewards; // validator node reward integration
 pub mod vesting_cliff; // issue #287 — reward vesting cliff
+pub mod vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
@@ -50,3 +51,6 @@ mod test_validator_rewards;
 
 #[cfg(test)]
 mod test_features_287_290;
+
+#[cfg(test)]
+mod test_issues_463_466;

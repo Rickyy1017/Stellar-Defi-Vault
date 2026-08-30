@@ -181,144 +181,150 @@ pub enum VaultExtError {
     ArithmeticError = 4,
     /// Mirrors `VaultError::AlreadyInitialized` ΓÇö returned by `import_state()`.
     AlreadyInitialized = 5,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 6,
     /// Returned by `set_insurance_rate_bps()` when `bps` exceeds 500 (5%)
     /// (issue #199).
-    InvalidInsuranceRate = 6,
+    InvalidInsuranceRate = 7,
     /// Returned by `export_state()` when more than 100 positions would be
     /// exported (issue #203).
-    TooManyPositions = 7,
+    TooManyPositions = 8,
     /// Returned by `set_fee_recipients()` when `recipients.len() > 5`
     /// (issue #197), and by `add_output_token()` when the output-token
     /// whitelist is already full (issue #244).
-    TooManyRecipients = 8,
+    TooManyRecipients = 9,
     /// Returned by `set_fee_recipients()` when the recipients' `share_bps`
     /// values don't sum to exactly 10 000 (issue #197).
-    InvalidFeeAllocation = 9,
+    InvalidFeeAllocation = 10,
     /// Returned by `queue_action()` when 5 actions are already pending
     /// (issue #195).
-    TooManyPendingActions = 10,
+    TooManyPendingActions = 11,
     /// Returned by `execute_action()`/`cancel_action()` when the given
     /// action id doesn't exist or was already executed/cancelled (issue
     /// #195).
-    ActionNotFound = 11,
+    ActionNotFound = 12,
     /// Returned by `execute_action()` when called before `executable_at`
     /// (issue #195).
-    ActionNotYetExecutable = 12,
+    ActionNotYetExecutable = 13,
     /// Returned by `initialize_multisig()` when `admins.len()` is 0 or > 5,
     /// or `threshold` is 0 or greater than `admins.len()` (issue #196).
-    InvalidMultisigConfig = 13,
+    InvalidMultisigConfig = 14,
     /// Returned by `propose_action()` when 10 open proposals already exist
     /// (issue #196).
-    TooManyProposals = 14,
+    TooManyProposals = 15,
     /// Returned by `propose_action()`/`approve_action()` when the caller is
     /// not one of the configured multisig admins (issue #196).
-    NotAMultisigAdmin = 15,
+    NotAMultisigAdmin = 16,
     /// Returned by `approve_action()` when the caller already approved this
     /// proposal (issue #196).
-    AlreadyApproved = 16,
+    AlreadyApproved = 17,
     /// Returned by `execute_proposal()` when approvals are below the
     /// configured threshold, or the proposal id doesn't exist / was already
     /// executed (issue #196).
-    ProposalNotReady = 17,
+    ProposalNotReady = 18,
     /// Returned by `rollback_last_rate_change()` when there is no previous
     /// rate to restore, or it was already rolled back (issue #206).
-    RollbackUnavailable = 18,
+    RollbackUnavailable = 19,
     /// Returned by `swap_and_stake()` when the DEX swap's output amount is
     /// below the caller-supplied `min_stake_amount` (issue #205).
-    SlippageExceeded = 19,
+    SlippageExceeded = 20,
     /// Returned by `swap_and_stake()` when `input_token` is not registered
     /// with a DEX router capable of swapping it to the stake token, or when
     /// no DEX router has been configured at all (issue #205). Also returned
     /// by `claim_in_token()` for an `output_token` that is not on the
     /// admin-managed whitelist (issue #244).
-    UnsupportedInputToken = 20,
+    UnsupportedInputToken = 21,
     /// Returned by `position_split()` when `split_amount` is not strictly
     /// between 0 and the caller's current position amount (issue #209).
-    InvalidSplitAmount = 21,
+    InvalidSplitAmount = 22,
     /// Returned by `claim_merkle_reward()` when the Merkle proof is invalid.
-    MerkleInvalidProof = 22,
+    MerkleInvalidProof = 23,
     /// Returned by `claim_merkle_reward()` when the user has already claimed
     /// for the given epoch.
-    MerkleAlreadyClaimed = 23,
+    MerkleAlreadyClaimed = 24,
     /// Returned by `create_tournament()` when a tournament is already active.
-    TournamentAlreadyExists = 24,
+    TournamentAlreadyExists = 25,
     /// Returned by `finalize_tournament()` when the tournament has not ended yet.
-    TournamentNotEnded = 25,
+    TournamentNotEnded = 26,
     /// Returned by `finalize_tournament()` when no tournament exists.
-    TournamentNotFound = 26,
+    TournamentNotFound = 27,
     /// Returned by `compare_pools()` when more than 5 external pools are supplied.
-    TooManyPools = 27,
+    /// Returned by `compare_pools()` when more than 5 external pools are supplied.
+    TooManyPools = 28,
     /// Returned by `execute_buyback()` when buyback is not enabled.
-    BuybackNotEnabled = 28,
+    BuybackNotEnabled = 29,
     /// Returned by `execute_buyback()` when accrued fees are below the threshold.
-    BuybackThresholdNotMet = 29,
+    BuybackThresholdNotMet = 30,
     /// Returned by stake/claim rate-limit checks (issue #201).
-    RateLimitExceeded = 30,
+    RateLimitExceeded = 31,
     /// Returned by `start_bootstrap()` when `initial_rate < base_rate`.
-    InvalidBootstrapConfig = 31,
+    InvalidBootstrapConfig = 32,
     /// Returned by delegation chain operations when a cycle is detected (issue #200).
-    CircularDelegation = 32,
+    CircularDelegation = 33,
     /// Returned when a delegation chain would exceed the maximum length (issue #200).
-    ChainTooLong = 33,
+    ChainTooLong = 34,
     /// Returned by `issue_certificate` when the user's stake is below the minimum (issue #222).
-    IneligibleForCertificate = 34,
+    IneligibleForCertificate = 35,
     /// Returned by `set_reward_smoothing()` when the smoothing period exceeds
     /// `MAX_SMOOTHING_PERIOD_LEDGERS`, or when `min_amount` is negative
     /// (issue #235).
-    InvalidSmoothingConfig = 35,
+    InvalidSmoothingConfig = 36,
     /// Returned by `referral_tree_data()` when `max_level` exceeds
     /// `MAX_REFERRAL_TREE_DEPTH` (issue #236).
-    ReferralDepthTooDeep = 36,
+    ReferralDepthTooDeep = 37,
     /// Returned by `start_capacity_auction()` when an auction is already open,
     /// and by `place_bid()` / `finalize_capacity_auction()` when no auction
     /// exists (issue #237).
-    AuctionNotFound = 37,
+    AuctionNotFound = 38,
     /// Returned by `start_capacity_auction()` when `spots` is 0 or above
     /// `MAX_AUCTION_SPOTS`, or `duration_ledgers` is 0 (issue #237).
-    InvalidAuctionConfig = 38,
+    InvalidAuctionConfig = 39,
     /// Returned by `start_capacity_auction()` when the previous auction has not
     /// been finalized yet (issue #237).
-    AuctionAlreadyActive = 39,
+    AuctionAlreadyActive = 40,
     /// Returned by `place_bid()` after the auction window has closed, and by
     /// `place_bid()` / `finalize_capacity_auction()` on an already-finalized
     /// auction (issue #237).
-    AuctionClosed = 40,
+    AuctionClosed = 41,
     /// Returned by `finalize_capacity_auction()` when called before the auction
     /// window has elapsed (issue #237).
-    AuctionNotEnded = 41,
+    AuctionNotEnded = 42,
     /// Returned by `place_bid()` when the resulting bid is below the auction's
     /// `min_bid` (issue #237).
-    BidBelowMinimum = 42,
+    BidBelowMinimum = 43,
     /// Returned by `place_bid()` when the auction already holds
     /// `MAX_AUCTION_BIDS` distinct bidders (issue #237).
-    TooManyBids = 43,
+    TooManyBids = 44,
     /// Returned by `create_lottery()` when an undrawn lottery already exists,
     /// and by `draw_lottery()` when no lottery is configured or it was
     /// already drawn (issue #239).
-    LotteryAlreadyActive = 44,
+    LotteryAlreadyActive = 45,
     /// Returned by `draw_lottery()` when called before `draw_at_ledger`
     /// (issue #239).
-    LotteryNotReady = 45,
+    LotteryNotReady = 46,
     /// Returned by `add_milestone()` when 10 milestones are already
     /// configured (issue #238).
-    TooManyMilestones = 46,
+    TooManyMilestones = 47,
     /// Returned by `check_and_release()` when no oracle contract has been
     /// registered via `set_oracle_contract()` (issue #240).
-    NoOracleConfigured = 47,
+    NoOracleConfigured = 48,
     /// Returned by `veto_proposal()` when the caller's pool share is below
     /// the configured veto threshold, or the veto threshold is unset (0),
     /// which disables the feature entirely (issue #241).
-    BelowVetoThreshold = 48,
+    BelowVetoThreshold = 49,
     /// Returned by `veto_proposal()` when the proposal already has a vetoer,
     /// or has already been enacted and so can no longer be vetoed (issue
     /// #241).
-    AlreadyVetoed = 49,
+    AlreadyVetoed = 50,
     /// Returned by `set_veto_threshold_bps()` when `bps` exceeds 10 000
     /// (100%) (issue #241). Both error enums are at Soroban's 50-variant cap,
     /// so this doubles as the generic "basis-points value out of range" code ΓÇö
     /// `start_matching_program()` also returns it for a `match_rate_bps` above
     /// 10 000 (issue #242).
-    InvalidVetoThreshold = 50,
+    InvalidVetoThreshold = 51,
+    /// Returned by `position_clawback` (issue #463) when the clawback window
+    /// has expired and the position can no longer be reversed.
+    ClawbackWindowExpired = 52,
 }
 
 /// Third error enum, for the same 50-variant reason `VaultExtError` exists:
@@ -390,37 +396,6 @@ pub enum VaultFeatureError {
     NotRequestedCounterparty = 49,
     InsufficientAmount = 50,
 }
-    // --- Admin action nonce / governance comment thread (issues #374, #375) ---
-
-    /// Returned by `execute_admin_action_with_nonce` when the supplied nonce
-    /// does not match the admin's next expected nonce — either a stale,
-    /// already-consumed value (a replayed transaction) or one issued too far
-    /// ahead. Call `admin_action_nonce()` for the correct value.
-    NonceMismatch = 60,
-    /// Returned by `post_proposal_comment` when the comment text exceeds
-    /// `proposal_comment_thread::MAX_COMMENT_LENGTH`.
-    CommentTooLong = 61,
-    // --- Pool pre-sale (issue #369) ---
-    /// Returned by `reserve_presale_spot`, `redeem_presale_reservation`, and
-    /// `cancel_presale` when no pre-sale has been started, or the active one
-    /// was already cancelled.
-    PresaleNotActive = 60,
-    /// Returned by `start_presale` when a pre-sale is already active, and by
-    /// `reserve_presale_spot` once the pre-sale's `opens_at` ledger has been
-    /// reached (reservations are only accepted before the pool opens).
-    PresaleReservationClosed = 61,
-    /// Returned by `redeem_presale_reservation` when called before the
-    /// pre-sale's `opens_at` ledger.
-    PresaleNotYetOpen = 62,
-    /// Returned by `reserve_presale_spot` when the reservation would exceed
-    /// `max_reservation_per_user`.
-    PresaleReservationExceedsMax = 63,
-    /// Returned by `redeem_presale_reservation` when the caller has no
-    /// reservation (or reserved zero).
-    NoPresaleReservation = 64,
-    /// Returned by `redeem_presale_reservation` when the reservation was
-    /// already redeemed.
-    PresaleReservationAlreadyRedeemed = 65,
 
 // Fourth error enum for overflow errors beyond the Soroban 50-variant cap.
 // VaultFeatureError exceeded the cap; new errors go here.
@@ -505,6 +480,7 @@ impl From<VaultError> for VaultExtError {
             VaultError::NotInitialized => VaultExtError::NotInitialized,
             VaultError::ZeroAmount => VaultExtError::ZeroAmount,
             VaultError::ArithmeticError => VaultExtError::ArithmeticError,
+            VaultError::PositionNotFound => VaultExtError::PositionNotFound,
             // Any other VaultError reaching here (shouldn't happen given how
             // these functions are written) maps to the closest generic case.
             _ => VaultExtError::Unauthorized,
@@ -584,4 +560,7 @@ impl From<VaultError> for VaultQuizError {
     /// Returned by `unstake` (issue #441) when the requested amount is below
     /// the configured minimum unstake amount and is not a full position exit.
     BelowMinimumUnstake = 74,
+    /// Returned by `position_clawback` (issue #463) when the clawback window
+    /// has expired and the position can no longer be reversed.
+    ClawbackWindowExpired = 75,
 }
