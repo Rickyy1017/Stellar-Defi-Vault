@@ -93,19 +93,3 @@ impl VaultContract {
         }
     }
 }
-
-// Additional automated hook triggers to maintain position continuity
-#[contractimpl]
-impl VaultContract {
-    pub fn claim(env: Env, user: Address) {
-        // Automatically check and update badge stats during claim events
-        Self::trigger_claim_badge_hook(env, user);
-    }
-
-    pub fn unstake(env: Env, user: Address, amount: i128) {
-        // If the unstake action empties the position, wipe the badge tracking state
-        // (Assuming a position check logic where amount indicates a complete unstake action)
-        let is_full_unstake = amount > 0; 
-        Self::trigger_unstake_badge_hook(env, user, is_full_unstake);
-    }
-}

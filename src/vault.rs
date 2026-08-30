@@ -15,7 +15,7 @@ use crate::{
         DelegationChain, DynamicFeeConfig, EpochState, FeeRecipient, FlashStakeReceipt,
         GovernanceProposal, HalvingConfig, InsurancePolicy, InsuranceProduct, InterfaceId,
         LeaderboardEntry, Loan, LoanConfig, LotteryConfig, MatchingProgram, MerkleRoot,
-        MigrationExport, Milestone, MilestoneCondition, MultisigConfig, OperatorDashboard,
+        MigrationExport, Milestone, MilestoneCondition, MultisigConfig,
         OptimalClaimAdvice, PauseInfo, PauseReason, PendingAction, PoolComparison, PoolConfig,
         OperatorDashboard, PoolHealthReport, PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam,
         RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore, RewardTier,
@@ -25,14 +25,6 @@ use crate::{
         StakingEfficiencyScore, StorageUsageReport, SunsetState, SwapOffer, TaxReport, Tournament,
         TriggerDirection, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary,
         VestingEntry, YieldComparison,
-        PoolHealthReport, PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord,
-        ProposableParam, RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode,
-        ReputationScore, RevenueShareMerkleRoot, RevenueSharingConfig, RewardMultiplierBreakdown,
-        RewardTier, RoundingPolicy, Season, SmoothingSchedule, SmoothingStatus, StakeAction,
-        StakeHistoryEntry, StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
-        StorageUsageReport, SunsetState, SwapOffer, TaxReport, Tournament, TriggerDirection,
-        UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary, VestingEntry,
-        YieldComparison,
     },
 };
 
@@ -140,7 +132,7 @@ pub struct WaitlistEntry {
 #[contract]
 pub struct VaultContract;
 
-#[cfg_attr(not(test), contractimpl)]
+#[contractimpl]
 impl VaultContract {
     /// Initialize the vault with an admin and the token it accepts.
     ///
@@ -220,7 +212,7 @@ impl VaultContract {
         let token_addr: Address = env
             .storage()
             .instance()
-            .get(&symbol_short!("token"))
+            .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
         token::Client::new(&env, &token_addr).transfer(
             &user,
@@ -245,6 +237,11 @@ impl VaultContract {
         balance::set_total_deposited(&env, total_deposited + amount);
 
         Ok(shares_minted)
+    }
+
+    /// Deposit tokens into the vault (alias for stake).
+    pub fn deposit(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
+        Self::stake(env, user, amount)
     }
 
     /// Sets or replaces the secondary emergency admin address.
@@ -543,6 +540,11 @@ impl VaultContract {
         balance::get_shares(&env, &user)
     }
 
+    /// Query staked amount of a user (matches IStakingPool interface).
+    pub fn staked_amount(env: Env, user: Address) -> i128 {
+        balance::get_shares(&env, &user)
+    }
+
     /// Read-only query for the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, VaultError> {
         admin::get_admin(&env)
@@ -739,7 +741,7 @@ impl VaultContract {
     /// Read-only governance weight using the user's current staked shares.
     pub fn current_vote_weight(env: Env, user: Address) -> Result<i128, VaultError> {
         let _ = admin::get_admin(&env)?;
-        Ok(balance::get_shares(&env, &user))
+        Ok(crate::cross_pool_identity::get_effective_vote_weight(&env, &user))
     }
 
     /// Total staked shares across all users.
@@ -1568,9 +1570,261 @@ impl VaultContract {
             .get(&symbol_short!("waitlist"))
             .unwrap_or(Vec::new(&env))
     }
+
+    // ── Issue #467: Reward Token Audit Trail ─────────────────────────────────
+
+    /// Paginated audit log retrieval. Admin read-only query.
+    pub fn get_audit_log_page(
+        env: Env,
+        page: u32,
+    ) -> Result<Vec<crate::reward_token_audit_trail::RewardTokenMovement>, VaultError> {
+        admin::require_admin(&env)?;
+        Ok(crate::reward_token_audit_trail::get_audit_log_page(&env, page))
+    }
+
+    /// Total number of reward movements logged. Public read-only query.
+    pub fn get_audit_log_count(env: Env) -> u64 {
+        crate::reward_token_audit_trail::get_audit_log_count(&env)
+    }
+
+    /// Financial reconciliation summary: (total_paid, total_burned, total_withdrawn, total_topped_up).
+    /// Public read-only query.
+    pub fn get_audit_log_summary(env: Env) -> (i128, i128, i128, i128) {
+        crate::reward_token_audit_trail::get_audit_log_summary(&env)
+    }
+
+    /// Explicit/admin entrypoint to log a reward token movement.
+    pub fn log_reward_movement(
+        env: Env,
+        movement_type: crate::reward_token_audit_trail::MovementType,
+        from: Address,
+        to: Address,
+        amount: i128,
+        triggered_by: String,
+    ) -> Result<u64, VaultError> {
+        admin::require_admin(&env)?;
+        Ok(crate::reward_token_audit_trail::log_reward_movement(
+            &env,
+            movement_type,
+            from,
+            to,
+            amount,
+            triggered_by,
+        ))
+    }
+
+    // ── Issue #468: Stake-Funded Bug Bounty ──────────────────────────────────
+
+    /// Staker opts in to contribute a percentage of their staking rewards to the
+    /// security fund. Max 1000 bps (10%). Setting 0 opts out.
+    pub fn set_bug_bounty_contribution_bps(
+        env: Env,
+        user: Address,
+        bps: u32,
+    ) -> Result<(), VaultError> {
+        user.require_auth();
+        if bps > crate::stake_funded_bug_bounty::MAX_BUG_BOUNTY_BPS {
+            return Err(VaultError::InvalidRate);
+        }
+        crate::stake_funded_bug_bounty::set_contribution_bps(&env, &user, bps);
+        Ok(())
+    }
+
+    /// Read-only query for a user's bug bounty contribution rate in basis points.
+    pub fn get_bug_bounty_contribution(env: Env, user: Address) -> u32 {
+        crate::stake_funded_bug_bounty::get_contribution_bps(&env, &user)
+    }
+
+    /// Read-only query for the current accumulated BugBountyFund balance.
+    pub fn get_bug_bounty_fund_balance(env: Env) -> i128 {
+        crate::stake_funded_bug_bounty::get_fund_balance(&env)
+    }
+
+    /// Admin function to confirm vulnerability report and pay security bounty to reporter.
+    /// Deducts payout from BugBountyFund and transfers reward tokens to reporter.
+    pub fn pay_bug_bounty(
+        env: Env,
+        admin: Address,
+        reporter: Address,
+        amount: i128,
+        description_hash: Bytes,
+    ) -> Result<(), VaultError> {
+        let stored_admin = admin::get_admin(&env)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        admin.require_auth();
+
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        let current_fund = crate::stake_funded_bug_bounty::get_fund_balance(&env);
+        if amount > current_fund {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
+        let new_fund = current_fund.saturating_sub(amount);
+        crate::stake_funded_bug_bounty::set_fund_balance(&env, new_fund);
+
+        let token_addr = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(VaultError::NotInitialized)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&env.current_contract_address(), &reporter, &amount);
+
+        crate::reward_token_audit_trail::log_reward_movement(
+            &env,
+            crate::reward_token_audit_trail::MovementType::InsurancePayout,
+            env.current_contract_address(),
+            reporter.clone(),
+            amount,
+            String::from_str(&env, "pay_bug_bounty"),
+        );
+
+        env.events().publish(
+            (symbol_short!("bb_paid"), reporter),
+            (amount, description_hash, new_fund, env.ledger().sequence()),
+        );
+
+        Ok(())
+    }
+
+    // ── Issue #470: Cross-Pool Identity ──────────────────────────────────────
+
+    /// Link user's address across multiple pool deployments (max 10 pools).
+    pub fn register_cross_pool_identity(
+        env: Env,
+        user: Address,
+        pools: Vec<Address>,
+    ) -> Result<(), VaultError> {
+        user.require_auth();
+
+        if pools.len() > crate::cross_pool_identity::MAX_LINKED_POOLS {
+            return Err(VaultError::MaxPositionsReached);
+        }
+
+        let mut unique_pools: Vec<Address> = Vec::new(&env);
+        for p in pools.iter() {
+            if !unique_pools.contains(&p) {
+                unique_pools.push_back(p);
+            }
+        }
+
+        let identity = crate::cross_pool_identity::CrossPoolIdentity {
+            linked_pools: unique_pools,
+            total_staked_all_pools: 0,
+            last_synced_at: 0,
+        };
+        crate::cross_pool_identity::set_identity(&env, &user, &identity);
+        Ok(())
+    }
+
+    /// Queries each linked pool's stake position for `user` and aggregates the total.
+    pub fn sync_cross_pool_stake(env: Env, user: Address) -> Result<i128, VaultError> {
+        let mut identity =
+            crate::cross_pool_identity::get_identity(&env, &user).ok_or(VaultError::PositionNotFound)?;
+
+        let mut total: i128 = 0;
+        let current_pool = env.current_contract_address();
+        let pool_count = identity.linked_pools.len();
+
+        for pool in identity.linked_pools.iter() {
+            if pool == current_pool {
+                let own_stake = balance::get_shares(&env, &user);
+                total = total.saturating_add(own_stake);
+            } else {
+                let pool_client = crate::interface::IStakingPoolClient::new(&env, &pool);
+                if let Ok(Ok(staked)) = pool_client.try_staked_amount(&user) {
+                    if staked > 0 {
+                        total = total.saturating_add(staked);
+                    }
+                } else {
+                    let vault_client = VaultContractClient::new(&env, &pool);
+                    if let Ok(Ok(shares)) = vault_client.try_shares_of(&user) {
+                        if shares > 0 {
+                            total = total.saturating_add(shares);
+                        }
+                    }
+                }
+            }
+        }
+
+        identity.total_staked_all_pools = total;
+        identity.last_synced_at = env.ledger().sequence();
+        crate::cross_pool_identity::set_identity(&env, &user, &identity);
+
+        env.events().publish(
+            (symbol_short!("id_synced"), user),
+            (total, pool_count, env.ledger().sequence()),
+        );
+
+        Ok(total)
+    }
+
+    /// Read-only query for a user's cross-pool identity.
+    pub fn get_cross_pool_identity(
+        env: Env,
+        user: Address,
+    ) -> Option<crate::cross_pool_identity::CrossPoolIdentity> {
+        crate::cross_pool_identity::get_identity(&env, &user)
+    }
+
+    /// Read-only query for the total stake aggregated across all linked pools.
+    pub fn get_cross_pool_total_staked(env: Env, user: Address) -> i128 {
+        match crate::cross_pool_identity::get_identity(&env, &user) {
+            Some(identity) => identity.total_staked_all_pools,
+            None => balance::get_shares(&env, &user),
+        }
+    }
+
+    /// Admin config: enable or disable cross-pool total stake weighting for governance voting.
+    pub fn set_cross_pool_governance_weight(
+        env: Env,
+        admin: Address,
+        enabled: bool,
+    ) -> Result<(), VaultError> {
+        let stored_admin = admin::get_admin(&env)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        admin.require_auth();
+
+        crate::cross_pool_identity::set_governance_weight_enabled(&env, enabled);
+        Ok(())
+    }
+
+    /// Read-only query for the governance weight config flag.
+    pub fn get_cross_pool_governance_weight(env: Env) -> bool {
+        crate::cross_pool_identity::is_governance_weight_enabled(&env)
+    }
+
+    // ── Issue #469: Position Value Appreciation Log ──────────────────────────
+
+    /// Take a valuation snapshot of user's staking position (callable by owner or keeper).
+    pub fn take_value_snapshot(
+        env: Env,
+        user: Address,
+    ) -> Result<crate::position_value_appreciation_log::ValueSnapshot, VaultError> {
+        Ok(crate::position_value_appreciation_log::take_value_snapshot_inner(&env, &user))
+    }
+
+    /// Read-only query for a user's value appreciation history (up to 52 entries).
+    pub fn get_value_appreciation_log(
+        env: Env,
+        user: Address,
+    ) -> Vec<crate::position_value_appreciation_log::ValueSnapshot> {
+        crate::position_value_appreciation_log::get_appreciation_log(&env, &user)
+    }
+
+    /// Read-only query for the total appreciation in basis points from first snapshot to latest.
+    pub fn get_total_appreciation_bps(env: Env, user: Address) -> i128 {
+        crate::position_value_appreciation_log::calculate_total_appreciation_bps(&env, &user)
+    }
 }
 
-#[cfg_attr(not(test), contractimpl)]
 impl VaultContract {
     fn validate_rate_bps(rate_bps: u32) -> Result<(), VaultError> {
         if rate_bps > balance::MAX_RATE_BPS {
@@ -1652,7 +1906,7 @@ impl VaultContract {
         let token_addr: Address = env
             .storage()
             .instance()
-            .get(&symbol_short!("token"))
+            .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
         token::Client::new(env, &token_addr).transfer(user, &env.current_contract_address(), &amount);
         let total_shares = balance::get_total_shares(env);
@@ -1698,9 +1952,28 @@ impl VaultContract {
         balance::set_accrued_reward(env, staker, 0);
         let total_paid = balance::get_total_rewards_paid(env);
         balance::set_total_rewards_paid(env, total_paid + accrued);
-        token_client.transfer(&env.current_contract_address(), staker, &accrued);
-        events::claimed(env, staker, accrued, env.ledger().sequence());
-        Ok(accrued)
+
+        let bounty_contribution =
+            crate::stake_funded_bug_bounty::deduct_bounty_contribution(env, staker, accrued);
+        let user_payout = accrued.saturating_sub(bounty_contribution);
+
+        if user_payout > 0 {
+            token_client.transfer(&env.current_contract_address(), staker, &user_payout);
+        }
+
+        crate::reward_token_audit_trail::log_reward_movement(
+            env,
+            crate::reward_token_audit_trail::MovementType::RewardPaid,
+            env.current_contract_address(),
+            staker.clone(),
+            user_payout,
+            String::from_str(env, "claim"),
+        );
+
+        crate::position_value_appreciation_log::maybe_auto_snapshot(env, staker);
+
+        events::claimed(env, staker, user_payout, env.ledger().sequence());
+        Ok(user_payout)
     }
 }
 
