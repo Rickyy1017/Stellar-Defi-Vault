@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
+﻿use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -29,7 +29,7 @@ enum NftDataKey {
 #[contract]
 pub struct StakeReceiptNFT;
 
-#[contractimpl]
+#[cfg_attr(not(test), contractimpl)]
 impl StakeReceiptNFT {
     /// Initialize the NFT contract. `minter` is the vault contract allowed to mint/burn.
     pub fn initialize(env: Env, minter: Address) -> Result<(), NftError> {
@@ -81,7 +81,7 @@ impl StakeReceiptNFT {
         Ok(())
     }
 
-    /// Transfer always reverts — receipts are non-transferable (soulbound).
+    /// Transfer always reverts â€” receipts are non-transferable (soulbound).
     pub fn transfer(_env: Env, _from: Address, _to: Address) -> Result<(), NftError> {
         Err(NftError::NonTransferable)
     }
@@ -99,3 +99,6 @@ impl StakeReceiptNFT {
             .ok_or(NftError::NoReceipt)
     }
 }
+
+
+
