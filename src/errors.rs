@@ -4,10 +4,6 @@ use soroban_sdk::contracterror;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum VaultError {
-    /// Returned by initialize-dependent getters and stake/unstake flows when
-    /// the admin, token, or other required contract state has not been stored
-    /// yet, and by `deploy_to_yield()` / `withdraw_from_yield()` when no yield
-    /// protocol has been registered via `set_yield_protocol()`.
     NotInitialized = 1,
     /// Returned by initialize() when the vault has already been initialized,
     /// and by `enact_proposal()` when the proposal has already been enacted.
