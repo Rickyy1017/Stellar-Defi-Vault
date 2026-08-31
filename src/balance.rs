@@ -1494,6 +1494,55 @@ pub fn add_tokens_burned(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&symbol_short!("tot_burn"), &total);
+    // Issue #452: check burn milestones without importing module to avoid cycle
+    {
+        let thresholds: soroban_sdk::Vec<i128> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("burn_thr"))
+            .unwrap_or(soroban_sdk::Vec::new(env));
+        if !thresholds.is_empty() {
+            let total_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("fbb_brn"))
+                .unwrap_or(0);
+            let total_burned = total.saturating_add(total_fees);
+            let mut reached: soroban_sdk::Vec<bool> = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("burn_hit"))
+                .unwrap_or(soroban_sdk::Vec::new(env));
+            if reached.len() != thresholds.len() {
+                let mut new_reached = soroban_sdk::Vec::new(env);
+                for _ in 0..thresholds.len() {
+                    new_reached.push_back(false);
+                }
+                let min_len = if reached.len() < thresholds.len() { reached.len() } else { thresholds.len() };
+                for i in 0..min_len {
+                    new_reached.set(i, reached.get(i).unwrap());
+                }
+                reached = new_reached;
+            }
+            let ledger = env.ledger().sequence();
+            let mut changed = false;
+            for i in 0..thresholds.len() {
+                let thr = thresholds.get(i).unwrap();
+                let is_reached = reached.get(i).unwrap();
+                if !is_reached && total_burned >= thr {
+                    reached.set(i, true);
+                    changed = true;
+                    env.events().publish(
+                        (symbol_short!("burn_ms"),),
+                        (thr, total_burned, amount, ledger),
+                    );
+                }
+            }
+            if changed {
+                env.storage().instance().set(&symbol_short!("burn_hit"), &reached);
+            }
+        }
+    }
 }
 
 // ── Issue #231: Halving Schedule ──────────────────────────────────────────────
@@ -2421,6 +2470,55 @@ pub fn add_fees_burned(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&symbol_short!("fbb_brn"), &total);
+    // Issue #452: same milestone check as add_tokens_burned but with fees path
+    {
+        let thresholds: soroban_sdk::Vec<i128> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("burn_thr"))
+            .unwrap_or(soroban_sdk::Vec::new(env));
+        if !thresholds.is_empty() {
+            let total_tokens: i128 = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("tot_burn"))
+                .unwrap_or(0);
+            let total_burned = total.saturating_add(total_tokens);
+            let mut reached: soroban_sdk::Vec<bool> = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("burn_hit"))
+                .unwrap_or(soroban_sdk::Vec::new(env));
+            if reached.len() != thresholds.len() {
+                let mut new_reached = soroban_sdk::Vec::new(env);
+                for _ in 0..thresholds.len() {
+                    new_reached.push_back(false);
+                }
+                let min_len = if reached.len() < thresholds.len() { reached.len() } else { thresholds.len() };
+                for i in 0..min_len {
+                    new_reached.set(i, reached.get(i).unwrap());
+                }
+                reached = new_reached;
+            }
+            let ledger = env.ledger().sequence();
+            let mut changed = false;
+            for i in 0..thresholds.len() {
+                let thr = thresholds.get(i).unwrap();
+                let is_reached = reached.get(i).unwrap();
+                if !is_reached && total_burned >= thr {
+                    reached.set(i, true);
+                    changed = true;
+                    env.events().publish(
+                        (symbol_short!("burn_ms"),),
+                        (thr, total_burned, amount, ledger),
+                    );
+                }
+            }
+            if changed {
+                env.storage().instance().set(&symbol_short!("burn_hit"), &reached);
+            }
+        }
+    }
 }
 
 // ── Issue #309: staker onboarding checklist ──────────────────────────────────
