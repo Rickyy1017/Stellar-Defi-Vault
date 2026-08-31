@@ -1,21 +1,4 @@
-﻿//! Epoch reward outflow cap.
-//!
-//! Caps total reward token outflow within a single epoch window so a
-//! coordinated mass-claim event cannot drain the reward pool unexpectedly
-//! fast. Any amount that would push the epoch over its cap is queued as a
-//! `DeferredReward` for the caller and becomes payable once the epoch window
-//! rolls over.
-//!
-//! # Wiring
-//!
-//! Like `compound_optimizer.rs`, this module exposes its own capped claim
-//! entrypoint (`claim_epoch_capped_reward`) rather than editing the existing
-//! `claim()` flow in `vault.rs`, keeping the cap opt-in and additive.
-//!
-//! # Storage
-//!
-//! `DataKey` sits at Soroban's 50-variant cap, so this uses raw `Symbol`-keyed
-//! storage, matching `balance.rs`.
+﻿
 
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol};
 
