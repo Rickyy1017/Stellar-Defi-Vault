@@ -18,6 +18,7 @@ pub mod vault;
 // file. `DataKey` is at Soroban's 50-variant cap for `#[contracttype]` enums,
 // so all of them use raw `Symbol`-keyed storage as `balance.rs` does.
 pub mod vesting_cliff; // issue #287 — reward vesting cliff
+pub mod vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log
 pub mod minimum_unstake_amount; // issue #441 — minimum unstake amount
 pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
@@ -28,4 +29,26 @@ pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
 
 #[cfg(test)]
+mod test;
+
+#[cfg(test)]
+mod test_content_curation;
+
+#[cfg(test)]
+mod test_integration;
+
+#[cfg(test)]
+mod test_nft_fractionalize;
+
+#[cfg(test)]
+mod test_reputation_decay;
+
+#[cfg(test)]
+mod test_validator_rewards;
+
+#[cfg(test)]
+mod test_features_287_290;
+
+#[cfg(test)]
+mod test_issues_463_466;
 mod test_issues_467_470;
