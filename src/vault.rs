@@ -1977,12 +1977,628 @@ impl VaultContract {
     }
 }
 
+    /// Admin-only paginated query over all registered staking positions.
+    ///
+    /// Returns up to `page_size` `(Address, StakePosition)` pairs in insertion
+    /// order (first-stake first). `page` is zero-indexed. Reverts with
+    /// `PageSizeTooLarge` when `page_size > 20` to cap per-call compute.
+    /// Returns an empty vec when `page` is past the last page. Users with
+    /// zero shares are skipped silently. Admin auth required.
+    pub fn view_all_positions(
+        env: Env,
+        page: u32,
+        page_size: u32,
+    ) -> Result<Vec<(Address, StakePosition)>, VaultError> {
+        admin::require_admin(&env)?;
+        if page_size == 0 || page_size > 20 {
+            return Err(VaultError::PageSizeTooLarge);
+        }
 
+        let all_stakers = balance::get_all_stakers(&env);
+        let start = page * page_size;
+        let mut results: Vec<(Address, StakePosition)> = Vec::new(&env);
 
+        let mut i = start;
+        while i < all_stakers.len() && i < start + page_size {
+            let user = all_stakers.get(i).unwrap();
+            if let Some(pos) = Self::build_position(&env, &user)? {
+                results.push_back((user, pos));
+            }
+            i += 1;
+        }
 
+        Ok(results)
+    }
 
+    // --- Issue #101: frozen position mechanism ---
 
+    /// Admin: set the inactivity threshold in ledgers.
+    ///
+    /// Positions that have not claimed or updated in more than this many ledgers
+    /// since their last activity can be flagged by `flag_frozen`. Pass `0` to
+    /// disable the threshold (threshold is informational only — no automatic
+    /// freezing occurs).
+    pub fn set_inactivity_threshold(env: Env, admin: Address, ledgers: u32) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+        env.storage().instance().set(&DataKey::InactivityThreshold, &ledgers);
+        Ok(())
+    }
 
+    /// Admin: mark a user's position as frozen.
+    ///
+    /// Freezing is informational only — it does not block stake, unstake, or
+    /// claim operations. Emits `FrozenPosition` with the current ledger.
+    /// Reverts with `PositionNotFound` when the user has no active stake.
+    pub fn flag_frozen(env: Env, admin: Address, user: Address) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+        if balance::get_shares(&env, &user) == 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+        let frozen_at = env.ledger().sequence();
+        env.storage()
+            .persistent()
+            .set(&DataKey::FrozenAt(user.clone()), &frozen_at);
+        let admin_addr = admin::get_admin(&env)?;
+        events::frozen_position(&env, &admin_addr, &user, frozen_at);
+        Ok(())
+    }
 
+    /// Read-only: returns `true` when the user's position carries a frozen flag.
+    pub fn is_frozen(env: Env, user: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::FrozenAt(user))
+    }
 
+    /// Admin: remove the frozen flag from a user's position.
+    pub fn unfreeze(env: Env, admin: Address, user: Address) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+        env.storage()
+            .persistent()
+            .remove(&DataKey::FrozenAt(user));
+        Ok(())
+    }
+
+    // --- Issue #102: reward_per_token_per_ledger metric ---
+
+    /// Read-only metric: reward earned per staked token per ledger at the current rate.
+    ///
+    /// Returns `reward_rate_bps / (10_000 * STELLAR_LEDGERS_PER_YEAR)`.
+    ///
+    /// Note: integer division causes this to truncate to 0 for all practical
+    /// rate values (e.g. 500 bps / 63_072_000_000 = 0). Callers that need
+    /// sub-integer precision should multiply the rate by the position size
+    /// first, then divide. Returns 0 when rate is zero or total staked is zero.
+    /// No auth required.
+    pub fn reward_per_token_per_ledger(env: Env) -> i128 {
+        let rate_bps = balance::get_reward_rate_bps(&env);
+        if rate_bps == 0 {
+            return 0;
+        }
+        let total_staked = balance::get_total_deposited(&env);
+        if total_staked == 0 {
+            return 0;
+        }
+        (rate_bps as i128)
+            / (BOOST_BPS_BASE as i128 * STELLAR_LEDGERS_PER_YEAR as i128)
+    }
+
+    // --- Issue #103: user_summary aggregated query ---
+
+    /// Read-only aggregate: returns the user's position, pending reward, and
+    /// pool-share fraction (in basis points) in a single contract call.
+    ///
+    /// `pool_share_bps` is `user_shares * 10_000 / total_shares` (0 when no
+    /// shares exist globally). Returns `UserSummary { position: None,
+    /// pending_reward: 0, pool_share_bps: 0 }` for users with no stake.
+    /// No auth required.
+    pub fn user_summary(env: Env, user: Address) -> Result<UserSummary, VaultError> {
+        let position = Self::build_position(&env, &user)?;
+        let pending_reward = Self::pending_reward(&env, &user)?;
+        let user_shares = balance::get_shares(&env, &user);
+        let total_shares = balance::get_total_shares(&env);
+        let pool_share_bps = if total_shares == 0 || user_shares == 0 {
+            0
+        } else {
+            user_shares
+                .checked_mul(BOOST_BPS_BASE as i128)
+                .unwrap_or(0)
+                .checked_div(total_shares)
+                .unwrap_or(0)
+        };
+        Ok(UserSummary {
+            position: match position {
+                Some(p) => OptionalPosition::Some(p),
+                None => OptionalPosition::None,
+            },
+            pending_reward,
+            pool_share_bps,
+        })
+    }
+
+    // ── Issue #105: stake history ─────────────────────────────────────────────
+
+    /// Returns the last (up to 5) stake/unstake actions for `user`.
+    ///
+    /// Returns an empty vec for a user who has never staked. No auth required.
+    pub fn stake_history(env: Env, user: Address) -> Vec<StakeHistoryEntry> {
+        let key = (soroban_sdk::Symbol::new(&env, "stkh"), user);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ── Issue #104: interface detection ──────────────────────────────────────
+
+    /// The compile-time set of interfaces this deployment supports.
+    ///
+    /// `Base` is always present. `Lockup` and `Whitelist` are supported because
+    /// the vault includes lock-period and whitelist features. `Compounding`,
+    /// `EpochMode`, and `VestingSchedule` are NOT included in this build.
+    const SUPPORTED_INTERFACES: &'static [InterfaceId] = &[
+        InterfaceId::Base,
+        InterfaceId::Lockup,
+        InterfaceId::Whitelist,
+    ];
+
+    /// Returns `true` if this contract deployment supports the given interface.
+    ///
+    /// Callers can use this for on-chain feature detection before invoking
+    /// optional functions. No auth required, no state changes.
+    pub fn supports_interface(_env: Env, interface: InterfaceId) -> bool {
+        Self::SUPPORTED_INTERFACES.contains(&interface)
+    }
+
+    // ── Issue #106: KYC enforcement ───────────────────────────────────────────
+
+    /// Toggle global KYC enforcement on or off (admin only).
+    ///
+    /// When `required` is `true`, only addresses marked approved via
+    /// `set_kyc_status` may call `stake`. Existing positions are unaffected —
+    /// users can always unstake and claim regardless of KYC status.
+    pub fn set_kyc_required(env: Env, required: bool) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::KycRequired, &required);
+        Ok(())
+    }
+
+    /// Approve or revoke KYC status for a specific address (admin only).
+    ///
+    /// Revoking KYC does not auto-unstake an existing position — it only
+    /// prevents the user from adding new stake while KYC enforcement is on.
+    pub fn set_kyc_status(env: Env, user: Address, approved: bool) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::KycApproved(user), &approved);
+        Ok(())
+    }
+
+    /// Returns `true` if `user` has been marked KYC-approved by the admin.
+    ///
+    /// Note: returns `false` when KYC enforcement is off — query
+    /// `kyc_required` separately if you need to distinguish these cases.
+    /// No auth required.
+    pub fn is_kyc_approved(env: Env, user: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::KycApproved(user))
+            .unwrap_or(false)
+    }
+
+    // ── Issue #107: permanent emergency stop ──────────────────────────────────
+
+    /// Permanently freeze the contract — no new stakes will ever be accepted.
+    ///
+    /// **This action is irreversible.** Once triggered, `stake` is permanently
+    /// blocked, and `pause`/`unpause` both revert with `ContractStopped`.
+    /// `unstake` and `claim` continue to work so all users can exit safely.
+    ///
+    /// Emits the `stopped` event. Can be called even when the contract is
+    /// already paused. Admin only.
+    pub fn emergency_stop(env: Env) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Stopped, &true);
+        let admin = admin::get_admin(&env)?;
+        events::stopped(&env, &admin);
+        Ok(())
+    }
+
+    /// Returns `true` if the contract has been permanently stopped.
+    ///
+    /// No auth required.
+    pub fn is_stopped(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Stopped)
+            .unwrap_or(false)
+    }
+
+    // ── Issue #98: can_unstake pre-flight check ────────────────────────────────
+
+    /// Read-only pre-flight check that simulates whether an unstake of the given
+    /// `amount` (in token units) would succeed for `user`, without modifying
+    /// any state or requiring authentication.
+    ///
+    /// Mirrors the exact same checks as `do_unstake` in the same order so the
+    /// result accurately reflects what would happen on-chain.
+    pub fn can_unstake(env: Env, user: Address, amount: i128) -> UnstakeCheckResult {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            return UnstakeCheckResult::PoolPaused;
+        }
+
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares == 0 {
+            return UnstakeCheckResult::NoPosition;
+        }
+
+        if amount <= 0 {
+            return UnstakeCheckResult::InsufficientAmount;
+        }
+
+        if let Some(limit) = balance::get_withdrawal_limit(&env) {
+            if amount > limit {
+                return UnstakeCheckResult::InsufficientAmount;
+            }
+        }
+
+        if user_shares < amount {
+            return UnstakeCheckResult::InsufficientAmount;
+        }
+
+        let lock_period: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LockPeriod)
+            .unwrap_or(0);
+        if lock_period > 0 {
+            let staked_at: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::StakedAtLedger(user.clone()))
+                .unwrap_or(0);
+            let current_ledger = env.ledger().sequence();
+            if current_ledger < staked_at.saturating_add(lock_period) {
+                return UnstakeCheckResult::StillLocked;
+            }
+        }
+
+        UnstakeCheckResult::Ok
+    }
+
+    // ── Issue #97: pool description ────────────────────────────────────────────
+
+    /// Admin: set or update the on-chain pool description.
+    ///
+    /// The description is stored as a `soroban_sdk::String` in instance storage
+    /// and can be queried via `get_pool_description`. Maximum length is 200
+    /// characters — reverts with `DescriptionTooLong` if exceeded.
+    ///
+    /// Emits a `description_updated` event on every change.
+    pub fn set_pool_description(
+        env: Env,
+        admin: Address,
+        description: soroban_sdk::String,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+
+        if description.len() > 200 {
+            return Err(VaultError::DescriptionTooLong);
+        }
+
+        balance::set_pool_description(&env, &description);
+        let admin_addr = admin::get_admin(&env)?;
+        events::description_updated(&env, &admin_addr, &description);
+        Ok(())
+    }
+
+    /// Read-only query for the pool description.
+    ///
+    /// Returns `None` if no description has been set yet. No auth required.
+    pub fn get_pool_description(env: Env) -> Option<soroban_sdk::String> {
+        balance::get_pool_description(&env)
+    }
+
+    // ── Issue #96: percentage_of_pool ──────────────────────────────────────────
+
+    /// Read-only query that returns the user's staked amount as a percentage of
+    /// the total pool, expressed in basis points (10 000 = 100%).
+    ///
+    /// Formula: `(user_staked * 10_000) / total_staked`. Integer arithmetic
+    /// truncates — see doc comment. Returns 0 if the user has no position or
+    /// total staked is 0. No auth required.
+    pub fn percentage_of_pool(env: Env, user: Address) -> i128 {
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares == 0 {
+            return 0;
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        if total_shares == 0 || total_deposited == 0 {
+            return 0;
+        }
+
+        let user_amount = match balance::shares_to_amount(total_shares, total_deposited, user_shares)
+        {
+            Some(a) => a,
+            None => return 0,
+        };
+
+        user_amount
+            .checked_mul(BOOST_BPS_BASE as i128)
+            .unwrap_or(0)
+            .checked_div(total_deposited)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #99: staking streak tracker ──────────────────────────────────────
+
+    /// Admin: record which users were active in a completed Wave.
+    ///
+    /// `wave_id` must be monotonically increasing (greater than the last
+    /// recorded wave_id). Users present in consecutive calls have their
+    /// `current_streak` incremented; users absent from a wave have their
+    /// streak reset to 0. `longest_streak` is never decremented.
+    ///
+    /// Maximum 50 active users per call to bound compute cost.
+    /// Reverts with `NonMonotonicWaveId` or `TooManyActiveUsers` on violation.
+    pub fn record_wave_activity(
+        env: Env,
+        admin: Address,
+        wave_id: u32,
+        active_users: Vec<Address>,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+
+        if active_users.len() > 50 {
+            return Err(VaultError::TooManyActiveUsers);
+        }
+
+        let last_wave = balance::get_last_recorded_wave(&env).unwrap_or(0);
+        if wave_id <= last_wave {
+            return Err(VaultError::NonMonotonicWaveId);
+        }
+
+        // Reset streaks for all existing stakers who are NOT in active_users
+        let all_stakers = balance::get_all_stakers(&env);
+        let mut i = 0u32;
+        while i < all_stakers.len() {
+            let staker = all_stakers.get(i).unwrap();
+            let mut found = false;
+            let mut j = 0u32;
+            while j < active_users.len() {
+                if active_users.get(j).unwrap() == staker {
+                    found = true;
+                    break;
+                }
+                j += 1;
+            }
+            if !found {
+                let mut streak =
+                    balance::get_user_streak(&env, &staker).unwrap_or(StakeStreak {
+                        current_streak: 0,
+                        longest_streak: 0,
+                        last_active_wave: 0,
+                    });
+                if streak.current_streak > 0 {
+                    streak.current_streak = 0;
+                    balance::set_user_streak(&env, &staker, &streak);
+                }
+            }
+            i += 1;
+        }
+
+        // Update streaks for active users
+        i = 0;
+        while i < active_users.len() {
+            let user = active_users.get(i).unwrap();
+            let mut streak = balance::get_user_streak(&env, &user).unwrap_or(StakeStreak {
+                current_streak: 0,
+                longest_streak: 0,
+                last_active_wave: 0,
+            });
+
+            if last_wave > 0 && streak.last_active_wave == last_wave {
+                streak.current_streak += 1;
+            } else {
+                streak.current_streak = 1;
+            }
+
+            if streak.current_streak > streak.longest_streak {
+                streak.longest_streak = streak.current_streak;
+            }
+            streak.last_active_wave = wave_id;
+
+            balance::set_user_streak(&env, &user, &streak);
+            i += 1;
+        }
+
+        balance::set_last_recorded_wave(&env, wave_id);
+        Ok(())
+    }
+
+    /// Read-only query for a user's staking streak.
+    ///
+    /// Returns a `StakeStreak` with `current_streak`, `longest_streak`, and
+    /// `last_active_wave`. Returns default (all zeros) if no streak data exists.
+    /// No auth required.
+    pub fn get_streak(env: Env, user: Address) -> StakeStreak {
+        balance::get_user_streak(&env, &user).unwrap_or(StakeStreak {
+            current_streak: 0,
+            longest_streak: 0,
+            last_active_wave: 0,
+        })
+    }
+
+    // ── Issue #131: get_estimated_annual_reward ────────────────────────────────
+
+    /// Read-only calculator: estimated annual reward for a given stake amount.
+    ///
+    /// Returns the estimated annual reward for `amount` at the current
+    /// `reward_rate_bps`, without requiring an actual position or auth.
+    /// Formula: `amount * reward_rate_bps / 10000`.
+    /// Returns 0 if rate is 0 or amount is 0.
+    /// 
+    /// **Note:** This is a simplified estimate that does not account for
+    /// boost multipliers, campaign bonuses, or compounding effects. Actual
+    /// rewards will vary based on rate changes over time and pool conditions.
+    /// 
+    /// No authentication required. Works for any hypothetical amount.
+    pub fn get_estimated_annual_reward(env: Env, amount: i128) -> i128 {
+        if amount == 0 {
+            return 0;
+        }
+        let rate_bps = balance::get_reward_rate_bps(&env);
+        if rate_bps == 0 {
+            return 0;
+        }
+        amount
+            .checked_mul(rate_bps as i128)
+            .unwrap_or(0)
+            .checked_div(BOOST_BPS_BASE as i128)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #130: bulk_set_kyc ──────────────────────────────────────────────
+
+    /// Admin: set KYC status for multiple addresses in one call.
+    ///
+    /// Each `(Address, bool)` pair in `approvals` sets the KYC status for that
+    /// address. Maximum 50 entries per call — reverts with `BatchKycTooLarge`
+    /// if exceeded. Emits one `kyc_status_changed` event per address updated.
+    /// Admin auth required.
+    ///
+    /// **Note:** This function is idempotent — setting an address to its
+    /// current status still updates the storage and emits an event.
+    pub fn bulk_set_kyc(
+        env: Env,
+        admin: Address,
+        approvals: Vec<(Address, bool)>,
+    ) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin; // follows existing admin patterns
+
+        if approvals.len() > 50 {
+            return Err(VaultError::BatchKycTooLarge);
+        }
+
+        let mut i = 0u32;
+        while i < approvals.len() {
+            let (user, approved) = approvals.get(i).unwrap();
+            env.storage()
+                .persistent()
+                .set(&DataKey::KycApproved(user.clone()), &approved);
+            events::kyc_status_changed(&env, &user, approved);
+            i += 1;
+        }
+
+        Ok(())
+    }
+
+    // ── Issue #129: auto-pause on low reward token balance ────────────────────
+
+    /// Admin: set the reward token balance threshold for auto-pause.
+    ///
+    /// When the reward token balance drops below `threshold` after a claim,
+    /// unstake auto-claim, or batch_claim, the pool automatically pauses.
+    /// Pass `0` to disable auto-pause (no threshold check). Admin can manually
+    /// unpause after funding the contract with more reward tokens.
+    ///
+    /// **Note:** Auto-pause does not prevent users from unstaking their
+    /// principal — it only blocks new stakes (same as manual pause).
+    pub fn set_reward_threshold(env: Env, admin: Address, threshold: i128) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        let _ = admin;
+
+        if threshold < 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
+        env.storage()
+            .instance()
+            .set(&threshold_key, &threshold);
+        Ok(())
+    }
+
+    /// Read-only query for the current reward threshold.
+    ///
+    /// Returns 0 if auto-pause is disabled. No auth required.
+    pub fn get_reward_threshold(env: Env) -> i128 {
+        let threshold_key = soroban_sdk::symbol_short!("rwd_thr");
+        env.storage()
+            .instance()
+            .get(&threshold_key)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #127: stake_weighted_average_duration ────────────────────────────
+
+    /// Read-only: stake-weighted average duration of all positions.
+    ///
+    /// Returns the average number of ledgers that stakers have been in the pool,
+    /// weighted by their stake amount. Formula:
+    /// `sum(position.amount * (current_ledger - position.staked_at_ledger)) / total_staked`
+    ///
+    /// Returns 0 if no stakers or total staked is 0. Larger stake amounts have
+    /// more influence on the average. Integer arithmetic truncates fractional
+    /// ledgers. No auth required.
+    pub fn stake_weighted_average_duration(env: Env) -> u32 {
+        let all_stakers = balance::get_all_stakers(&env);
+        if all_stakers.is_empty() {
+            return 0;
+        }
+
+        let total_staked = balance::get_total_deposited(&env);
+        if total_staked == 0 {
+            return 0;
+        }
+
+        let current_ledger = env.ledger().sequence();
+        let total_shares = balance::get_total_shares(&env);
+
+        let mut weighted_sum: i128 = 0;
+        let mut i = 0u32;
+
+        while i < all_stakers.len() {
+            let user = all_stakers.get(i).unwrap();
+            let shares = balance::get_shares(&env, &user);
+            
+            if shares > 0 {
+                if let Some(amount) = balance::shares_to_amount(total_shares, total_staked, shares) {
+                    if let Some(staked_at) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, u32>(&DataKey::StakedAtLedger(user.clone()))
+                    {
+                        let duration = current_ledger.saturating_sub(staked_at);
+                        if let Some(weighted) = amount.checked_mul(duration as i128) {
+                            weighted_sum = weighted_sum.saturating_add(weighted);
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        if total_staked == 0 {
+            return 0;
+        }
+
+        (weighted_sum / total_staked) as u32
+    }
 
