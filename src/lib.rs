@@ -24,6 +24,10 @@ pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
 pub mod position_value_appreciation_log; // issue #469 — position value appreciation log
+pub mod position_health_auto_recovery; // issue #459 — position health auto-recovery
+pub mod lockdrop_campaign; // issue #460 — lockdrop campaign
+pub mod proof_of_humanity_hook; // issue #461 — proof-of-humanity hook
+pub mod roadmap_voting; // issue #462 — roadmap voting
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
@@ -52,3 +56,6 @@ mod test_features_287_290;
 #[cfg(test)]
 mod test_issues_463_466;
 mod test_issues_467_470;
+
+#[cfg(test)]
+mod test_issues_459_462;

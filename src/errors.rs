@@ -560,3 +560,121 @@ impl From<VaultError> for VaultQuizError {
     /// has expired and the position can no longer be reversed.
     ClawbackWindowExpired = 75,
 }
+
+/// Sixth error enum, added for the same 50-variant reason the earlier
+/// `Vault*Error` enums exist: every prior `#[contracterror]` enum is already at
+/// Soroban's cap. Holds the cases introduced by issues #459 (position health
+/// auto-recovery), #460 (lockdrop campaign), #461 (proof-of-humanity hook), and
+/// #462 (roadmap voting), plus mirrors of the handful of `VaultError` cases
+/// those functions can also hit (via the `From` impl below, so `?` keeps
+/// working at call sites that mix the two).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultCampaignError {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 5,
+    /// Mirrors `VaultError::VaultPaused`.
+    VaultPaused = 6,
+
+    // ── Issue #459: position health auto-recovery ────────────────────────────
+    /// Returned by `check_and_recover()` / `cancel_recovery_config()` when the
+    /// user has no active recovery configuration.
+    RecoveryNotConfigured = 7,
+    /// Returned by `check_and_recover()` when the user's current position
+    /// health is at or above their configured trigger threshold (or the
+    /// position carries no loan, so health is unbounded).
+    RecoveryNotTriggered = 8,
+    /// Returned by `check_and_recover()` when the per-user daily cooldown has
+    /// not elapsed since the last recovery.
+    RecoveryOnCooldown = 9,
+    /// Returned by `set_recovery_config()` when `trigger_health_bps` is 0, or
+    /// `action_amount` is not positive for an action that needs one.
+    InvalidRecoveryConfig = 10,
+    /// Returned by `check_and_recover()` when an `AutoRepayLoan` action is
+    /// configured but the user has no outstanding loan.
+    NoActiveLoan = 11,
+
+    // ── Issue #460: lockdrop campaign ───────────────────────────────────────
+    /// Returned by `start_lockdrop()` when a campaign that has not been
+    /// finalized already exists.
+    LockdropAlreadyActive = 12,
+    /// Returned by lockdrop entrypoints when no campaign has been started.
+    LockdropNotActive = 13,
+    /// Returned by `commit_to_lockdrop()` after the commitment window
+    /// (`ends_at`) has passed.
+    LockdropEnded = 14,
+    /// Returned by `finalize_lockdrop()` before `ends_at`.
+    LockdropNotEnded = 15,
+    /// Returned by `claim_lockdrop_reward()` before the campaign is finalized.
+    LockdropNotFinalized = 16,
+    /// Returned by `finalize_lockdrop()` when the campaign is already finalized.
+    LockdropAlreadyFinalized = 17,
+    /// Returned by `commit_to_lockdrop()` when the caller already has a
+    /// commitment in the active campaign.
+    AlreadyCommitted = 18,
+    /// Returned by `exit_lockdrop()` / `claim_lockdrop_reward()` when the
+    /// caller has no commitment.
+    CommitmentNotFound = 19,
+    /// Returned by `exit_lockdrop()` before the caller's chosen lock duration
+    /// has elapsed.
+    LockStillActive = 20,
+    /// Returned by `claim_lockdrop_reward()` when the caller already claimed.
+    AlreadyClaimed = 21,
+    /// Returned by `claim_lockdrop_reward()` when the caller's proportional
+    /// allocation is zero.
+    NothingToClaim = 22,
+    /// Returned by `commit_to_lockdrop()` when the campaign already holds the
+    /// maximum supported number of committers.
+    LockdropFull = 23,
+    /// Returned by `commit_to_lockdrop()` when `lock_duration_ledgers` is 0 or
+    /// exceeds the campaign's `max_lock_ledgers`.
+    InvalidLockDuration = 24,
+
+    // ── Issue #461: proof-of-humanity hook ─────────────────────────────────
+    /// Returned by `stake_verified()` when no humanity oracle / config has
+    /// been registered.
+    OracleNotConfigured = 25,
+    /// Returned by `stake_verified()` when the staked amount is below the
+    /// minimum that applies to the caller's verification status.
+    BelowHumanityMinStake = 26,
+    /// Returned by `set_humanity_config()` when a bps field is out of range.
+    InvalidHumanityConfig = 27,
+
+    // ── Issue #462: roadmap voting ────────────────────────────────────────
+    /// Returned by `add_roadmap_item()` when 20 items already exist.
+    TooManyRoadmapItems = 28,
+    /// Returned by `remove_roadmap_item()` / `vote_roadmap_item()` for an
+    /// unknown item id.
+    RoadmapItemNotFound = 29,
+    /// Returned by `add_roadmap_item()` when the title exceeds 80 characters.
+    TitleTooLong = 30,
+    /// Returned by `vote_roadmap_item()` when the caller's allocations for the
+    /// current epoch would exceed the 100-point budget.
+    VoteBudgetExceeded = 31,
+    /// Returned by `vote_roadmap_item()` when `weight` alone exceeds 100.
+    InvalidVoteWeight = 32,
+}
+
+impl From<VaultError> for VaultCampaignError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultCampaignError::Unauthorized,
+            VaultError::NotInitialized => VaultCampaignError::NotInitialized,
+            VaultError::ZeroAmount => VaultCampaignError::ZeroAmount,
+            VaultError::ArithmeticError => VaultCampaignError::ArithmeticError,
+            VaultError::PositionNotFound => VaultCampaignError::PositionNotFound,
+            VaultError::VaultPaused => VaultCampaignError::VaultPaused,
+            // Any other VaultError reaching here maps to the closest generic case.
+            _ => VaultCampaignError::Unauthorized,
+        }
+    }
+}
