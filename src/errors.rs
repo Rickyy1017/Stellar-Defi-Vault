@@ -530,6 +530,22 @@ pub enum VaultQuizError {
     /// Returned by `add_quiz()` when the contract already holds the maximum
     /// of 20 quizzes.
     TooManyQuizzes = 9,
+    /// Returned by `submit_daily_tip()` (issue #458) when `content` exceeds
+    /// `MAX_TIP_CONTENT_LEN` characters.
+    TipTooLong = 10,
+    /// Returned by `submit_daily_tip()` (issue #458) when the caller has
+    /// already submitted a tip for the current day.
+    AlreadySubmittedToday = 11,
+    /// Returned by `submit_daily_tip()` (issue #458) when the current day
+    /// already holds `MAX_TIPS_PER_DAY` candidates.
+    TooManyTipsToday = 12,
+    /// Returned by `vote_daily_tip()` (issue #458) when the given `tip_id`
+    /// does not correspond to a candidate submitted for the current day, and
+    /// by `finalize_daily_tip()` when the given day has no candidates.
+    TipNotFound = 13,
+    /// Returned by `vote_daily_tip()` (issue #458) when the caller has
+    /// already voted on a tip for the current day.
+    AlreadyVotedToday = 14,
 }
 
 impl From<VaultError> for VaultQuizError {
