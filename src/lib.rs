@@ -25,6 +25,7 @@ pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
 pub mod position_value_appreciation_log; // issue #469 — position value appreciation log
 pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph
+pub mod staker_favor_rounding; // issue #457 — always round in the staker's favor
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
