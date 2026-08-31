@@ -24,10 +24,10 @@ pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
 pub mod position_value_appreciation_log; // issue #469 — position value appreciation log
-pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph
-pub mod staker_favor_rounding; // issue #457 — always round in the staker's favor
-pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
-pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-change announcements
+pub mod burn_milestone_tracker; // issue #452 — burn milestone tracker
+pub mod sub_pool_delegation; // issue #454 — sub-pool delegation
+pub mod position_mirroring; // issue #453 — position mirroring
+pub mod stake_weighted_news_feed; // issue #451 — stake-weighted news feed
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
