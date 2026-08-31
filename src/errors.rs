@@ -546,6 +546,19 @@ pub enum VaultQuizError {
     /// Returned by `vote_daily_tip()` (issue #458) when the caller has
     /// already voted on a tip for the current day.
     AlreadyVotedToday = 14,
+    /// Returned by `cancel_config_change()` / `execute_config_change()` /
+    /// `get_admin_proposal()` (issue #455) when the given `proposal_id` does
+    /// not exist.
+    AdminProposalNotFound = 15,
+    /// Returned by `cancel_config_change()` / `execute_config_change()`
+    /// (issue #455) when the proposal was already cancelled.
+    AdminProposalAlreadyCancelled = 16,
+    /// Returned by `cancel_config_change()` / `execute_config_change()`
+    /// (issue #455) when the proposal was already executed.
+    AdminProposalAlreadyExecuted = 17,
+    /// Returned by `execute_config_change()` (issue #455) when called
+    /// before the proposal's `executes_at` ledger has been reached.
+    AdminProposalNotYetExecutable = 18,
 }
 
 impl From<VaultError> for VaultQuizError {

@@ -27,6 +27,7 @@ pub mod position_value_appreciation_log; // issue #469 — position value apprec
 pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph
 pub mod staker_favor_rounding; // issue #457 — always round in the staker's favor
 pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
+pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-change announcements
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
