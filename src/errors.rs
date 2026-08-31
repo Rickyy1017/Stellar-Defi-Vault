@@ -530,6 +530,35 @@ pub enum VaultQuizError {
     /// Returned by `add_quiz()` when the contract already holds the maximum
     /// of 20 quizzes.
     TooManyQuizzes = 9,
+    /// Returned by `submit_daily_tip()` (issue #458) when `content` exceeds
+    /// `MAX_TIP_CONTENT_LEN` characters.
+    TipTooLong = 10,
+    /// Returned by `submit_daily_tip()` (issue #458) when the caller has
+    /// already submitted a tip for the current day.
+    AlreadySubmittedToday = 11,
+    /// Returned by `submit_daily_tip()` (issue #458) when the current day
+    /// already holds `MAX_TIPS_PER_DAY` candidates.
+    TooManyTipsToday = 12,
+    /// Returned by `vote_daily_tip()` (issue #458) when the given `tip_id`
+    /// does not correspond to a candidate submitted for the current day, and
+    /// by `finalize_daily_tip()` when the given day has no candidates.
+    TipNotFound = 13,
+    /// Returned by `vote_daily_tip()` (issue #458) when the caller has
+    /// already voted on a tip for the current day.
+    AlreadyVotedToday = 14,
+    /// Returned by `cancel_config_change()` / `execute_config_change()` /
+    /// `get_admin_proposal()` (issue #455) when the given `proposal_id` does
+    /// not exist.
+    AdminProposalNotFound = 15,
+    /// Returned by `cancel_config_change()` / `execute_config_change()`
+    /// (issue #455) when the proposal was already cancelled.
+    AdminProposalAlreadyCancelled = 16,
+    /// Returned by `cancel_config_change()` / `execute_config_change()`
+    /// (issue #455) when the proposal was already executed.
+    AdminProposalAlreadyExecuted = 17,
+    /// Returned by `execute_config_change()` (issue #455) when called
+    /// before the proposal's `executes_at` ledger has been reached.
+    AdminProposalNotYetExecutable = 18,
 }
 
 impl From<VaultError> for VaultQuizError {
@@ -543,22 +572,6 @@ impl From<VaultError> for VaultQuizError {
             _ => VaultQuizError::Unauthorized,
         }
     }
-    /// Returned by `sign_covenant` (issue #413) when the supplied
-    /// `terms_hash` does not match the currently published pool terms.
-    TermsMismatch = 71,
-    /// Returned by `stake_with_covenant` (issue #413) when the caller has
-    /// not signed the currently published pool terms.
-    CovenantRequired = 72,
-    /// Returned by `pin_ipfs_hash` (issue #439) when the caller's staked
-    /// position amount is below the configured `min_stake` for the
-    /// stake-gated IPFS storage service.
-    InsufficientStakeForStorage = 73,
-    /// Returned by `unstake` (issue #441) when the requested amount is below
-    /// the configured minimum unstake amount and is not a full position exit.
-    BelowMinimumUnstake = 74,
-    /// Returned by `position_clawback` (issue #463) when the clawback window
-    /// has expired and the position can no longer be reversed.
-    ClawbackWindowExpired = 75,
 }
 
 /// Sixth error enum, added for the same 50-variant reason the earlier
