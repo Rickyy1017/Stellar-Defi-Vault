@@ -239,6 +239,9 @@ impl VaultContract {
         balance::set_total_shares(&env, total_shares + shares_minted);
         balance::set_total_deposited(&env, total_deposited + amount);
 
+        // Issue #453: trigger mirroring for followers
+        crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
+
         Ok(shares_minted)
     }
 
@@ -1920,6 +1923,7 @@ impl VaultContract {
         balance::set_shares(env, user, cur + shares);
         balance::set_total_shares(env, total_shares + shares);
         balance::set_total_deposited(env, total_deposited + amount);
+        crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
         Ok(shares)
     }
 
@@ -1941,6 +1945,8 @@ impl VaultContract {
         balance::set_shares(env, staker, user_shares - shares);
         balance::set_total_shares(env, total_shares - shares);
         balance::set_total_deposited(env, total_deposited - amount);
+        // Issue #453: trigger mirroring for unstake
+        crate::position_mirroring::maybe_mirror_action(env, staker, symbol_short!("unstake"), amount);
         Ok(amount)
     }
 
