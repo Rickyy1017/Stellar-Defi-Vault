@@ -33,6 +33,7 @@ pub mod staker_favor_rounding; // issue #457 — always round in the staker's fa
 pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
 pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-change announcements
 pub mod meta_staking; // meta-staking layer — restake reward tokens for a bonus meta-reward rate
+pub mod batch_vote; // governance batch voting (issue #160)
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
