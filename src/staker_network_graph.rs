@@ -16,7 +16,7 @@ use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol
 
 use crate::admin;
 use crate::balance;
-use crate::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 /// Maximum stakers returned per `staker_network_graph_data()` page.
 pub const MAX_GRAPH_PAGE_SIZE: u32 = 50;

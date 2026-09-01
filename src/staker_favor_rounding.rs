@@ -17,7 +17,7 @@ use soroban_sdk::{contractimpl, symbol_short, Address, Env, Symbol};
 
 use crate::admin;
 use crate::errors::VaultQuizError;
-use crate::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 const STAKER_FAVOR_KEY: Symbol = symbol_short!("sfr_on");
 

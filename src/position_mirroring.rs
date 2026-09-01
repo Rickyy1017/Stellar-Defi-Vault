@@ -7,7 +7,7 @@ use soroban_sdk::{contractimpl, contracttype, symbol_short, token, Address, Env,
 use crate::balance;
 use crate::errors::VaultExtError;
 use crate::storage::DataKey;
-use crate::vault::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 const MIRROR_CFG_KEY: Symbol = symbol_short!("mirr_cfg");
 const MIRROR_FOLLOWER_LIST_KEY: Symbol = symbol_short!("mirr_flw");
@@ -173,7 +173,7 @@ impl VaultContract {
             return Err(VaultExtError::InvalidMultisigConfig);
         }
         if mirror_ratio_bps == 0 || mirror_ratio_bps > 10_000 {
-            return Err(VaultExtError::InvalidVetoThreshold);
+            return Err(VaultExtError::InvalidFeeAllocation);
         }
         if max_mirror_amount <= 0 {
             return Err(VaultExtError::ZeroAmount);

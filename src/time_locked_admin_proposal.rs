@@ -21,7 +21,7 @@ use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, String
 
 use crate::admin;
 use crate::errors::VaultQuizError;
-use crate::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 /// Maximum proposals retained; oldest are dropped once exceeded.
 pub const MAX_ADMIN_PROPOSALS: u32 = 50;
@@ -126,10 +126,8 @@ impl VaultContract {
                 proposals.set(i, updated);
                 set_proposals(&env, &proposals);
 
-                env.events().publish(
-                    (symbol_short!("acp_cncl"), admin_addr),
-                    proposal_id,
-                );
+                env.events()
+                    .publish((symbol_short!("acp_cncl"), admin_addr), proposal_id);
                 return Ok(());
             }
         }

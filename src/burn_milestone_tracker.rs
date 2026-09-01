@@ -97,11 +97,11 @@ impl VaultContract {
         let mut prev: Option<i128> = None;
         for thr in thresholds.iter() {
             if thr <= 0 {
-                return Err(VaultExtError::InvalidVetoThreshold);
+                return Err(VaultExtError::InvalidFeeAllocation);
             }
             if let Some(p) = prev {
                 if thr <= p {
-                    return Err(VaultExtError::InvalidVetoThreshold);
+                    return Err(VaultExtError::InvalidFeeAllocation);
                 }
             }
             prev = Some(thr);
