@@ -632,6 +632,44 @@ impl VaultContract {
         }
     }
 
+    /// Admin: configure reward-token peg stabilization.
+    pub fn set_peg_config(
+        env: Env,
+        admin: Address,
+        config: crate::peg_stabilization::PegConfig,
+    ) -> Result<(), VaultError> {
+        crate::peg_stabilization::set_peg_config(env, admin, config)
+    }
+
+    /// Read-only query for the active peg configuration.
+    pub fn get_peg_config(env: Env) -> Option<crate::peg_stabilization::PegConfig> {
+        crate::peg_stabilization::read_peg_config(env)
+    }
+
+    /// Admin: cap treasury funds spent on one peg buyback check.
+    pub fn set_max_buyback_per_check(
+        env: Env,
+        admin: Address,
+        amount: i128,
+    ) -> Result<(), VaultError> {
+        crate::peg_stabilization::set_max_buyback_per_check(env, admin, amount)
+    }
+
+    /// Read-only query for the per-check buyback spend cap.
+    pub fn get_max_buyback_per_check(env: Env) -> i128 {
+        crate::peg_stabilization::read_max_buyback_per_check(env)
+    }
+
+    /// Returns whether peg protection is currently halting reward payouts.
+    pub fn emissions_halted_by_peg(env: Env) -> bool {
+        crate::peg_stabilization::emissions_halted_by_peg(env)
+    }
+
+    /// Check the reward-token price against the configured peg and react.
+    pub fn check_peg(env: Env) -> Result<(), VaultError> {
+        crate::peg_stabilization::check_peg(env)
+    }
+
     /// Read-only metadata for external tools and explorers.
     pub fn contract_metadata(env: Env) -> ContractMetadata {
         ContractMetadata {
@@ -1953,6 +1991,9 @@ impl VaultContract {
     fn do_claim(env: &Env, staker: &Address) -> Result<i128, VaultError> {
         let accrued = balance::get_accrued_reward(env, staker);
         if accrued == 0 {
+            return Ok(0);
+        }
+        if crate::peg_stabilization::emissions_halted(env) {
             return Ok(0);
         }
         let token_addr = Self::token_address(env)?;

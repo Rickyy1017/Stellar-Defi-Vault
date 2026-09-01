@@ -20,6 +20,7 @@ pub mod vault;
 pub mod vesting_cliff; // issue #287 — reward vesting cliff
 pub mod vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log
 pub mod minimum_unstake_amount; // issue #441 — minimum unstake amount
+pub mod peg_stabilization;
 pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
@@ -63,3 +64,6 @@ mod test_issues_467_470;
 
 #[cfg(test)]
 mod test_issues_459_462;
+
+#[cfg(test)]
+mod test_peg_stabilization;
