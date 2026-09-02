@@ -495,14 +495,37 @@ impl VaultContract {
         balance::get_split_positions(&env, &user)
     }
 
+    pub fn set_mev_protection_threshold(
+        env: Env,
+        admin: Address,
+        amount: i128,
+    ) -> Result<(), VaultError> {
+        crate::mev_claim_protection::set_mev_protection_threshold(&env, &admin, amount)
+    }
+
+    pub fn get_mev_protection_threshold(env: Env) -> i128 {
+        crate::mev_claim_protection::get_mev_protection_threshold(&env)
+    }
+
+    pub fn get_pending_claim(
+        env: Env,
+        user: Address,
+    ) -> Option<crate::mev_claim_protection::PendingClaim> {
+        crate::mev_claim_protection::get_pending_claim(&env, &user)
+    }
+
+    pub fn execute_pending_claim(env: Env, user: Address) -> Result<i128, VaultError> {
+        crate::mev_claim_protection::execute_pending_claim(&env, &user)
+    }
+
+    pub fn cancel_pending_claim(env: Env, user: Address) -> Result<(), VaultError> {
+        crate::mev_claim_protection::cancel_pending_claim(&env, &user)
+    }
+
     /// Claim accumulated staking rewards without changing the staked position.
     ///
-    /// Accrues any pending rewards up to the current ledger, then transfers the
-    /// full accrued balance to `staker`. If an admin-configured claim cap is
-    /// active the payout is limited to whatever headroom remains in the current
-    /// window; the remainder stays accrued and can be claimed in the next window.
-    ///
-    /// Returns the token amount transferred. Returns 0 if there is nothing to claim.
+    /// Large claims are queued when MEV protection is enabled and the accrued
+    /// reward meets or exceeds the configured threshold.
     pub fn claim(env: Env, staker: Address) -> Result<i128, VaultError> {
         staker.require_auth();
         // Issue #201: rate limit applies to explicit claim() calls only ΓÇö
@@ -511,6 +534,10 @@ impl VaultContract {
         // auth/rate semantics and shouldn't be collaterally throttled by a
         // limit meant for standalone claim spam.
         Self::check_claim_rate_limit(&env, &staker);
+        if crate::mev_claim_protection::maybe_queue_large_claim(&env, &staker)? {
+            balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
+            return Ok(0);
+        }
         let result = Self::do_claim(&env, &staker);
         if result.is_ok() {
             balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
@@ -1835,6 +1862,77 @@ impl VaultContract {
         crate::cross_pool_identity::is_governance_weight_enabled(&env)
     }
 
+    pub fn set_unstake_fee_bps(env: Env, admin: Address, bps: u32) -> Result<(), VaultError> {
+        let stored_admin = admin::get_admin(&env)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        admin.require_auth();
+        if bps > 500 {
+            return Err(VaultError::UnstakeFeeTooHigh);
+        }
+        balance::set_unstake_fee_bps(&env, bps);
+        Ok(())
+    }
+
+    pub fn get_unstake_fee_bps(env: Env) -> u32 {
+        balance::get_unstake_fee_bps(&env)
+    }
+
+    pub fn get_reward_pool_balance(env: Env) -> i128 {
+        balance::get_reward_pool_balance(&env)
+    }
+
+    pub fn set_treasury_contribution_bps(
+        env: Env,
+        admin: Address,
+        bps: u32,
+    ) -> Result<(), VaultError> {
+        crate::community_treasury::set_treasury_contribution_bps(&env, &admin, bps)
+    }
+
+    pub fn get_community_treasury_balance(env: Env) -> i128 {
+        crate::community_treasury::get_community_treasury_balance(&env)
+    }
+
+    pub fn get_spending_proposal(
+        env: Env,
+        proposal_id: u32,
+    ) -> Option<crate::community_treasury::SpendingProposal> {
+        crate::community_treasury::get_spending_proposal(&env, proposal_id)
+    }
+
+    pub fn propose_spending(
+        env: Env,
+        user: Address,
+        recipient: Address,
+        amount: i128,
+        purpose: String,
+        duration_ledgers: u32,
+    ) -> Result<u32, VaultError> {
+        crate::community_treasury::propose_spending(
+            &env,
+            &user,
+            recipient,
+            amount,
+            purpose,
+            duration_ledgers,
+        )
+    }
+
+    pub fn vote_spending(
+        env: Env,
+        user: Address,
+        proposal_id: u32,
+        support: bool,
+    ) -> Result<(), VaultError> {
+        crate::community_treasury::vote_spending(&env, &user, proposal_id, support)
+    }
+
+    pub fn execute_spending(env: Env, proposal_id: u32) -> Result<(), VaultError> {
+        crate::community_treasury::execute_spending(&env, proposal_id)
+    }
+
     // ── Issue #469: Position Value Appreciation Log ──────────────────────────
 
     /// Take a valuation snapshot of user's staking position (callable by owner or keeper).
@@ -1967,15 +2065,36 @@ impl VaultContract {
         let total_deposited = balance::get_total_deposited(env);
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
+        let fee = amount
+            .checked_mul(balance::get_unstake_fee_bps(env) as i128)
+            .and_then(|v| v.checked_div(10_000))
+            .ok_or(VaultError::ArithmeticError)?;
+        let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
         let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
-        token_client.transfer(&env.current_contract_address(), staker, &amount);
+        token_client.transfer(&env.current_contract_address(), staker, &payout);
         balance::set_shares(env, staker, user_shares - shares);
         balance::set_total_shares(env, total_shares - shares);
         balance::set_total_deposited(env, total_deposited - amount);
+        if fee > 0 {
+            balance::add_protocol_fee_collected(env, fee);
+            let treasury_share = crate::community_treasury::route_fee_revenue(env, fee)?;
+            let remaining_fee = fee
+                .checked_sub(treasury_share)
+                .ok_or(VaultError::ArithmeticError)?;
+            let recipients = balance::get_fee_recipients(env);
+            if !recipients.is_empty() {
+                Self::distribute_fee(env, &token_addr, remaining_fee, &recipients);
+            } else if balance::fee_buyback_enabled(env) {
+                balance::add_unstake_fee_reserve(env, remaining_fee);
+            } else {
+                let reward_pool = balance::get_reward_pool_balance(env);
+                balance::set_reward_pool_balance(env, reward_pool + remaining_fee);
+            }
+        }
         // Issue #453: trigger mirroring for unstake
         crate::position_mirroring::maybe_mirror_action(env, staker, symbol_short!("unstake"), amount);
-        Ok(amount)
+        Ok(payout)
     }
 
     fn do_claim(env: &Env, staker: &Address) -> Result<i128, VaultError> {
