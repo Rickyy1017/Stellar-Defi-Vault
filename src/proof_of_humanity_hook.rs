@@ -279,6 +279,7 @@ impl VaultContract {
         if surcharge > 0 {
             token_client.transfer(&user, &contract, &surcharge);
             balance::add_protocol_fee_collected(&env, surcharge);
+            crate::community_treasury::route_fee_revenue(&env, surcharge)?;
         }
 
         token_client.transfer(&user, &contract, &stake_amount);

@@ -32,7 +32,7 @@ pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirro
 pub mod staker_favor_rounding; // issue #457 — always round in the staker's favor
 pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
 pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-change announcements
-pub mod mev_claim_protection;
+pub mod community_treasury;
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
@@ -66,4 +66,4 @@ mod test_issues_467_470;
 mod test_issues_459_462;
 
 #[cfg(test)]
-mod test_mev_claim_protection;
+mod test_community_treasury;
