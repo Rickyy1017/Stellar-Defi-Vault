@@ -495,14 +495,37 @@ impl VaultContract {
         balance::get_split_positions(&env, &user)
     }
 
+    pub fn set_mev_protection_threshold(
+        env: Env,
+        admin: Address,
+        amount: i128,
+    ) -> Result<(), VaultError> {
+        crate::mev_claim_protection::set_mev_protection_threshold(&env, &admin, amount)
+    }
+
+    pub fn get_mev_protection_threshold(env: Env) -> i128 {
+        crate::mev_claim_protection::get_mev_protection_threshold(&env)
+    }
+
+    pub fn get_pending_claim(
+        env: Env,
+        user: Address,
+    ) -> Option<crate::mev_claim_protection::PendingClaim> {
+        crate::mev_claim_protection::get_pending_claim(&env, &user)
+    }
+
+    pub fn execute_pending_claim(env: Env, user: Address) -> Result<i128, VaultError> {
+        crate::mev_claim_protection::execute_pending_claim(&env, &user)
+    }
+
+    pub fn cancel_pending_claim(env: Env, user: Address) -> Result<(), VaultError> {
+        crate::mev_claim_protection::cancel_pending_claim(&env, &user)
+    }
+
     /// Claim accumulated staking rewards without changing the staked position.
     ///
-    /// Accrues any pending rewards up to the current ledger, then transfers the
-    /// full accrued balance to `staker`. If an admin-configured claim cap is
-    /// active the payout is limited to whatever headroom remains in the current
-    /// window; the remainder stays accrued and can be claimed in the next window.
-    ///
-    /// Returns the token amount transferred. Returns 0 if there is nothing to claim.
+    /// Large claims are queued when MEV protection is enabled and the accrued
+    /// reward meets or exceeds the configured threshold.
     pub fn claim(env: Env, staker: Address) -> Result<i128, VaultError> {
         staker.require_auth();
         // Issue #201: rate limit applies to explicit claim() calls only ΓÇö
@@ -511,6 +534,10 @@ impl VaultContract {
         // auth/rate semantics and shouldn't be collaterally throttled by a
         // limit meant for standalone claim spam.
         Self::check_claim_rate_limit(&env, &staker);
+        if crate::mev_claim_protection::maybe_queue_large_claim(&env, &staker)? {
+            balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
+            return Ok(0);
+        }
         let result = Self::do_claim(&env, &staker);
         if result.is_ok() {
             balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
