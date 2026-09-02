@@ -312,15 +312,6 @@ pub enum VaultExtError {
     /// or has already been enacted and so can no longer be vetoed (issue
     /// #241).
     AlreadyVetoed = 50,
-    /// Returned by `set_veto_threshold_bps()` when `bps` exceeds 10 000
-    /// (100%) (issue #241). Both error enums are at Soroban's 50-variant cap,
-    /// so this doubles as the generic "basis-points value out of range" code ΓÇö
-    /// `start_matching_program()` also returns it for a `match_rate_bps` above
-    /// 10 000 (issue #242).
-    InvalidVetoThreshold = 51,
-    /// Returned by `position_clawback` (issue #463) when the clawback window
-    /// has expired and the position can no longer be reversed.
-    ClawbackWindowExpired = 52,
 }
 
 /// Third error enum, for the same 50-variant reason `VaultExtError` exists:
@@ -466,8 +457,6 @@ impl From<VaultError> for VaultOverflowError {
         }
     }
 }
-
-
 
 impl From<VaultError> for VaultExtError {
     fn from(err: VaultError) -> Self {

@@ -98,7 +98,7 @@ impl VaultContract {
         // reward_rate <= main pool rate if main rate set
         let main_rate = balance::get_reward_rate_bps(&env) as i128;
         if main_rate > 0 && reward_rate_bps > main_rate {
-            return Err(VaultExtError::InvalidVetoThreshold);
+            return Err(VaultExtError::InvalidFeeAllocation);
         }
         let mut pools = get_sub_pools(&env);
         if pools.len() >= 5 {
@@ -147,7 +147,7 @@ impl VaultContract {
         let idx = find_sub_pool_index(&env, &pools, sub_pool_id).ok_or(VaultExtError::PositionNotFound)?;
         let mut pool = pools.get(idx).unwrap();
         if pool.total_staked + amount > pool.max_capacity {
-            return Err(VaultExtError::InvalidVetoThreshold);
+            return Err(VaultExtError::InvalidFeeAllocation);
         }
         pool.total_staked += amount;
         pools.set(idx, pool);
@@ -228,7 +228,7 @@ impl VaultContract {
         }
         let main_rate = balance::get_reward_rate_bps(&env) as i128;
         if main_rate > 0 && rate_bps > main_rate {
-            return Err(VaultExtError::InvalidVetoThreshold);
+            return Err(VaultExtError::InvalidFeeAllocation);
         }
         pool.reward_rate_bps = rate_bps;
         pools.set(idx, pool);
