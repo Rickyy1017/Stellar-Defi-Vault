@@ -22,7 +22,7 @@ use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, String
 
 use crate::balance;
 use crate::errors::VaultQuizError;
-use crate::vault::{VaultContract, LEDGERS_PER_DAY};
+use crate::vault::{VaultContract, VaultContractClient, LEDGERS_PER_DAY};
 
 /// Maximum characters allowed in a submitted tip's content.
 pub const MAX_TIP_CONTENT_LEN: u32 = 140;

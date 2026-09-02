@@ -858,13 +858,7 @@ pub fn milestone_achieved(
 }
 
 /// Emitted when a user successfully completes a quiz and unlocks a reward tier.
-pub fn quiz_completed(
-    env: &Env,
-    user: &Address,
-    quiz_id: u32,
-    tier_unlocked: u32,
-    ledger: u32,
-) {
+pub fn quiz_completed(env: &Env, user: &Address, quiz_id: u32, tier_unlocked: u32, ledger: u32) {
     let topics = (symbol_short!("quiz_comp"), user);
     env.events()
         .publish(topics, (quiz_id, tier_unlocked, ledger));
@@ -884,13 +878,7 @@ pub fn quiz_attempt_failed(
 }
 
 /// Emitted when an admin adds a new quiz.
-pub fn quiz_added(
-    env: &Env,
-    admin: &Address,
-    quiz_id: u32,
-    tier_unlocked: u32,
-    ledger: u32,
-) {
+pub fn quiz_added(env: &Env, admin: &Address, quiz_id: u32, tier_unlocked: u32, ledger: u32) {
     let topics = (symbol_short!("quiz_add"), admin);
     env.events()
         .publish(topics, (quiz_id, tier_unlocked, ledger));
@@ -1126,39 +1114,19 @@ pub fn force_resolved(
 
 // ── Issue #286: debt NFT collateral ─────────────────────────────────────────
 
-pub fn debt_nft_minted(
-    env: &Env,
-    issuer: &Address,
-    nft_id: u32,
-    face_value: i128,
-    ledger: u32,
-) {
+pub fn debt_nft_minted(env: &Env, issuer: &Address, nft_id: u32, face_value: i128, ledger: u32) {
     let topics = (symbol_short!("dbt_mnt"), issuer);
-    env.events()
-        .publish(topics, (nft_id, face_value, ledger));
+    env.events().publish(topics, (nft_id, face_value, ledger));
 }
 
-pub fn debt_nft_burned(
-    env: &Env,
-    holder: &Address,
-    nft_id: u32,
-    ledger: u32,
-) {
+pub fn debt_nft_burned(env: &Env, holder: &Address, nft_id: u32, ledger: u32) {
     let topics = (symbol_short!("dbt_brn"), holder);
-    env.events()
-        .publish(topics, (nft_id, ledger));
+    env.events().publish(topics, (nft_id, ledger));
 }
 
-pub fn debt_nft_transferred(
-    env: &Env,
-    from: &Address,
-    to: &Address,
-    nft_id: u32,
-    ledger: u32,
-) {
+pub fn debt_nft_transferred(env: &Env, from: &Address, to: &Address, nft_id: u32, ledger: u32) {
     let topics = (symbol_short!("dbt_trn"), from);
-    env.events()
-        .publish(topics, (to, nft_id, ledger));
+    env.events().publish(topics, (to, nft_id, ledger));
 }
 
 // ── Issue #283: position AMM ─────────────────────────────────────────────────
@@ -1172,8 +1140,10 @@ pub fn swap_executed(
     ledger: u32,
 ) {
     let topics = (symbol_short!("swap_exe"), offerer);
-    env.events()
-        .publish(topics, (counterparty, offerer_amount, counterparty_amount, ledger));
+    env.events().publish(
+        topics,
+        (counterparty, offerer_amount, counterparty_amount, ledger),
+    );
 }
 
 // ── Issue #284: reward prediction market ─────────────────────────────────────
@@ -1186,8 +1156,10 @@ pub fn market_resolved(
     ledger: u32,
 ) {
     let topics = (symbol_short!("mkt_rsl"),);
-    env.events()
-        .publish(topics, (outcome, winning_side_total, losing_side_total, ledger));
+    env.events().publish(
+        topics,
+        (outcome, winning_side_total, losing_side_total, ledger),
+    );
 }
 
 // ── Issue #285: cross-pool yield detector ────────────────────────────────────
@@ -1200,8 +1172,7 @@ pub fn higher_yield_detected(
     ledger: u32,
 ) {
     let topics = (symbol_short!("hi_yld"), competitor);
-    env.events()
-        .publish(topics, (their_rate, our_rate, ledger));
+    env.events().publish(topics, (their_rate, our_rate, ledger));
 }
 // ── Issue #281: Fee Revenue Sharing ──────────────────────────────────────────
 
@@ -1216,13 +1187,7 @@ pub fn revenue_distributed(
         .publish(topics, (merkle_root.clone(), total_amount, ledger));
 }
 
-pub fn revenue_share_claimed(
-    env: &Env,
-    user: &Address,
-    amount: i128,
-    epoch: u32,
-    ledger: u32,
-) {
+pub fn revenue_share_claimed(env: &Env, user: &Address, amount: i128, epoch: u32, ledger: u32) {
     let topics = (symbol_short!("rev_clm"), user);
     env.events().publish(topics, (amount, epoch, ledger));
 }
@@ -1298,17 +1263,12 @@ pub fn stake_matched(
     ledger: u32,
 ) {
     let topics = (symbol_short!("stk_match"), user);
-    env.events().publish(topics, (stake_amount, match_amount, ledger));
+    env.events()
+        .publish(topics, (stake_amount, match_amount, ledger));
 }
 
 /// Issue #243: emitted when a user purchases unstake insurance.
-pub fn insurance_purchased(
-    env: &Env,
-    user: &Address,
-    premium: i128,
-    coverage: i128,
-    ledger: u32,
-) {
+pub fn insurance_purchased(env: &Env, user: &Address, premium: i128, coverage: i128, ledger: u32) {
     let topics = (symbol_short!("ins_buy"), user);
     env.events().publish(topics, (premium, coverage, ledger));
 }
@@ -1412,13 +1372,7 @@ pub fn reward_claimed_in_token(
 
 // ── Issue #392: loyalty points events ───────────────────────────────────────
 
-pub fn points_awarded(
-    env: &Env,
-    user: &Address,
-    amount: u32,
-    new_balance: u32,
-    ledger: u32,
-) {
+pub fn points_awarded(env: &Env, user: &Address, amount: u32, new_balance: u32, ledger: u32) {
     let topics = (symbol_short!("loy_awd"), user.clone());
     env.events().publish(topics, (amount, new_balance, ledger));
 }
@@ -1439,4 +1393,10 @@ pub fn points_redeemed(
 pub fn loyalty_config_updated(env: &Env, rules_len: u32, ledger: u32) {
     let topics = (symbol_short!("loy_cfg"),);
     env.events().publish(topics, (rules_len, ledger));
+}
+
+/// Emitted when an address's KYC approval status changes.
+pub fn kyc_status_changed(env: &Env, user: &Address, approved: bool) {
+    let topics = (symbol_short!("kyc_set"), user);
+    env.events().publish(topics, approved);
 }
