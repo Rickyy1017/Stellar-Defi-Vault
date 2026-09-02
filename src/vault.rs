@@ -659,6 +659,34 @@ impl VaultContract {
         }
     }
 
+    /// Admin: configure the optional per-claim protocol fee.
+    pub fn set_claim_fee_bps(
+        env: Env,
+        admin: Address,
+        fee_bps: u32,
+    ) -> Result<(), VaultError> {
+        crate::claim_fee::set_claim_fee_bps(env, admin, fee_bps)
+    }
+
+    /// Read-only query for the active claim fee in basis points.
+    pub fn get_claim_fee_bps(env: Env) -> u32 {
+        crate::claim_fee::get_claim_fee_bps(env)
+    }
+
+    /// Read-only query for accrued protocol claim fees.
+    pub fn get_claim_fee_reserve(env: Env) -> i128 {
+        crate::claim_fee::get_claim_fee_reserve(env)
+    }
+
+    /// Admin: withdraw accumulated claim fees to the protocol treasury.
+    pub fn withdraw_claim_fees(
+        env: Env,
+        admin: Address,
+        amount: i128,
+    ) -> Result<(), VaultError> {
+        crate::claim_fee::withdraw_claim_fees(env, admin, amount)
+    }
+
     /// Read-only metadata for external tools and explorers.
     pub fn contract_metadata(env: Env) -> ContractMetadata {
         ContractMetadata {
@@ -2083,7 +2111,8 @@ impl VaultContract {
 
         let bounty_contribution =
             crate::stake_funded_bug_bounty::deduct_bounty_contribution(env, staker, accrued);
-        let user_payout = accrued.saturating_sub(bounty_contribution);
+        let reward_after_bounty = accrued.saturating_sub(bounty_contribution);
+        let user_payout = crate::claim_fee::apply_claim_fee(env, staker, reward_after_bounty)?;
 
         if user_payout > 0 {
             token_client.transfer(&env.current_contract_address(), staker, &user_payout);
