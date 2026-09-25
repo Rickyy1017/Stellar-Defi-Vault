@@ -39,6 +39,12 @@ pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawa
 pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
 pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
 
+// Issues #526-#529: scheduled exit, snapshot airdrop, external price oracle, co-sponsor.
+pub mod scheduled_exit; // issue #526 — scheduled self-withdrawal
+pub mod snapshot_airdrop; // issue #527 — snapshot-based airdrop distribution
+pub mod external_price_oracle; // issue #528 — external price oracle for collateral valuation
+pub mod co_sponsor; // issue #529 — third-party reward matching via co-sponsors
+
 // Pool insights, reward-runway guard, and time-delayed admin recovery.
 pub mod pool_insights; // pool summary + rounding-policy transparency
 pub mod runway_guard; // set_reward_rate_bps runway safety rail
@@ -77,6 +83,9 @@ pub use vault::VaultContract;
 
 #[cfg(test)]
 mod test_issues_568_571;
+
+#[cfg(test)]
+mod test_issues_526_529;
 
 // #[cfg(test)]
 // mod test_issues_463_466;
