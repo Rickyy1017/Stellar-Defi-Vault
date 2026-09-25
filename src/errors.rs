@@ -803,3 +803,33 @@ impl From<VaultError> for VaultFeature2Error {
         }
     }
 }
+
+/// Ninth error enum for issues #530-#533 (activity log, invariant checker,
+/// reward-rate ceiling, pause grace period).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature3Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Returned by `force_unpause()` when the vault is not paused.
+    NotPaused = 3,
+    /// Returned by `force_unpause()` before the maximum pause duration has
+    /// elapsed.
+    GracePeriodNotElapsed = 4,
+    /// Returned by `set_max_pause_duration()` while the vault is paused, or
+    /// when the supplied duration is below `MIN_MAX_PAUSE_LEDGERS`.
+    InvalidPauseDuration = 5,
+}
+
+impl From<VaultError> for VaultFeature3Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature3Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature3Error::NotInitialized,
+            _ => VaultFeature3Error::Unauthorized,
+        }
+    }
+}

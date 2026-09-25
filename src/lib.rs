@@ -45,6 +45,9 @@ pub mod snapshot_airdrop; // issue #527 — snapshot-based airdrop distribution
 pub mod external_price_oracle; // issue #528 — external price oracle for collateral valuation
 pub mod co_sponsor; // issue #529 — third-party reward matching via co-sponsors
 
+// Issues #530-#533.
+pub mod pause_grace_period; // issue #533 — max pause duration + forced unpause
+
 // Pool insights, reward-runway guard, and time-delayed admin recovery.
 pub mod pool_insights; // pool summary + rounding-policy transparency
 pub mod runway_guard; // set_reward_rate_bps runway safety rail

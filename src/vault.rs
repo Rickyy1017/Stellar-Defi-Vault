@@ -1482,6 +1482,10 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::require_not_stopped(&env)?;
+        // Issue #533: no re-pause during the cooldown after a forced unpause.
+        if crate::pause_grace_period::repause_blocked(&env) {
+            return Err(VaultError::Unauthorized);
+        }
 
         if message.len() > 200 {
             return Err(VaultError::DescriptionTooLong);
@@ -1544,6 +1548,10 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::require_not_stopped(&env)?;
+        // Issue #533: no re-pause during the cooldown after a forced unpause.
+        if crate::pause_grace_period::repause_blocked(&env) {
+            return Err(VaultError::Unauthorized);
+        }
 
         if message.len() > 200 {
             return Err(VaultError::DescriptionTooLong);
