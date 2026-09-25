@@ -825,6 +825,15 @@ pub enum VaultFeature3Error {
     /// Returned by `set_max_reward_rate()` when the new ceiling is zero,
     /// higher than the current ceiling, or below the current reward rate.
     InvalidRateCeiling = 6,
+    /// Returned by `assert_invariants()` when a core accounting total
+    /// (shares, deposits, reward pool) is negative.
+    NegativeAccounting = 7,
+    /// Returned by `assert_invariants()` when the sum of all stakers' share
+    /// balances differs from total shares outstanding.
+    SharesMismatch = 8,
+    /// Returned by `assert_invariants()` when the vault's actual token
+    /// balance is below what its accounting says it holds.
+    Undercollateralized = 9,
 }
 
 impl From<VaultError> for VaultFeature3Error {

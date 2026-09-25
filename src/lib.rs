@@ -48,6 +48,7 @@ pub mod co_sponsor; // issue #529 — third-party reward matching via co-sponsor
 // Issues #530-#533.
 pub mod pause_grace_period; // issue #533 — max pause duration + forced unpause
 pub mod reward_rate_ceiling; // issue #532 — lower-only max reward rate ceiling
+pub mod invariants; // issue #531 — core accounting invariant checker
 
 // Pool insights, reward-runway guard, and time-delayed admin recovery.
 pub mod pool_insights; // pool summary + rounding-policy transparency
