@@ -789,6 +789,61 @@ pub enum VaultFeature2Error {
     InsufficientStake = 13,
 }
 
+/// Ninth error enum, for issues #519 (vote-weight delegation) and #520
+/// (tiered fee discounts). All eight prior `#[contracterror]` enums are at
+/// Soroban's 50-variant cap. Issues #518 (`transfer_position`) and #521
+/// (guardian pause) don't need new cases here — every error they can return
+/// already exists on `VaultError` itself (`PositionNotFound`,
+/// `RecipientAlreadyStaking`, `Unauthorized`, `ContractStopped`, etc.), so
+/// those two entrypoints just return `VaultError` directly.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature3Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 5,
+    /// Mirrors `VaultError::InsufficientShares`.
+    InsufficientShares = 6,
+    /// Returned by `set_fee_tiers()` (issue #520) when more than
+    /// `MAX_FEE_TIERS` tiers are supplied.
+    TooManyFeeTiers = 7,
+    /// Returned by `set_fee_tiers()` (issue #520) when a tier's
+    /// `discount_bps` exceeds 10 000 (100%) or `min_position_amount` is
+    /// negative.
+    InvalidFeeTierConfig = 8,
+    /// Returned by `delegate_vote_weight()` (issue #519) when a user tries
+    /// to delegate to themselves.
+    SelfDelegationNotAllowed = 9,
+    /// Returned by `delegate_vote_weight()` (issue #519) when the target
+    /// delegate already has `MAX_DELEGATORS_PER_DELEGATE` delegators.
+    TooManyDelegators = 10,
+    /// Returned by `revoke_vote_delegation()` (issue #519) when the caller
+    /// has no active delegation to revoke.
+    NoDelegationSet = 11,
+}
+
+impl From<VaultError> for VaultFeature3Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature3Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature3Error::NotInitialized,
+            VaultError::ZeroAmount => VaultFeature3Error::ZeroAmount,
+            VaultError::ArithmeticError => VaultFeature3Error::ArithmeticError,
+            VaultError::PositionNotFound => VaultFeature3Error::PositionNotFound,
+            VaultError::InsufficientShares => VaultFeature3Error::InsufficientShares,
+            _ => VaultFeature3Error::Unauthorized,
+        }
+    }
+}
+
 impl From<VaultError> for VaultFeature2Error {
     fn from(err: VaultError) -> Self {
         match err {

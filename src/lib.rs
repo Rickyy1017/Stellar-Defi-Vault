@@ -50,6 +50,13 @@ pub mod allowlist_rate_limits; // #514–#517: allowlist, withdrawal rate limit,
 pub mod peg_stabilization;
 pub mod position_mirroring;
 
+// Issues #518-#521: position transfer, vote-weight delegation, tiered fee
+// discounts, and a pause-only guardian role.
+pub mod position_transfer; // issue #518 — transfer_position()
+pub mod vote_weight_delegation; // issue #519 — delegate_vote_weight()
+pub mod position_fee_tiers; // issue #520 — tiered fee discounts for large depositors
+pub mod guardian_pause; // issue #521 — guardian role with pause-only power
+
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
 
