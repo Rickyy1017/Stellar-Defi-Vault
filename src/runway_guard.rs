@@ -165,6 +165,10 @@ impl VaultContract {
 /// and the role-gated `role_set_reward_rate_bps` (issue #513). Callers must
 /// have authorized the change beforehand.
 pub(crate) fn apply_reward_rate(env: &Env, rate_bps: u32) -> Result<(), VaultOpsError> {
+    // Issue #510: a manual rate would be overwritten on the next TVL change.
+    if crate::dynamic_reward_rate::is_enabled(env) {
+        return Err(VaultOpsError::DynamicRateActive);
+    }
     if rate_bps > balance::MAX_RATE_BPS {
         return Err(VaultOpsError::RateTooHigh);
     }

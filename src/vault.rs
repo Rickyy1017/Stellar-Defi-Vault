@@ -243,6 +243,9 @@ impl VaultContract {
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
 
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(&env);
+
         Ok(shares_minted)
     }
 
@@ -1560,6 +1563,8 @@ impl VaultContract {
         events::yield_added(&env, &admin_actual, amount);
         events::admin_action_add_yield(&env, &admin_actual, amount);
         balance::increment_admin_action_count(&env);
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(&env);
         Ok(())
     }
 
@@ -2177,6 +2182,8 @@ impl VaultContract {
             balance::register_staker(env, user);
         }
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(env);
         Ok(shares)
     }
 
@@ -2228,6 +2235,8 @@ impl VaultContract {
             symbol_short!("unstake"),
             amount,
         );
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(env);
         Ok(amount)
     }
 
@@ -3299,6 +3308,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             (symbol_short!("bat_dep"), &caller),
             (beneficiaries.len() as i128, total_amount, env.ledger().sequence()),
         );
+
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(&env);
 
         Ok(())
     }

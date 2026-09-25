@@ -734,6 +734,9 @@ pub enum VaultOpsError {
     /// Returned by `propose_admin_recovery` when `new_admin` equals the
     /// current admin.
     InvalidRecoveryConfig = 11,
+    /// Returned by `set_reward_rate_bps` while the algorithmic reward rate
+    /// is enabled (issue #510) — the rate is derived from utilization.
+    DynamicRateActive = 12,
 }
 
 impl From<VaultError> for VaultOpsError {
@@ -835,6 +838,11 @@ pub enum VaultAccessError {
     /// Returned by `set_claim_vesting_duration` when the duration exceeds
     /// the supported maximum (issue #511).
     InvalidVestingDuration = 11,
+    /// Returned by `set_dynamic_rate_config` when the curve parameters are
+    /// inconsistent (issue #510).
+    InvalidDynamicRateConfig = 12,
+    /// Mirrors `VaultOpsError::DynamicRateActive` (issue #510).
+    DynamicRateActive = 13,
 }
 
 impl From<VaultError> for VaultAccessError {
@@ -861,6 +869,7 @@ impl From<VaultOpsError> for VaultAccessError {
             VaultOpsError::ArithmeticError => VaultAccessError::ArithmeticError,
             VaultOpsError::RateTooHigh => VaultAccessError::RateTooHigh,
             VaultOpsError::InsufficientRunway => VaultAccessError::InsufficientRunway,
+            VaultOpsError::DynamicRateActive => VaultAccessError::DynamicRateActive,
             _ => VaultAccessError::Unauthorized,
         }
     }

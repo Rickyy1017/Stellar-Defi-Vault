@@ -62,6 +62,7 @@ pub mod allowlist_rate_limits; // #514–#517: allowlist, withdrawal rate limit,
 pub mod access_roles; // issue #513 — role-based access control (RateSetter, Pauser, TreasuryManager)
 pub mod transfer_safety; // issue #512 — fee-on-transfer safety via actual-received-amount checks
 pub mod claim_vesting; // issue #511 — optional linear vesting for claimed rewards
+pub mod dynamic_reward_rate; // issue #510 — utilization-driven algorithmic reward rate
 pub mod peg_stabilization;
 pub mod position_mirroring;
 
