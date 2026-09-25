@@ -218,11 +218,8 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
-        token::Client::new(&env, &token_addr).transfer(
-            &user,
-            &env.current_contract_address(),
-            &amount,
-        );
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount = crate::transfer_safety::pull_tokens(&env, &token_addr, &user, amount)?;
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
@@ -245,6 +242,9 @@ impl VaultContract {
 
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
+
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(&env);
 
         Ok(shares_minted)
     }
@@ -1495,29 +1495,8 @@ impl VaultContract {
         message: soroban_sdk::String,
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        Self::require_not_stopped(&env)?;
-
-        if message.len() > 200 {
-            return Err(VaultError::DescriptionTooLong);
-        }
-
-        Self::set_paused(&env, true);
         let admin = admin::get_admin(&env)?;
-        let current_ledger = env.ledger().sequence();
-
-        let pause_info = PauseInfo {
-            reason,
-            message: message.clone(),
-            paused_at: current_ledger,
-        };
-        balance::set_pause_info(&env, &pause_info);
-
-        events::paused_with_reason(&env, &admin, &reason, &message, current_ledger);
-        events::admin_action_pause(&env, &admin);
-        balance::increment_admin_action_count(&env);
-        balance::set_last_updated_ledger(&env, current_ledger);
-        Self::append_changelog(&env, &admin, String::from_str(&env, "paused"), 0, 1);
-        Ok(())
+        Self::pause_by(&env, &admin, reason, message)
     }
 
     /// Resume deposits and withdrawals after a pause (admin only). Also
@@ -1525,17 +1504,8 @@ impl VaultContract {
     /// manual unpause always wins over a scheduled one.
     pub fn unpause(env: Env) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        Self::require_not_stopped(&env)?;
-        Self::set_paused(&env, false);
-        balance::clear_pause_info(&env);
-        balance::clear_scheduled_unpause(&env);
         let admin = admin::get_admin(&env)?;
-        events::unpaused(&env, &admin, env.ledger().sequence());
-        events::admin_action_unpause(&env, &admin);
-        balance::increment_admin_action_count(&env);
-        balance::set_last_updated_ledger(&env, env.ledger().sequence());
-        Self::append_changelog(&env, &admin, String::from_str(&env, "unpaused"), 1, 0);
-        Ok(())
+        Self::unpause_by(&env, &admin)
     }
 
     /// Pause all deposits and withdrawals now, scheduling an automatic
@@ -1598,14 +1568,17 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
         let token_addr = Self::token_address(&env)?;
-        let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&admin_addr, &env.current_contract_address(), &amount);
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount =
+            crate::transfer_safety::pull_tokens(&env, &token_addr, &admin_addr, amount)?;
         let total_deposited = balance::get_total_deposited(&env);
         balance::set_total_deposited(&env, total_deposited + amount);
         let admin_actual = admin::get_admin(&env)?;
         events::yield_added(&env, &admin_actual, amount);
         events::admin_action_add_yield(&env, &admin_actual, amount);
         balance::increment_admin_action_count(&env);
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(&env);
         Ok(())
     }
 
@@ -2209,11 +2182,8 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
-        token::Client::new(env, &token_addr).transfer(
-            user,
-            &env.current_contract_address(),
-            &amount,
-        );
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount = crate::transfer_safety::pull_tokens(env, &token_addr, user, amount)?;
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
         let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
@@ -2226,6 +2196,8 @@ impl VaultContract {
             balance::register_staker(env, user);
         }
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(env);
         Ok(shares)
     }
 
@@ -2279,6 +2251,8 @@ impl VaultContract {
             symbol_short!("unstake"),
             amount,
         );
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(env);
         Ok(amount)
     }
 
@@ -2390,11 +2364,8 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
         let token_addr = Self::token_address(&env)?;
-        token::Client::new(&env, &token_addr).transfer(
-            &admin,
-            &env.current_contract_address(),
-            &amount,
-        );
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount = crate::transfer_safety::pull_tokens(&env, &token_addr, &admin, amount)?;
         Self::set_gas_rebate_pool(&env, Self::gas_rebate_pool(&env) + amount);
         Ok(())
     }
@@ -3302,8 +3273,10 @@ pub fn get_reward_threshold(env: Env) -> i128 {
 
         // Transfer tokens from caller to contract
         let token_addr = Self::token_address(&env)?;
-        let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&caller, &env.current_contract_address(), &total_amount);
+        // Issue #512: measure what actually arrived. If a fee-on-transfer
+        // token delivered less, each beneficiary is credited pro-rata.
+        let received =
+            crate::transfer_safety::pull_tokens(&env, &token_addr, &caller, total_amount)?;
 
         // Credit each beneficiary individually
         let total_shares = balance::get_total_shares(&env);
@@ -3314,7 +3287,15 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         let mut i = 0u32;
         while i < beneficiaries.len() {
             let beneficiary = beneficiaries.get(i).unwrap();
-            let amount = amounts.get(i).unwrap();
+            let stated = amounts.get(i).unwrap();
+            let amount = if received == total_amount {
+                stated
+            } else {
+                stated
+                    .checked_mul(received)
+                    .and_then(|v| v.checked_div(total_amount))
+                    .ok_or(VaultError::ArithmeticError)?
+            };
             let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
                 .ok_or(VaultError::ArithmeticError)?;
 
@@ -3344,7 +3325,60 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             (beneficiaries.len() as i128, total_amount, env.ledger().sequence()),
         );
 
+        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
+        crate::dynamic_reward_rate::sync(&env);
+
         Ok(())
     }
 
+}
+
+// Shared bodies for entrypoints that can be reached both by the admin and by a
+// delegated role holder (issue #513). Kept out of `#[contractimpl]` so they
+// are never exported as contract functions.
+impl VaultContract {
+    /// Pauses the pool on behalf of `actor`. Callers must authorize `actor`.
+    pub(crate) fn pause_by(
+        env: &Env,
+        actor: &Address,
+        reason: PauseReason,
+        message: soroban_sdk::String,
+    ) -> Result<(), VaultError> {
+        Self::require_not_stopped(env)?;
+
+        if message.len() > 200 {
+            return Err(VaultError::DescriptionTooLong);
+        }
+
+        Self::set_paused(env, true);
+        let current_ledger = env.ledger().sequence();
+
+        let pause_info = PauseInfo {
+            reason,
+            message: message.clone(),
+            paused_at: current_ledger,
+        };
+        balance::set_pause_info(env, &pause_info);
+
+        events::paused_with_reason(env, actor, &reason, &message, current_ledger);
+        events::admin_action_pause(env, actor);
+        balance::increment_admin_action_count(env);
+        balance::set_last_updated_ledger(env, current_ledger);
+        Self::append_changelog(env, actor, String::from_str(env, "paused"), 0, 1);
+        Ok(())
+    }
+
+    /// Unpauses the pool on behalf of `actor`. Callers must authorize `actor`.
+    pub(crate) fn unpause_by(env: &Env, actor: &Address) -> Result<(), VaultError> {
+        Self::require_not_stopped(env)?;
+        Self::set_paused(env, false);
+        balance::clear_pause_info(env);
+        balance::clear_scheduled_unpause(env);
+        events::unpaused(env, actor, env.ledger().sequence());
+        events::admin_action_unpause(env, actor);
+        balance::increment_admin_action_count(env);
+        balance::set_last_updated_ledger(env, env.ledger().sequence());
+        Self::append_changelog(env, actor, String::from_str(env, "unpaused"), 1, 0);
+        Ok(())
+    }
 }

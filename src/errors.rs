@@ -734,6 +734,9 @@ pub enum VaultOpsError {
     /// Returned by `propose_admin_recovery` when `new_admin` equals the
     /// current admin.
     InvalidRecoveryConfig = 11,
+    /// Returned by `set_reward_rate_bps` while the algorithmic reward rate
+    /// is enabled (issue #510) — the rate is derived from utilization.
+    DynamicRateActive = 12,
 }
 
 impl From<VaultError> for VaultOpsError {
@@ -855,6 +858,74 @@ impl From<VaultError> for VaultFeature2Error {
             VaultError::VaultPaused => VaultFeature2Error::VaultPaused,
             VaultError::InsufficientRewardPool => VaultFeature2Error::InsufficientRewardPool,
             _ => VaultFeature2Error::Unauthorized,
+        }
+    }
+}
+
+/// Ninth error enum for issues #510-#513 (dynamic reward rate, claim vesting,
+/// fee-on-transfer safety, role-based access control). All prior
+/// `#[contracterror]` enums are at Soroban's 50-variant cap.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultAccessError {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::RateTooHigh`.
+    RateTooHigh = 5,
+    /// Mirrors `VaultOpsError::InsufficientRunway`.
+    InsufficientRunway = 6,
+    /// Mirrors `VaultError::ContractStopped`.
+    ContractStopped = 7,
+    /// Mirrors `VaultError::DescriptionTooLong`.
+    DescriptionTooLong = 8,
+    /// Mirrors `VaultError::UnstakeFeeTooHigh`.
+    UnstakeFeeTooHigh = 9,
+    /// Returned by a role-gated entrypoint when the caller is neither the
+    /// admin nor a holder of the required role (issue #513).
+    MissingRole = 10,
+    /// Returned by `set_claim_vesting_duration` when the duration exceeds
+    /// the supported maximum (issue #511).
+    InvalidVestingDuration = 11,
+    /// Returned by `set_dynamic_rate_config` when the curve parameters are
+    /// inconsistent (issue #510).
+    InvalidDynamicRateConfig = 12,
+    /// Mirrors `VaultOpsError::DynamicRateActive` (issue #510).
+    DynamicRateActive = 13,
+}
+
+impl From<VaultError> for VaultAccessError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultAccessError::Unauthorized,
+            VaultError::NotInitialized => VaultAccessError::NotInitialized,
+            VaultError::ZeroAmount => VaultAccessError::ZeroAmount,
+            VaultError::ArithmeticError => VaultAccessError::ArithmeticError,
+            VaultError::RateTooHigh => VaultAccessError::RateTooHigh,
+            VaultError::ContractStopped => VaultAccessError::ContractStopped,
+            VaultError::DescriptionTooLong => VaultAccessError::DescriptionTooLong,
+            VaultError::UnstakeFeeTooHigh => VaultAccessError::UnstakeFeeTooHigh,
+            _ => VaultAccessError::Unauthorized,
+        }
+    }
+}
+
+impl From<VaultOpsError> for VaultAccessError {
+    fn from(err: VaultOpsError) -> Self {
+        match err {
+            VaultOpsError::NotInitialized => VaultAccessError::NotInitialized,
+            VaultOpsError::ZeroAmount => VaultAccessError::ZeroAmount,
+            VaultOpsError::ArithmeticError => VaultAccessError::ArithmeticError,
+            VaultOpsError::RateTooHigh => VaultAccessError::RateTooHigh,
+            VaultOpsError::InsufficientRunway => VaultAccessError::InsufficientRunway,
+            VaultOpsError::DynamicRateActive => VaultAccessError::DynamicRateActive,
+            _ => VaultAccessError::Unauthorized,
         }
     }
 }

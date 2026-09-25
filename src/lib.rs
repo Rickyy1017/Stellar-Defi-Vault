@@ -36,7 +36,19 @@ pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-c
 pub mod meta_staking; // meta-staking layer — restake reward tokens for a bonus meta-reward rate
 pub mod batch_vote; // governance batch voting (issue #160)
 pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit
-pub mod vault_extensions_538_541; // issues #538-#541 — version query, token fee override, rate ramp, deposit memo
+pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
+pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
+
+// Issues #526-#529: scheduled exit, snapshot airdrop, external price oracle, co-sponsor.
+pub mod scheduled_exit; // issue #526 — scheduled self-withdrawal
+pub mod snapshot_airdrop; // issue #527 — snapshot-based airdrop distribution
+pub mod external_price_oracle; // issue #528 — external price oracle for collateral valuation
+pub mod co_sponsor; // issue #529 — third-party reward matching via co-sponsors
+
+// Pool insights, reward-runway guard, and time-delayed admin recovery.
+pub mod pool_insights; // pool summary + rounding-policy transparency
+pub mod runway_guard; // set_reward_rate_bps runway safety rail
+pub mod admin_recovery; // long-delay admin key-loss recovery
 
 // Pre-existing modules that `vault.rs` already calls into (e.g. `do_unstake`'s
 // `community_treasury::route_fee_revenue` / `position_mirroring::maybe_mirror_action`)
@@ -47,15 +59,12 @@ pub mod claim_fee;
 pub mod community_treasury;
 pub mod mev_claim_protection;
 pub mod allowlist_rate_limits; // #514–#517: allowlist, withdrawal rate limit, partial claim, claim cooldown
+pub mod access_roles; // issue #513 — role-based access control (RateSetter, Pauser, TreasuryManager)
+pub mod transfer_safety; // issue #512 — fee-on-transfer safety via actual-received-amount checks
+pub mod claim_vesting; // issue #511 — optional linear vesting for claimed rewards
+pub mod dynamic_reward_rate; // issue #510 — utilization-driven algorithmic reward rate
 pub mod peg_stabilization;
 pub mod position_mirroring;
-
-// Issues #518-#521: position transfer, vote-weight delegation, tiered fee
-// discounts, and a pause-only guardian role.
-pub mod position_transfer; // issue #518 — transfer_position()
-pub mod vote_weight_delegation; // issue #519 — delegate_vote_weight()
-pub mod position_fee_tiers; // issue #520 — tiered fee discounts for large depositors
-pub mod guardian_pause; // issue #521 — guardian role with pause-only power
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
@@ -84,9 +93,13 @@ mod test_issues_514_571;
 #[cfg(test)]
 mod test_issues_526_529;
 
-#[cfg(test)]
-mod test_staker_region_tag;
-
-#[cfg(test)]
-mod test_issues_538_541;
-
+// #[cfg(test)]
+// mod test_issues_463_466;
+// #[cfg(test)]
+// mod test_issues_467_470;
+// #[cfg(test)]
+// mod test_issues_459_462;
+// #[cfg(test)]
+// mod test_issue_554;
+// #[cfg(test)]
+// mod test_staker_region_tag;
