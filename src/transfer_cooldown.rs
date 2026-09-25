@@ -98,7 +98,7 @@ pub fn assert_transfer_cooldown_cleared(env: &Env, user: &Address) -> Result<(),
     Ok(())
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the transfer cooldown length, in ledgers. `0` disables the check.
     /// Admin only.

@@ -376,6 +376,14 @@ pub fn claimed(env: &Env, user: &Address, reward: i128, ledger: u32) {
     env.events().publish(topics, (reward, ledger));
 }
 
+/// Emitted by `claim()` when a configured gas rebate is paid out of the
+/// dedicated gas-rebate pool alongside the ordinary reward payout (issue #569).
+pub fn gas_rebate_paid(env: &Env, user: &Address, amount: i128) {
+    let topics = (symbol_short!("gas_rbt"), user);
+    env.events()
+        .publish(topics, (amount, env.ledger().sequence()));
+}
+
 /// Emitted by `initialize` so indexers can detect new pool deployments on-chain.
 pub fn pool_initialized(
     env: &Env,

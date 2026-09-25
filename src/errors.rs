@@ -87,9 +87,13 @@ pub enum VaultError {
     /// Returned by `end_boost_campaign()` when there is no active boost campaign
     /// to cancel.
     NoCampaignActive = 26,
-    /// Returned by `set_leaderboard_size()` when the requested leaderboard cap
-    /// exceeds 20.
-    LeaderboardSizeTooLarge = 27,
+    /// Returned by `deposit()`, `stake()`, and `stake_and_claim()` when the
+    /// admin-configured unique-depositor cap (issue #568) has already been
+    /// reached and the caller has never deposited before. Reuses the numeric
+    /// slot of the never-implemented `LeaderboardSizeTooLarge` case because
+    /// Soroban caps `#[contracterror]` enums at 50 variants and all other slots
+    /// are live.
+    DepositorCapReached = 27,
     /// Returned by `view_all_positions()` when `page_size` is 0 or greater than 20.
     PageSizeTooLarge = 28,
     /// Returned by staking entrypoints when KYC enforcement is enabled and the
@@ -687,6 +691,115 @@ impl From<VaultError> for VaultCampaignError {
             VaultError::VaultPaused => VaultCampaignError::VaultPaused,
             // Any other VaultError reaching here maps to the closest generic case.
             _ => VaultCampaignError::Unauthorized,
+        }
+    }
+}
+
+/// Seventh error enum, added for the same 50-variant reason the earlier
+/// `Vault*Error` enums exist: every prior `#[contracterror]` enum is at
+/// Soroban's cap. Holds the cases for the pool-insights / runway-guard /
+/// admin-recovery issue batch, plus mirrors of the `VaultError` cases those
+/// functions can hit (via the `From` impl below, so `?` still works).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultOpsError {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::RateTooHigh` — a reward rate above
+    /// `balance::MAX_RATE_BPS` was supplied.
+    RateTooHigh = 5,
+    /// Returned by `set_reward_rate_bps` when the new rate would exhaust the
+    /// reward pool before the configured minimum runway
+    /// (`set_min_runway_ledgers`).
+    InsufficientRunway = 6,
+    /// Returned by `set_min_runway_ledgers` when `ledgers` is non-zero but
+    /// below the supported floor.
+    InvalidRunway = 7,
+    /// Returned by `propose_admin_recovery` when a recovery proposal is
+    /// already active.
+    RecoveryAlreadyPending = 8,
+    /// Returned by `execute_admin_recovery` / `cancel_admin_recovery` when no
+    /// recovery proposal is active.
+    RecoveryNotPending = 9,
+    /// Returned by `execute_admin_recovery` before the recovery delay has
+    /// elapsed.
+    RecoveryDelayNotElapsed = 10,
+    /// Returned by `propose_admin_recovery` when `new_admin` equals the
+    /// current admin.
+    InvalidRecoveryConfig = 11,
+}
+
+impl From<VaultError> for VaultOpsError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultOpsError::Unauthorized,
+            VaultError::NotInitialized => VaultOpsError::NotInitialized,
+            VaultError::ZeroAmount => VaultOpsError::ZeroAmount,
+            VaultError::ArithmeticError => VaultOpsError::ArithmeticError,
+            VaultError::RateTooHigh => VaultOpsError::RateTooHigh,
+            // Any other VaultError reaching here maps to the closest generic case.
+            _ => VaultOpsError::Unauthorized,
+        }
+    }
+}
+
+/// Eighth error enum for issues #526-#529 (scheduled exit, snapshot airdrop,
+/// external price oracle, co-sponsor). All prior `#[contracterror]` enums
+/// are at Soroban's 50-variant cap.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature2Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 5,
+    /// Mirrors `VaultError::VaultPaused`.
+    VaultPaused = 6,
+    /// Mirrors `VaultError::InsufficientRewardPool`.
+    InsufficientRewardPool = 7,
+    /// Returned by `create_airdrop()` / `execute_scheduled_exit()` when the
+    /// supplied ledger or config is invalid.
+    InvalidRecoveryConfig = 8,
+    /// Returned by `register_co_sponsor()` when the sponsor is already
+    /// registered and active.
+    AlreadyRegistered = 9,
+    /// Returned by `fund_co_sponsor_rewards()` when the sponsor's
+    /// registration has expired.
+    SponsorExpired = 10,
+    /// Returned by `claim_airdrop()` when the user already claimed.
+    AlreadyClaimed = 11,
+    /// Returned by `get_position_value_usd()` when no oracle is configured.
+    NoOracleConfigured = 12,
+    /// Returned by `claim_airdrop()` when the user has no weight at the
+    /// snapshot ledger.
+    InsufficientStake = 13,
+}
+
+impl From<VaultError> for VaultFeature2Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature2Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature2Error::NotInitialized,
+            VaultError::ZeroAmount => VaultFeature2Error::ZeroAmount,
+            VaultError::ArithmeticError => VaultFeature2Error::ArithmeticError,
+            VaultError::PositionNotFound => VaultFeature2Error::PositionNotFound,
+            VaultError::VaultPaused => VaultFeature2Error::VaultPaused,
+            VaultError::InsufficientRewardPool => VaultFeature2Error::InsufficientRewardPool,
+            _ => VaultFeature2Error::Unauthorized,
         }
     }
 }

@@ -115,7 +115,7 @@ fn compute_optimal_interval(
     (interval as u32).max(1)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Opt in to the compound optimizer with an estimated tx cost, in basis
     /// points of position size.

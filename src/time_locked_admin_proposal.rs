@@ -59,7 +59,7 @@ fn set_proposals(env: &Env, proposals: &Vec<AdminProposal>) {
     env.storage().instance().set(&PROPOSALS_KEY, proposals);
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #455: Admin publicly announces an intended configuration
     /// change, executable only after `delay_ledgers` have passed. Returns

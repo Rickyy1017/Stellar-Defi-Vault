@@ -518,6 +518,24 @@ pub fn set_all_stakers(env: &Env, stakers: &Vec<Address>) {
     env.storage().instance().set(&DataKey::AllStakers, stakers);
 }
 
+/// Records `user` in the staker registry if they are not already present and
+/// refreshes the `total_stakers` count. Idempotent, so callers can invoke it on
+/// every stake without worrying about duplicates. Keeps the registry (and thus
+/// `get_pool_summary().depositor_count`) in sync with real depositors.
+pub fn register_staker(env: &Env, user: &Address) {
+    let mut stakers = get_all_stakers(env);
+    let already_present = stakers.iter().any(|a| &a == user);
+    if !already_present {
+        stakers.push_back(user.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllStakers, &stakers);
+    }
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalStakers, &stakers.len());
+}
+
 // ── Share math ────────────────────────────────────────────────────────────────
 
 /// Convert a deposit amount to shares using current vault ratio.

@@ -170,7 +170,7 @@ pub fn log_parameter_change(
 
 // ── Contract implementation ───────────────────────────────────────────────────
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #463: Clawback a position within the fraud window
     /// Only admin can call this to reverse fraudulent stakes

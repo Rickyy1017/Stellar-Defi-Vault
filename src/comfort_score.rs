@@ -70,7 +70,7 @@ fn get_pool_audited(env: &Env) -> bool {
     env.storage().instance().get(&AUDITED_KEY).unwrap_or(false)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the caller's risk profile for this pool. Requires the user's own auth.
     pub fn set_risk_profile(

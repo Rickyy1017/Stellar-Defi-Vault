@@ -158,7 +158,7 @@ pub fn maybe_mirror_action(env: &Env, leader: &Address, action: Symbol, amount: 
     }
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Follower sets mirror config
     pub fn set_mirror_config(

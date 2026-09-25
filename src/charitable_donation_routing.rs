@@ -85,7 +85,7 @@ pub fn compute_donation(env: &Env, user: &Address, reward: i128) -> Option<(Addr
     Some((config.charity, donation))
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Register a charity address and display name. Admin only. Max 10.
     pub fn add_charity(

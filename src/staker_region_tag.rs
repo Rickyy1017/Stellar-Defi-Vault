@@ -78,7 +78,7 @@ fn normalize_region_code(env: &Env, region_code: &String) -> Result<String, Vaul
     Ok(String::from_bytes(env, bytes))
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #430: set the caller's voluntary region tag (1–10 alphanumeric
     /// characters, e.g. an ISO 3166 code). Requires an active position.

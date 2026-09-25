@@ -50,7 +50,7 @@ fn set_comments(env: &Env, proposal_id: u32, comments: &Vec<ProposalComment>) {
         .set(&(COMMENTS_KEY, proposal_id), comments);
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Post a stake-weighted comment on a governance proposal's discussion
     /// thread (issue #375). `author` must sign; the proposal must exist.

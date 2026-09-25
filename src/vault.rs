@@ -209,6 +209,10 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
+        // Issue #568: enforce the unique-depositor cap before moving any tokens
+        // so a rejected first-time deposit leaves no state behind.
+        Self::register_depositor(&env, &user)?;
+
         let token_addr: Address = env
             .storage()
             .instance()
@@ -235,6 +239,9 @@ impl VaultContract {
         balance::set_shares(&env, &user, current_shares + shares_minted);
         balance::set_total_shares(&env, total_shares + shares_minted);
         balance::set_total_deposited(&env, total_deposited + amount);
+        if current_shares == 0 {
+            balance::register_staker(&env, &user);
+        }
 
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
@@ -1297,6 +1304,13 @@ impl VaultContract {
             AdminAction::SetRewardRate => {
                 let rate_bps =
                     Self::decode_u32_bytes(params).ok_or(VaultExtError::ActionNotFound)?;
+                // Enforce the reward-pool runway guard on the timelocked path
+                // too, so `queue_action` can't bypass `set_reward_rate_bps`.
+                // `VaultExtError` is at Soroban's 50-variant cap, so the
+                // specific reason can't be surfaced here; the direct setter
+                // reports `InsufficientRunway`.
+                crate::runway_guard::enforce_runway(env, rate_bps)
+                    .map_err(|_| VaultExtError::ActionNotFound)?;
                 balance::set_reward_rate_bps(env, rate_bps);
                 Ok(())
             }
@@ -2187,6 +2201,9 @@ impl VaultContract {
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
+        // Issue #568: same unique-depositor cap as `stake`, so the
+        // `stake_and_claim` path can't bypass it.
+        Self::register_depositor(env, user)?;
         let token_addr: Address = env
             .storage()
             .instance()
@@ -2205,6 +2222,9 @@ impl VaultContract {
         balance::set_shares(env, user, cur + shares);
         balance::set_total_shares(env, total_shares + shares);
         balance::set_total_deposited(env, total_deposited + amount);
+        if cur == 0 {
+            balance::register_staker(env, user);
+        }
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
         Ok(shares)
     }
@@ -2286,6 +2306,23 @@ impl VaultContract {
             token_client.transfer(&env.current_contract_address(), staker, &user_payout);
         }
 
+        // Issue #569: pay the configured gas rebate out of its dedicated pool,
+        // alongside (never instead of) the reward. A pool that can't cover the
+        // rebate silently skips it; the claim itself is never blocked.
+        let rebate_amount: i128 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("gas_amt"))
+            .unwrap_or(0);
+        if rebate_amount > 0 {
+            let rebate_pool = Self::gas_rebate_pool(env);
+            if rebate_pool >= rebate_amount {
+                Self::set_gas_rebate_pool(env, rebate_pool - rebate_amount);
+                token_client.transfer(&env.current_contract_address(), staker, &rebate_amount);
+                events::gas_rebate_paid(env, staker, rebate_amount);
+            }
+        }
+
         crate::reward_token_audit_trail::log_reward_movement(
             env,
             crate::reward_token_audit_trail::MovementType::RewardPaid,
@@ -2299,6 +2336,196 @@ impl VaultContract {
 
         events::claimed(env, staker, user_payout, env.ledger().sequence());
         Ok(user_payout)
+    }
+}
+
+#[contractimpl]
+impl VaultContract {
+    // ── Issue #568: unique depositor count cap ──────────────────────────────
+
+    /// Sets the maximum number of unique depositor addresses the pool will
+    /// accept (issue #568). Admin only. `0` disables the cap.
+    ///
+    /// Distinct from a TVL cap: this limits the *number of distinct addresses*
+    /// regardless of how much any one of them deposits. Existing depositors are
+    /// never blocked from adding to their position once the cap is reached.
+    pub fn set_max_depositor_count(env: Env, admin: Address, count: u32) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("dep_cap"), &count);
+        Ok(())
+    }
+
+    /// Read-only query for the admin-configured unique-depositor cap
+    /// (issue #568). `0` means the cap is disabled.
+    pub fn get_max_depositor_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("dep_cap"))
+            .unwrap_or(0)
+    }
+
+    /// Read-only query for the number of unique depositor addresses that have
+    /// ever deposited into the pool (issue #568).
+    pub fn get_depositor_count(env: Env) -> u32 {
+        Self::depositor_count(&env)
+    }
+
+    // ── Issue #569: reward-claim gas rebate ────────────────────────────────
+
+    /// Funds the dedicated gas-rebate pool (issue #569). Admin only. `amount`
+    /// is transferred from `admin` into the contract and tracked in a pool
+    /// separate from the reward pool, so claims can never drain staker rewards
+    /// to pay a rebate.
+    pub fn fund_gas_rebate_pool(env: Env, admin: Address, amount: i128) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        let token_addr = Self::token_address(&env)?;
+        token::Client::new(&env, &token_addr).transfer(
+            &admin,
+            &env.current_contract_address(),
+            &amount,
+        );
+        Self::set_gas_rebate_pool(&env, Self::gas_rebate_pool(&env) + amount);
+        Ok(())
+    }
+
+    /// Sets the fixed per-claim gas rebate (issue #569). Admin only. `0`
+    /// disables rebates. The rebate is paid from the dedicated gas-rebate pool
+    /// only while that pool can cover it, and is never taken from the reward
+    /// pool; a depleted pool never blocks a claim.
+    pub fn set_gas_rebate_amount(env: Env, admin: Address, amount: i128) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if amount < 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("gas_amt"), &amount);
+        Ok(())
+    }
+
+    /// Read-only query for the currently funded gas-rebate pool balance
+    /// (issue #569).
+    pub fn get_gas_rebate_pool(env: Env) -> i128 {
+        Self::gas_rebate_pool(&env)
+    }
+
+    /// Read-only query for the configured per-claim gas rebate (issue #569).
+    /// `0` means rebates are disabled.
+    pub fn get_gas_rebate_amount(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("gas_amt"))
+            .unwrap_or(0)
+    }
+
+    // ── Issue #570: deposit-side preview ───────────────────────────────────
+
+    /// Estimates the shares a deposit of `amount` would mint right now, without
+    /// changing state (issue #570). Mirrors `stake`/`do_stake_inner`'s share
+    /// math exactly, so a `preview_deposit` call followed by a real deposit of
+    /// the same amount (with no price movement between them) mints exactly the
+    /// previewed number of shares. No auth required. Returns `0` for
+    /// zero/negative amounts and on arithmetic overflow.
+    pub fn preview_deposit(env: Env, amount: i128) -> i128 {
+        if amount <= 0 {
+            return 0;
+        }
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        balance::amount_to_shares(total_shares, total_deposited, amount).unwrap_or(0)
+    }
+
+    // ── Issue #571: indexing guidance ──────────────────────────────────────
+
+    /// Static, documentation-as-code guidance for third-party indexers
+    /// (issue #571). Read-only, no auth, no state. The returned string is a
+    /// stable, hand-maintained contract describing which events are safe to
+    /// rely on for off-chain indexing and which internal counters are the
+    /// source of truth for vault state.
+    pub fn get_indexing_recommendations(env: Env) -> String {
+        String::from_str(
+            &env,
+            "Stellar DeFi Vault indexing guidance (issue #571). \
+Source of truth: read get_depositor_count(), shares_of(), staked_amount(), \
+preview_redeem()/preview_deposit(), and the pool/counter getters; do not infer \
+balances from events alone. Events are emitted exactly once per successful \
+state change and are safe to index: 'deposit' fires once per successful \
+stake/deposit; 'claimed' fires once per successful claim that paid a non-zero \
+reward; 'gas_rbt' fires only when a gas rebate was actually paid, so it may be \
+absent even on a successful claim; 'cap_upd' fires on admin pool-cap updates. \
+Events may be absent when a call reverts, when a claim had nothing to pay, or \
+when an optional bonus pool is empty. Counter semantics: total_shares and \
+total_deposited are authoritative for the share price; per-user share balances \
+are authoritative over reconstructed event deltas. Indexers must tolerate \
+absent events and must not treat event presence as proof of a balance.",
+        )
+    }
+
+    // ── Shared helpers ─────────────────────────────────────────────────────
+
+    fn depositor_count(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("dep_cnt"))
+            .unwrap_or(0)
+    }
+
+    fn depositor_registered(env: &Env, user: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&(symbol_short!("dep_reg"), user.clone()))
+            .unwrap_or(false)
+    }
+
+    /// Registers `user` as a depositor exactly once, enforcing the configured
+    /// unique-depositor cap only for addresses that have never deposited
+    /// before (issue #568).
+    fn register_depositor(env: &Env, user: &Address) -> Result<(), VaultError> {
+        if Self::depositor_registered(env, user) {
+            return Ok(());
+        }
+        let cap: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("dep_cap"))
+            .unwrap_or(0);
+        if cap != 0 && Self::depositor_count(env) >= cap {
+            return Err(VaultError::DepositorCapReached);
+        }
+        env.storage()
+            .persistent()
+            .set(&(symbol_short!("dep_reg"), user.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("dep_cnt"), &(Self::depositor_count(env) + 1));
+        Ok(())
+    }
+
+    fn gas_rebate_pool(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("gas_pool"))
+            .unwrap_or(0)
+    }
+
+    fn set_gas_rebate_pool(env: &Env, amount: i128) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("gas_pool"), &amount);
     }
 }
 
@@ -2433,15 +2660,12 @@ pub fn user_summary(env: Env, user: Address) -> Result<UserSummary, VaultError> 
             .checked_div(total_shares)
             .unwrap_or(0)
     };
-    let position_vec = match position {
-        Some(p) => Vec::from_array(&env, [p]),
+    let position_vec = match &position {
+        Some(p) => Vec::from_array(&env, [p.clone()]),
         None => Vec::new(&env),
     };
     Ok(UserSummary {
-        position: match position {
-            Some(p) => soroban_sdk::vec![&env, p],
-            None => soroban_sdk::vec![&env],
-        },
+        position: position_vec,
         pending_reward,
         pool_share_bps,
     })
@@ -2928,5 +3152,199 @@ pub fn get_reward_threshold(env: Env) -> i128 {
 
     (weighted_sum / total_staked) as u32
 }
+
+    // ── Issue #534: per-position custom reward multiplier ──────────────────
+
+    /// Admin-only: set a custom reward multiplier for a specific user's position.
+    /// Applied multiplicatively on top of any existing boost schedule multiplier.
+    pub fn set_position_multiplier(
+        env: Env,
+        admin: Address,
+        user: Address,
+        multiplier_bps: u32,
+        expires_at: Option<u32>,
+    ) -> Result<(), VaultError> {
+        crate::position_multiplier::set(&env, &admin, &user, multiplier_bps, expires_at)
+    }
+
+    /// Read-only: get the position multiplier for a user, if set and not expired.
+    pub fn get_position_multiplier(env: Env, user: Address) -> Option<(u32, Option<u32>)> {
+        crate::position_multiplier::get(&env, &user)
+    }
+
+    // ── Issue #535: withdrawal destination override ────────────────────────
+
+    /// Withdraw by burning `shares`, sending underlying tokens to `recipient`.
+    /// Requires `user` auth only — `recipient` does not need to authorize.
+    pub fn withdraw_to(
+        env: Env,
+        user: Address,
+        shares: i128,
+        recipient: Address,
+    ) -> Result<i128, VaultError> {
+        if shares <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        user.require_auth();
+
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares < shares {
+            return Err(VaultError::InsufficientShares);
+        }
+
+        // Apply daily withdrawal limit check
+        let projected = Self::projected_unstake_amount(&env, shares)?;
+        crate::daily_withdrawal_limit::enforce_and_record(&env, &user, projected)?;
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
+
+        let fee = amount
+            .checked_mul(balance::get_unstake_fee_bps(&env) as i128)
+            .and_then(|v| v.checked_div(10_000))
+            .ok_or(VaultError::ArithmeticError)?;
+        let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
+
+        let token_addr = Self::token_address(&env)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        // Send to recipient instead of user
+        token_client.transfer(&env.current_contract_address(), &recipient, &payout);
+
+        balance::set_shares(&env, &user, user_shares - shares);
+        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_deposited(&env, total_deposited - amount);
+
+        if fee > 0 {
+            balance::add_protocol_fee_collected(&env, fee);
+            let treasury_share = crate::community_treasury::route_fee_revenue(&env, fee)?;
+            let remaining_fee = fee
+                .checked_sub(treasury_share)
+                .ok_or(VaultError::ArithmeticError)?;
+            let recipients = balance::get_fee_recipients(&env);
+            if !recipients.is_empty() {
+                Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
+            } else if balance::fee_buyback_enabled(&env) {
+                balance::add_unstake_fee_reserve(&env, remaining_fee);
+            } else {
+                let reward_pool = balance::get_reward_pool_balance(&env);
+                balance::set_reward_pool_balance(&env, reward_pool + remaining_fee);
+            }
+        }
+
+        // Emit withdrawal event with both user and recipient
+        env.events().publish(
+            (symbol_short!("wd_to"), &user),
+            (&recipient, shares, amount, env.ledger().sequence()),
+        );
+
+        Ok(amount)
+    }
+
+    // ── Issue #536: inactivity decay configuration ────────────────────────
+
+    /// Admin-only: configure inactivity-based reward decay.
+    pub fn set_inactivity_decay(
+        env: Env,
+        admin: Address,
+        threshold_ledgers: u32,
+        decay_bps_per_period: u32,
+    ) -> Result<(), VaultError> {
+        crate::inactivity_decay::set_config(&env, &admin, threshold_ledgers, decay_bps_per_period)
+    }
+
+    /// Read-only: get the last interaction ledger for a user.
+    pub fn get_last_interaction(env: Env, user: Address) -> u32 {
+        crate::inactivity_decay::get_last_interaction(&env, &user)
+    }
+
+    // ── Issue #537: batch deposit for multiple beneficiaries ───────────────
+
+    /// Deposit on behalf of multiple beneficiaries in one transaction.
+    /// Arrays must match in length, max 20 entries.
+    /// Reverts entirely if any single entry would fail.
+    pub fn deposit_for_many(
+        env: Env,
+        caller: Address,
+        beneficiaries: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<(), VaultError> {
+        caller.require_auth();
+
+        if beneficiaries.len() != amounts.len() {
+            return Err(VaultError::ArithmeticError);
+        }
+        if beneficiaries.len() > 20 {
+            return Err(VaultError::BatchTooLarge);
+        }
+        if beneficiaries.is_empty() {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        // Pre-validate all entries (all-or-nothing)
+        let min_stake = balance::get_min_stake(&env);
+        let mut total_amount: i128 = 0;
+        let mut i = 0u32;
+        while i < beneficiaries.len() {
+            let amount = amounts.get(i).unwrap();
+            if amount <= 0 {
+                return Err(VaultError::ZeroAmount);
+            }
+            if min_stake > 0 && amount < min_stake {
+                return Err(VaultError::BelowMinimumStake);
+            }
+            total_amount = total_amount
+                .checked_add(amount)
+                .ok_or(VaultError::ArithmeticError)?;
+            i += 1;
+        }
+
+        // Transfer tokens from caller to contract
+        let token_addr = Self::token_address(&env)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&caller, &env.current_contract_address(), &total_amount);
+
+        // Credit each beneficiary individually
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let mut new_total_shares = total_shares;
+        let mut new_total_deposited = total_deposited;
+
+        let mut i = 0u32;
+        while i < beneficiaries.len() {
+            let beneficiary = beneficiaries.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+            let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
+                .ok_or(VaultError::ArithmeticError)?;
+
+            let existing = balance::get_shares(&env, &beneficiary);
+            balance::set_shares(&env, &beneficiary, existing + shares);
+            new_total_shares += shares;
+            new_total_deposited += amount;
+
+            // Record interaction for inactivity decay
+            crate::inactivity_decay::record_interaction(&env, &beneficiary);
+
+            // Emit deposit event per beneficiary
+            env.events().publish(
+                (symbol_short!("deposit"), &beneficiary),
+                (amount, shares, env.ledger().sequence()),
+            );
+
+            i += 1;
+        }
+
+        balance::set_total_shares(&env, new_total_shares);
+        balance::set_total_deposited(&env, new_total_deposited);
+
+        // Emit batch event
+        env.events().publish(
+            (symbol_short!("bat_dep"), &caller),
+            (beneficiaries.len() as i128, total_amount, env.ledger().sequence()),
+        );
+
+        Ok(())
+    }
 
 }

@@ -159,7 +159,7 @@ pub fn build_graph_data(env: &Env, stakers: &Vec<Address>) -> NetworkGraphData {
     NetworkGraphData { nodes, edges }
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #456: Returns structured graph data (nodes + edges) describing
     /// delegation, referral, and mirror relationships between the given
