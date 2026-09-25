@@ -1418,3 +1418,64 @@ pub fn kyc_status_changed(env: &Env, user: &Address, approved: bool) {
     let topics = (symbol_short!("kyc_set"), user);
     env.events().publish(topics, approved);
 }
+
+// ── Issue #541: deposit receipt memo ─────────────────────────────────────────
+
+/// Emitted by `deposit_with_memo()` (issue #541).
+pub fn deposit_completed(
+    env: &Env,
+    depositor: &Address,
+    amount: i128,
+    shares_minted: i128,
+    memo: &soroban_sdk::String,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "deposit_completed"), depositor);
+    env.events()
+        .publish(topics, (amount, shares_minted, memo.clone(), ledger));
+}
+
+// ── Issue #540: scheduled reward-rate ramp ───────────────────────────────────
+
+/// Emitted when a linear reward-rate ramp begins (issue #540).
+pub fn rate_ramp_started(
+    env: &Env,
+    start_rate_bps: u32,
+    target_rate_bps: u32,
+    duration_ledgers: u32,
+    start_ledger: u32,
+) {
+    let topics = (Symbol::new(env, "rate_ramp_started"),);
+    env.events().publish(
+        topics,
+        (
+            start_rate_bps,
+            target_rate_bps,
+            duration_ledgers,
+            start_ledger,
+        ),
+    );
+}
+
+/// Emitted when a linear reward-rate ramp completes or is settled (issue #540).
+pub fn rate_ramp_completed(env: &Env, final_rate_bps: u32, ledger: u32) {
+    let topics = (Symbol::new(env, "rate_ramp_completed"),);
+    env.events()
+        .publish(topics, (final_rate_bps, ledger));
+}
+
+// ── Issue #539: per-token fee override ───────────────────────────────────────
+
+/// Emitted when a per-token fee override is configured or cleared (issue #539).
+pub fn token_fee_override_set(
+    env: &Env,
+    token: &Address,
+    deposit_fee_bps: Option<u32>,
+    unstake_fee_bps: Option<u32>,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "token_fee_set"), token);
+    env.events()
+        .publish(topics, (deposit_fee_bps, unstake_fee_bps, ledger));
+}
+
