@@ -218,11 +218,8 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
-        token::Client::new(&env, &token_addr).transfer(
-            &user,
-            &env.current_contract_address(),
-            &amount,
-        );
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount = crate::transfer_safety::pull_tokens(&env, &token_addr, &user, amount)?;
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
@@ -1554,8 +1551,9 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
         let token_addr = Self::token_address(&env)?;
-        let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&admin_addr, &env.current_contract_address(), &amount);
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount =
+            crate::transfer_safety::pull_tokens(&env, &token_addr, &admin_addr, amount)?;
         let total_deposited = balance::get_total_deposited(&env);
         balance::set_total_deposited(&env, total_deposited + amount);
         let admin_actual = admin::get_admin(&env)?;
@@ -2165,11 +2163,8 @@ impl VaultContract {
             .instance()
             .get(&DataKey::Token)
             .ok_or(VaultError::NotInitialized)?;
-        token::Client::new(env, &token_addr).transfer(
-            user,
-            &env.current_contract_address(),
-            &amount,
-        );
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount = crate::transfer_safety::pull_tokens(env, &token_addr, user, amount)?;
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
         let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
@@ -2344,11 +2339,8 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
         let token_addr = Self::token_address(&env)?;
-        token::Client::new(&env, &token_addr).transfer(
-            &admin,
-            &env.current_contract_address(),
-            &amount,
-        );
+        // Issue #512: credit what actually arrived, not the stated amount.
+        let amount = crate::transfer_safety::pull_tokens(&env, &token_addr, &admin, amount)?;
         Self::set_gas_rebate_pool(&env, Self::gas_rebate_pool(&env) + amount);
         Ok(())
     }
@@ -3256,8 +3248,10 @@ pub fn get_reward_threshold(env: Env) -> i128 {
 
         // Transfer tokens from caller to contract
         let token_addr = Self::token_address(&env)?;
-        let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(&caller, &env.current_contract_address(), &total_amount);
+        // Issue #512: measure what actually arrived. If a fee-on-transfer
+        // token delivered less, each beneficiary is credited pro-rata.
+        let received =
+            crate::transfer_safety::pull_tokens(&env, &token_addr, &caller, total_amount)?;
 
         // Credit each beneficiary individually
         let total_shares = balance::get_total_shares(&env);
@@ -3268,7 +3262,15 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         let mut i = 0u32;
         while i < beneficiaries.len() {
             let beneficiary = beneficiaries.get(i).unwrap();
-            let amount = amounts.get(i).unwrap();
+            let stated = amounts.get(i).unwrap();
+            let amount = if received == total_amount {
+                stated
+            } else {
+                stated
+                    .checked_mul(received)
+                    .and_then(|v| v.checked_div(total_amount))
+                    .ok_or(VaultError::ArithmeticError)?
+            };
             let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
                 .ok_or(VaultError::ArithmeticError)?;
 

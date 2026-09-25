@@ -13,7 +13,7 @@
 //!
 //! Storage key: `symbol_short!("min_run")` -> `u32` (0 = guard disabled)
 
-use soroban_sdk::{contractimpl, symbol_short, token, Address, Env, Symbol};
+use soroban_sdk::{contractimpl, symbol_short, Address, Env, Symbol};
 
 use crate::admin;
 use crate::balance;
@@ -197,11 +197,8 @@ pub(crate) fn credit_reward_pool_from(
             .get(&crate::storage::DataKey::Token)
             .ok_or(VaultOpsError::NotInitialized)?,
     };
-    token::Client::new(env, &token_addr).transfer(
-        from,
-        &env.current_contract_address(),
-        &amount,
-    );
+    // Issue #512: credit what actually arrived, not the stated amount.
+    let amount = crate::transfer_safety::pull_tokens(env, &token_addr, from, amount)?;
 
     let pool = balance::get_reward_pool_balance(env);
     let updated = pool
