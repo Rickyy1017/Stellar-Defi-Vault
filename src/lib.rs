@@ -93,6 +93,9 @@ mod test_issues_568_571;
 #[cfg(test)]
 mod test_issues_526_529;
 
+#[cfg(test)]
+mod test_top_depositors; // issue #523 — get_top_depositors leaderboard query
+
 // #[cfg(test)]
 // mod test_issues_463_466;
 // #[cfg(test)]

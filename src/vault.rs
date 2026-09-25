@@ -114,6 +114,15 @@ pub(crate) const LIQUIDATION_LTV_BPS: u32 = 9_000;
 /// Most active stakers `get_reward_gini_coefficient()` will process in one
 /// call before reverting with `TooManyStakers` (issue #275).
 pub(crate) const MAX_GINI_STAKERS: u32 = 100;
+/// Most rows `get_top_depositors()` will return, whatever `limit` asks for
+/// (issue #523). Keeps the response small enough to render in one page and
+/// bounds the memory its ranking sort can occupy.
+pub const MAX_TOP_DEPOSITORS: u32 = 50;
+/// Most registered depositors a single `get_top_depositors()` call will read
+/// (issue #523). This is that call's per-invocation persistent-read ceiling;
+/// see the query's docs for what is traded away past it. Sized to match
+/// `MAX_GINI_STAKERS`, the other full-registry scan in the contract.
+pub const MAX_DEPOSITOR_SCAN: u32 = 200;
 /// Most seasons `add_season()` will keep scheduled at once (issue #276).
 pub(crate) const MAX_SEASONS: u32 = 10;
 /// Longest allowed `set_staker_bio()` bio, in bytes (issue #274).
@@ -2383,6 +2392,49 @@ impl VaultContract {
         Self::depositor_count(&env)
     }
 
+    // ── Issue #523: top-depositor leaderboard ──────────────────────────────
+
+    /// Read-only leaderboard of the largest depositor positions (issue #523),
+    /// so a frontend can render a leaderboard and pool concentration is
+    /// visible at a glance without paging through every position off-chain.
+    ///
+    /// Returns up to `limit` `(depositor, position_size)` pairs sorted
+    /// descending by position size, where size is the depositor's share
+    /// balance converted at the current share price (`shares_to_amount`, i.e.
+    /// stake-token units, not raw shares — every depositor converts at the
+    /// same price, so the ordering is the same either way, but the converted
+    /// value is what a leaderboard should display). `limit` is clamped to
+    /// `MAX_TOP_DEPOSITORS` (50), and `0` returns an empty vec. Depositors
+    /// with no position left are skipped, and equal sizes keep registration
+    /// order, so the output is deterministic for identical state.
+    ///
+    /// No auth required, no state changes, no events, so it is cheap and safe
+    /// to poll.
+    ///
+    /// # Read bounds
+    ///
+    /// One instance read for the staker registry, two for the share price
+    /// (`total_shares`, `total_deposited`), and at most `MAX_DEPOSITOR_SCAN`
+    /// persistent share-balance reads. The running ranking is trimmed back to
+    /// `limit` rows as it is built, so memory never exceeds that cap: worst
+    /// case ~200 persistent reads plus 3 instance reads, no matter how many
+    /// depositors the pool has.
+    ///
+    /// Those bounds are also the honest caveat. The scan is a full pass over
+    /// the registry, truncated at `MAX_DEPOSITOR_SCAN` depositors *in
+    /// registration order*, so on a pool larger than that a later depositor
+    /// is simply not considered and this is a partial leaderboard, not a
+    /// global one. That ceiling is the price of a bounded read; if a pool ever
+    /// needs to grow past it, the fix is a maintained sorted top-N index
+    /// updated on deposit/unstake rather than a wider scan here.
+    pub fn get_top_depositors(env: Env, limit: u32) -> Vec<(Address, i128)> {
+        let limit = limit.min(MAX_TOP_DEPOSITORS);
+        if limit == 0 {
+            return Vec::new(&env);
+        }
+        Self::rank_top_depositors(&env, limit)
+    }
+
     // ── Issue #569: reward-claim gas rebate ────────────────────────────────
 
     /// Funds the dedicated gas-rebate pool (issue #569). Admin only. `amount`
@@ -2481,6 +2533,61 @@ absent events and must not treat event presence as proof of a balance.",
     }
 
     // ── Shared helpers ─────────────────────────────────────────────────────
+
+    /// Ranks registered depositors by position size, highest first, keeping at
+    /// most `limit` rows (issue #523). `limit` must be non-zero;
+    /// `get_top_depositors()` clamps it.
+    ///
+    /// Reads `total_shares`/`total_deposited` once and reuses them for every
+    /// depositor, so the whole scan costs one registry read plus one share read
+    /// per depositor examined — at most `MAX_DEPOSITOR_SCAN` of those. This is
+    /// the same descending-insertion idiom `competitive_season` uses for its
+    /// season-end ranking.
+    fn rank_top_depositors(env: &Env, limit: u32) -> Vec<(Address, i128)> {
+        let total_shares = balance::get_total_shares(env);
+        let total_deposited = balance::get_total_deposited(env);
+        let all_stakers = balance::get_all_stakers(env);
+
+        let mut ranked: Vec<(Address, i128)> = Vec::new(env);
+        let scan_len = all_stakers.len().min(MAX_DEPOSITOR_SCAN);
+
+        for i in 0..scan_len {
+            let depositor = all_stakers.get(i).unwrap();
+            let shares = balance::get_shares(env, &depositor);
+            if shares <= 0 {
+                continue;
+            }
+            // `None` means the conversion overflowed, which is not a size we
+            // can rank, so it drops out along with exited positions.
+            let size =
+                balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
+            if size <= 0 {
+                continue;
+            }
+
+            // Stop at the first row this depositor outranks, which leaves
+            // equal sizes in registration order behind it.
+            let mut inserted = false;
+            for j in 0..ranked.len() {
+                if size > ranked.get(j).unwrap().1 {
+                    ranked.insert(j, (depositor.clone(), size));
+                    inserted = true;
+                    break;
+                }
+            }
+            if !inserted {
+                ranked.push_back((depositor.clone(), size));
+            }
+
+            // Trim as we go so memory stays bounded by `limit` however many
+            // depositors are scanned.
+            while ranked.len() > limit {
+                ranked.pop_back();
+            }
+        }
+
+        ranked
+    }
 
     fn depositor_count(env: &Env) -> u32 {
         env.storage()
