@@ -112,7 +112,7 @@ pub fn compute_decayed_score(
     (decayed, score.total_score, epochs_elapsed)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Minimal base reputation score computed from a user's current position,
     /// before decay is applied. Reduced to `total_score` only â€” no per-sub-score

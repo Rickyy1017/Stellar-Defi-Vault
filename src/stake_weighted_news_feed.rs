@@ -58,7 +58,7 @@ fn set_voted(env: &Env, item_id: u32, voter: &Address) {
         .set(&(NEWS_VOTE_KEY, item_id, voter.clone()), &true);
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Any staker can submit; title max 80 chars
     pub fn submit_news_item(

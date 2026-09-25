@@ -64,7 +64,7 @@ pub fn apply_fee_rounding(_env: &Env, numerator: i128, denominator: i128) -> i12
     numerator / denominator
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #457: Admin toggles staker-favor rounding mode on or off.
     pub fn set_staker_favor_rounding(

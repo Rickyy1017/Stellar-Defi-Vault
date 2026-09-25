@@ -87,9 +87,13 @@ pub enum VaultError {
     /// Returned by `end_boost_campaign()` when there is no active boost campaign
     /// to cancel.
     NoCampaignActive = 26,
-    /// Returned by `set_leaderboard_size()` when the requested leaderboard cap
-    /// exceeds 20.
-    LeaderboardSizeTooLarge = 27,
+    /// Returned by `deposit()`, `stake()`, and `stake_and_claim()` when the
+    /// admin-configured unique-depositor cap (issue #568) has already been
+    /// reached and the caller has never deposited before. Reuses the numeric
+    /// slot of the never-implemented `LeaderboardSizeTooLarge` case because
+    /// Soroban caps `#[contracterror]` enums at 50 variants and all other slots
+    /// are live.
+    DepositorCapReached = 27,
     /// Returned by `view_all_positions()` when `page_size` is 0 or greater than 20.
     PageSizeTooLarge = 28,
     /// Returned by staking entrypoints when KYC enforcement is enabled and the

@@ -116,7 +116,7 @@ fn transfer_reward(env: &Env, user: &Address, amount: i128) -> Result<(), VaultE
     Ok(())
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Sets the pool-wide cap on reward token outflow per rolling day.
     /// Admin only. `0` disables the limit.

@@ -181,7 +181,7 @@ pub fn maybe_emit_cliff_reached(env: &Env, user: &Address) {
     );
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the combined cliff-then-linear vesting schedule. Admin only.
     ///

@@ -67,7 +67,7 @@ fn decode_u32(bytes: &Bytes) -> Option<u32> {
     Some(u32::from_be_bytes(buf))
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// The nonce `admin` must supply to its next
     /// `execute_admin_action_with_nonce()` call. Starts at 0 for an address

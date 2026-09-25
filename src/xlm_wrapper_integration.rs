@@ -101,7 +101,7 @@ fn require_token_is_wxlm(env: &Env, expected_sac: &Address) -> Result<Address, V
     Ok(token_addr)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure the native XLM Stellar Asset Contract address. Admin only.
     ///

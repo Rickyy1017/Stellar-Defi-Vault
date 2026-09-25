@@ -53,7 +53,7 @@ fn record_clone(env: &Env, clone: &Address) {
     env.storage().instance().set(&CLONES_KEY, &clones);
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Deploys a fresh instance of this pool contract using `wasm_hash` as
     /// the template, initializes it with `config`, and registers it as a

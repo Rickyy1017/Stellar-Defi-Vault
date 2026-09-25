@@ -56,7 +56,7 @@ pub fn get_original(env: &Env, user: &Address) -> Option<Bytes> {
     env.storage().persistent().get(&(DNA_KEY, user.clone()))
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// The deterministic fingerprint for `user`'s current position.
     ///

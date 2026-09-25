@@ -111,7 +111,7 @@ pub fn remaining(env: &Env, user: &Address) -> i128 {
     limit.saturating_sub(tracker.withdrawn_today).max(0)
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Sets the per-user cap on cumulative withdrawals per rolling 24h
     /// window. Admin only. `0` disables the limit.

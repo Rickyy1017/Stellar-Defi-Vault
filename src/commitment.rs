@@ -93,7 +93,7 @@ pub fn compute_hash(env: &Env, amount: i128, salt: &Bytes) -> Bytes {
     env.crypto().sha256(&preimage(env, amount, salt)).into()
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the reveal window, in ledgers. Admin only.
     pub fn set_commitment_window(env: Env, ledgers: u32) -> Result<(), VaultError> {

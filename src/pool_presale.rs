@@ -85,7 +85,7 @@ fn token_address(env: &Env) -> Result<Address, VaultError> {
         .ok_or(VaultError::NotInitialized)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Open a pre-sale window. Admin only.
     ///

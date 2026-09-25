@@ -113,7 +113,7 @@ fn compute_accrual(env: &Env, user: &Address, now: u32) -> Result<(i128, i128), 
     Ok((total_scaled / SUB_UNIT_SCALE, total_scaled % SUB_UNIT_SCALE))
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Read-only preview of what `claim_sub_unit_reward` would do right now,
     /// without mutating any state: the carried remainder, the last accrual

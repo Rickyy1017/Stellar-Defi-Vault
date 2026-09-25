@@ -135,7 +135,7 @@ pub fn fee_surcharge_bps(env: &Env, user: &Address) -> u32 {
     }
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #461: admin registers the external verification oracle. Preserves
     /// any previously configured thresholds; new registrations default them to

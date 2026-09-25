@@ -82,7 +82,7 @@ fn top_stakers(env: &Env, n: u32) -> Vec<(Address, i128)> {
     ranked
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Starts a new competitive season lasting `duration_ledgers`, with
     /// `prize_amount` set aside for the eventual winner. Admin only.

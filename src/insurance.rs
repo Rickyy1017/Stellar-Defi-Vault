@@ -78,7 +78,7 @@ pub fn is_insolvent(env: &Env) -> bool {
     insolvency_ledger(env).is_some()
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Register a guarantor and the coverage they commit to. Admin only.
     ///

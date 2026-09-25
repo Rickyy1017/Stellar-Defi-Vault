@@ -154,7 +154,7 @@ fn apply_heartbeat_boost(env: &Env, user: &Address, base: i128) -> i128 {
     base.saturating_mul(bps) / (BOOST_BPS_BASE as i128)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Sets the maximum number of ledgers a staker may go silent before
     /// their boost multiplier is suspended. Admin only. `0` disables the

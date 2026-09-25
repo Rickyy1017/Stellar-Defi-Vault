@@ -60,7 +60,7 @@ fn set_history(env: &Env, history: &Vec<ComplianceReport>) {
     env.storage().instance().set(&HISTORY_KEY, history);
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Generate a structured compliance report covering pool operations,
     /// labeled with the given `[ledger_from, ledger_to]` range (issue #409).

@@ -17,7 +17,7 @@ pub struct SynchronizedPauseResult {
     pub success: bool,
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl crate::VaultContract {
     /// Pause all sibling pools in the pool registry simultaneously
     pub fn synchronized_pause(

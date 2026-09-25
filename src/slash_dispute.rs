@@ -156,7 +156,7 @@ pub fn record_slash(env: &Env, user: &Address, slash_id: u32, amount: i128) -> R
     Ok(())
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Record that `user` was slashed `amount` under `slash_id`, making it
     /// eligible for `dispute_slash`. Admin only.

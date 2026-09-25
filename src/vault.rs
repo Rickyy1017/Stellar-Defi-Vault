@@ -209,6 +209,10 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
+        // Issue #568: enforce the unique-depositor cap before moving any tokens
+        // so a rejected first-time deposit leaves no state behind.
+        Self::register_depositor(&env, &user)?;
+
         let token_addr: Address = env
             .storage()
             .instance()
@@ -2183,6 +2187,9 @@ impl VaultContract {
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
+        // Issue #568: same unique-depositor cap as `stake`, so the
+        // `stake_and_claim` path can't bypass it.
+        Self::register_depositor(env, user)?;
         let token_addr: Address = env
             .storage()
             .instance()
@@ -2283,6 +2290,23 @@ impl VaultContract {
             token_client.transfer(&env.current_contract_address(), staker, &user_payout);
         }
 
+        // Issue #569: pay the configured gas rebate out of its dedicated pool,
+        // alongside (never instead of) the reward. A pool that can't cover the
+        // rebate silently skips it; the claim itself is never blocked.
+        let rebate_amount: i128 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("gas_amt"))
+            .unwrap_or(0);
+        if rebate_amount > 0 {
+            let rebate_pool = Self::gas_rebate_pool(env);
+            if rebate_pool >= rebate_amount {
+                Self::set_gas_rebate_pool(env, rebate_pool - rebate_amount);
+                token_client.transfer(&env.current_contract_address(), staker, &rebate_amount);
+                events::gas_rebate_paid(env, staker, rebate_amount);
+            }
+        }
+
         crate::reward_token_audit_trail::log_reward_movement(
             env,
             crate::reward_token_audit_trail::MovementType::RewardPaid,
@@ -2296,6 +2320,196 @@ impl VaultContract {
 
         events::claimed(env, staker, user_payout, env.ledger().sequence());
         Ok(user_payout)
+    }
+}
+
+#[contractimpl]
+impl VaultContract {
+    // ── Issue #568: unique depositor count cap ──────────────────────────────
+
+    /// Sets the maximum number of unique depositor addresses the pool will
+    /// accept (issue #568). Admin only. `0` disables the cap.
+    ///
+    /// Distinct from a TVL cap: this limits the *number of distinct addresses*
+    /// regardless of how much any one of them deposits. Existing depositors are
+    /// never blocked from adding to their position once the cap is reached.
+    pub fn set_max_depositor_count(env: Env, admin: Address, count: u32) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("dep_cap"), &count);
+        Ok(())
+    }
+
+    /// Read-only query for the admin-configured unique-depositor cap
+    /// (issue #568). `0` means the cap is disabled.
+    pub fn get_max_depositor_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("dep_cap"))
+            .unwrap_or(0)
+    }
+
+    /// Read-only query for the number of unique depositor addresses that have
+    /// ever deposited into the pool (issue #568).
+    pub fn get_depositor_count(env: Env) -> u32 {
+        Self::depositor_count(&env)
+    }
+
+    // ── Issue #569: reward-claim gas rebate ────────────────────────────────
+
+    /// Funds the dedicated gas-rebate pool (issue #569). Admin only. `amount`
+    /// is transferred from `admin` into the contract and tracked in a pool
+    /// separate from the reward pool, so claims can never drain staker rewards
+    /// to pay a rebate.
+    pub fn fund_gas_rebate_pool(env: Env, admin: Address, amount: i128) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        let token_addr = Self::token_address(&env)?;
+        token::Client::new(&env, &token_addr).transfer(
+            &admin,
+            &env.current_contract_address(),
+            &amount,
+        );
+        Self::set_gas_rebate_pool(&env, Self::gas_rebate_pool(&env) + amount);
+        Ok(())
+    }
+
+    /// Sets the fixed per-claim gas rebate (issue #569). Admin only. `0`
+    /// disables rebates. The rebate is paid from the dedicated gas-rebate pool
+    /// only while that pool can cover it, and is never taken from the reward
+    /// pool; a depleted pool never blocks a claim.
+    pub fn set_gas_rebate_amount(env: Env, admin: Address, amount: i128) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if amount < 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("gas_amt"), &amount);
+        Ok(())
+    }
+
+    /// Read-only query for the currently funded gas-rebate pool balance
+    /// (issue #569).
+    pub fn get_gas_rebate_pool(env: Env) -> i128 {
+        Self::gas_rebate_pool(&env)
+    }
+
+    /// Read-only query for the configured per-claim gas rebate (issue #569).
+    /// `0` means rebates are disabled.
+    pub fn get_gas_rebate_amount(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("gas_amt"))
+            .unwrap_or(0)
+    }
+
+    // ── Issue #570: deposit-side preview ───────────────────────────────────
+
+    /// Estimates the shares a deposit of `amount` would mint right now, without
+    /// changing state (issue #570). Mirrors `stake`/`do_stake_inner`'s share
+    /// math exactly, so a `preview_deposit` call followed by a real deposit of
+    /// the same amount (with no price movement between them) mints exactly the
+    /// previewed number of shares. No auth required. Returns `0` for
+    /// zero/negative amounts and on arithmetic overflow.
+    pub fn preview_deposit(env: Env, amount: i128) -> i128 {
+        if amount <= 0 {
+            return 0;
+        }
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        balance::amount_to_shares(total_shares, total_deposited, amount).unwrap_or(0)
+    }
+
+    // ── Issue #571: indexing guidance ──────────────────────────────────────
+
+    /// Static, documentation-as-code guidance for third-party indexers
+    /// (issue #571). Read-only, no auth, no state. The returned string is a
+    /// stable, hand-maintained contract describing which events are safe to
+    /// rely on for off-chain indexing and which internal counters are the
+    /// source of truth for vault state.
+    pub fn get_indexing_recommendations(env: Env) -> String {
+        String::from_str(
+            &env,
+            "Stellar DeFi Vault indexing guidance (issue #571). \
+Source of truth: read get_depositor_count(), shares_of(), staked_amount(), \
+preview_redeem()/preview_deposit(), and the pool/counter getters; do not infer \
+balances from events alone. Events are emitted exactly once per successful \
+state change and are safe to index: 'deposit' fires once per successful \
+stake/deposit; 'claimed' fires once per successful claim that paid a non-zero \
+reward; 'gas_rbt' fires only when a gas rebate was actually paid, so it may be \
+absent even on a successful claim; 'cap_upd' fires on admin pool-cap updates. \
+Events may be absent when a call reverts, when a claim had nothing to pay, or \
+when an optional bonus pool is empty. Counter semantics: total_shares and \
+total_deposited are authoritative for the share price; per-user share balances \
+are authoritative over reconstructed event deltas. Indexers must tolerate \
+absent events and must not treat event presence as proof of a balance.",
+        )
+    }
+
+    // ── Shared helpers ─────────────────────────────────────────────────────
+
+    fn depositor_count(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("dep_cnt"))
+            .unwrap_or(0)
+    }
+
+    fn depositor_registered(env: &Env, user: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&(symbol_short!("dep_reg"), user.clone()))
+            .unwrap_or(false)
+    }
+
+    /// Registers `user` as a depositor exactly once, enforcing the configured
+    /// unique-depositor cap only for addresses that have never deposited
+    /// before (issue #568).
+    fn register_depositor(env: &Env, user: &Address) -> Result<(), VaultError> {
+        if Self::depositor_registered(env, user) {
+            return Ok(());
+        }
+        let cap: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("dep_cap"))
+            .unwrap_or(0);
+        if cap != 0 && Self::depositor_count(env) >= cap {
+            return Err(VaultError::DepositorCapReached);
+        }
+        env.storage()
+            .persistent()
+            .set(&(symbol_short!("dep_reg"), user.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("dep_cnt"), &(Self::depositor_count(env) + 1));
+        Ok(())
+    }
+
+    fn gas_rebate_pool(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("gas_pool"))
+            .unwrap_or(0)
+    }
+
+    fn set_gas_rebate_pool(env: &Env, amount: i128) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("gas_pool"), &amount);
     }
 }
 

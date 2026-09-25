@@ -73,7 +73,7 @@ fn set_order_ids(env: &Env, ids: &Vec<u32>) {
     env.storage().instance().set(&ORDER_LIST_KEY, ids);
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Place a limit order for reward token buyback. Admin only.
     /// `max_price_bps` is the maximum price in basis points the admin is

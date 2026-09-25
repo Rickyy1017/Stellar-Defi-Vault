@@ -63,7 +63,7 @@ fn set_vr_balance(env: &Env, user: &Address, amount: i128) {
         .set(&(VR_BAL_KEY, user.clone()), &amount);
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Link a validator node address to the pool. Admin only.
     ///
