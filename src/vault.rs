@@ -246,6 +246,14 @@ impl VaultContract {
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
 
+        crate::activity_log::record(
+            &env,
+            &user,
+            crate::activity_log::ActivityKind::Deposit,
+            amount,
+            shares_minted,
+        );
+
         Ok(shares_minted)
     }
 
@@ -2224,6 +2232,13 @@ impl VaultContract {
             balance::register_staker(env, user);
         }
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
+        crate::activity_log::record(
+            env,
+            user,
+            crate::activity_log::ActivityKind::Deposit,
+            amount,
+            shares,
+        );
         Ok(shares)
     }
 
@@ -2274,6 +2289,13 @@ impl VaultContract {
             staker,
             symbol_short!("unstake"),
             amount,
+        );
+        crate::activity_log::record(
+            env,
+            staker,
+            crate::activity_log::ActivityKind::Withdrawal,
+            amount,
+            shares,
         );
         Ok(amount)
     }
