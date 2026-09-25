@@ -832,6 +832,9 @@ pub enum VaultAccessError {
     /// Returned by a role-gated entrypoint when the caller is neither the
     /// admin nor a holder of the required role (issue #513).
     MissingRole = 10,
+    /// Returned by `set_claim_vesting_duration` when the duration exceeds
+    /// the supported maximum (issue #511).
+    InvalidVestingDuration = 11,
 }
 
 impl From<VaultError> for VaultAccessError {
