@@ -3137,4 +3137,198 @@ pub fn get_reward_threshold(env: Env) -> i128 {
     (weighted_sum / total_staked) as u32
 }
 
+    // ── Issue #534: per-position custom reward multiplier ──────────────────
+
+    /// Admin-only: set a custom reward multiplier for a specific user's position.
+    /// Applied multiplicatively on top of any existing boost schedule multiplier.
+    pub fn set_position_multiplier(
+        env: Env,
+        admin: Address,
+        user: Address,
+        multiplier_bps: u32,
+        expires_at: Option<u32>,
+    ) -> Result<(), VaultError> {
+        crate::position_multiplier::set(&env, &admin, &user, multiplier_bps, expires_at)
+    }
+
+    /// Read-only: get the position multiplier for a user, if set and not expired.
+    pub fn get_position_multiplier(env: Env, user: Address) -> Option<(u32, Option<u32>)> {
+        crate::position_multiplier::get(&env, &user)
+    }
+
+    // ── Issue #535: withdrawal destination override ────────────────────────
+
+    /// Withdraw by burning `shares`, sending underlying tokens to `recipient`.
+    /// Requires `user` auth only — `recipient` does not need to authorize.
+    pub fn withdraw_to(
+        env: Env,
+        user: Address,
+        shares: i128,
+        recipient: Address,
+    ) -> Result<i128, VaultError> {
+        if shares <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        user.require_auth();
+
+        let user_shares = balance::get_shares(&env, &user);
+        if user_shares < shares {
+            return Err(VaultError::InsufficientShares);
+        }
+
+        // Apply daily withdrawal limit check
+        let projected = Self::projected_unstake_amount(&env, shares)?;
+        crate::daily_withdrawal_limit::enforce_and_record(&env, &user, projected)?;
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
+
+        let fee = amount
+            .checked_mul(balance::get_unstake_fee_bps(&env) as i128)
+            .and_then(|v| v.checked_div(10_000))
+            .ok_or(VaultError::ArithmeticError)?;
+        let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
+
+        let token_addr = Self::token_address(&env)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        // Send to recipient instead of user
+        token_client.transfer(&env.current_contract_address(), &recipient, &payout);
+
+        balance::set_shares(&env, &user, user_shares - shares);
+        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_deposited(&env, total_deposited - amount);
+
+        if fee > 0 {
+            balance::add_protocol_fee_collected(&env, fee);
+            let treasury_share = crate::community_treasury::route_fee_revenue(&env, fee)?;
+            let remaining_fee = fee
+                .checked_sub(treasury_share)
+                .ok_or(VaultError::ArithmeticError)?;
+            let recipients = balance::get_fee_recipients(&env);
+            if !recipients.is_empty() {
+                Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
+            } else if balance::fee_buyback_enabled(&env) {
+                balance::add_unstake_fee_reserve(&env, remaining_fee);
+            } else {
+                let reward_pool = balance::get_reward_pool_balance(&env);
+                balance::set_reward_pool_balance(&env, reward_pool + remaining_fee);
+            }
+        }
+
+        // Emit withdrawal event with both user and recipient
+        env.events().publish(
+            (symbol_short!("wd_to"), &user),
+            (&recipient, shares, amount, env.ledger().sequence()),
+        );
+
+        Ok(amount)
+    }
+
+    // ── Issue #536: inactivity decay configuration ────────────────────────
+
+    /// Admin-only: configure inactivity-based reward decay.
+    pub fn set_inactivity_decay(
+        env: Env,
+        admin: Address,
+        threshold_ledgers: u32,
+        decay_bps_per_period: u32,
+    ) -> Result<(), VaultError> {
+        crate::inactivity_decay::set_config(&env, &admin, threshold_ledgers, decay_bps_per_period)
+    }
+
+    /// Read-only: get the last interaction ledger for a user.
+    pub fn get_last_interaction(env: Env, user: Address) -> u32 {
+        crate::inactivity_decay::get_last_interaction(&env, &user)
+    }
+
+    // ── Issue #537: batch deposit for multiple beneficiaries ───────────────
+
+    /// Deposit on behalf of multiple beneficiaries in one transaction.
+    /// Arrays must match in length, max 20 entries.
+    /// Reverts entirely if any single entry would fail.
+    pub fn deposit_for_many(
+        env: Env,
+        caller: Address,
+        beneficiaries: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<(), VaultError> {
+        caller.require_auth();
+
+        if beneficiaries.len() != amounts.len() {
+            return Err(VaultError::ArithmeticError);
+        }
+        if beneficiaries.len() > 20 {
+            return Err(VaultError::BatchTooLarge);
+        }
+        if beneficiaries.is_empty() {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        // Pre-validate all entries (all-or-nothing)
+        let min_stake = balance::get_min_stake(&env);
+        let mut total_amount: i128 = 0;
+        let mut i = 0u32;
+        while i < beneficiaries.len() {
+            let amount = amounts.get(i).unwrap();
+            if amount <= 0 {
+                return Err(VaultError::ZeroAmount);
+            }
+            if min_stake > 0 && amount < min_stake {
+                return Err(VaultError::BelowMinimumStake);
+            }
+            total_amount = total_amount
+                .checked_add(amount)
+                .ok_or(VaultError::ArithmeticError)?;
+            i += 1;
+        }
+
+        // Transfer tokens from caller to contract
+        let token_addr = Self::token_address(&env)?;
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&caller, &env.current_contract_address(), &total_amount);
+
+        // Credit each beneficiary individually
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let mut new_total_shares = total_shares;
+        let mut new_total_deposited = total_deposited;
+
+        let mut i = 0u32;
+        while i < beneficiaries.len() {
+            let beneficiary = beneficiaries.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+            let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
+                .ok_or(VaultError::ArithmeticError)?;
+
+            let existing = balance::get_shares(&env, &beneficiary);
+            balance::set_shares(&env, &beneficiary, existing + shares);
+            new_total_shares += shares;
+            new_total_deposited += amount;
+
+            // Record interaction for inactivity decay
+            crate::inactivity_decay::record_interaction(&env, &beneficiary);
+
+            // Emit deposit event per beneficiary
+            env.events().publish(
+                (symbol_short!("deposit"), &beneficiary),
+                (amount, shares, env.ledger().sequence()),
+            );
+
+            i += 1;
+        }
+
+        balance::set_total_shares(&env, new_total_shares);
+        balance::set_total_deposited(&env, new_total_deposited);
+
+        // Emit batch event
+        env.events().publish(
+            (symbol_short!("bat_dep"), &caller),
+            (beneficiaries.len() as i128, total_amount, env.ledger().sequence()),
+        );
+
+        Ok(())
+    }
+
 }

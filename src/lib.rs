@@ -36,6 +36,8 @@ pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-c
 pub mod meta_staking; // meta-staking layer — restake reward tokens for a bonus meta-reward rate
 pub mod batch_vote; // governance batch voting (issue #160)
 pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit
+pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
+pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
 
 // Pool insights, reward-runway guard, and time-delayed admin recovery.
 pub mod pool_insights; // pool summary + rounding-policy transparency
