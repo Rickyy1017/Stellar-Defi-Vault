@@ -52,6 +52,7 @@ pub mod admin_recovery; // long-delay admin key-loss recovery
 pub mod claim_fee;
 pub mod community_treasury;
 pub mod mev_claim_protection;
+pub mod allowlist_rate_limits; // #514–#517: allowlist, withdrawal rate limit, partial claim, claim cooldown
 pub mod peg_stabilization;
 pub mod position_mirroring;
 
@@ -77,6 +78,7 @@ pub use vault::VaultContract;
 
 #[cfg(test)]
 mod test_issues_568_571;
+mod test_issues_514_571;
 
 // #[cfg(test)]
 // mod test_issues_463_466;
