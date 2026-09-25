@@ -749,3 +749,57 @@ impl From<VaultError> for VaultOpsError {
         }
     }
 }
+
+/// Eighth error enum for issues #526-#529 (scheduled exit, snapshot airdrop,
+/// external price oracle, co-sponsor). All prior `#[contracterror]` enums
+/// are at Soroban's 50-variant cap.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature2Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 5,
+    /// Mirrors `VaultError::VaultPaused`.
+    VaultPaused = 6,
+    /// Mirrors `VaultError::InsufficientRewardPool`.
+    InsufficientRewardPool = 7,
+    /// Returned by `create_airdrop()` / `execute_scheduled_exit()` when the
+    /// supplied ledger or config is invalid.
+    InvalidRecoveryConfig = 8,
+    /// Returned by `register_co_sponsor()` when the sponsor is already
+    /// registered and active.
+    AlreadyRegistered = 9,
+    /// Returned by `fund_co_sponsor_rewards()` when the sponsor's
+    /// registration has expired.
+    SponsorExpired = 10,
+    /// Returned by `claim_airdrop()` when the user already claimed.
+    AlreadyClaimed = 11,
+    /// Returned by `get_position_value_usd()` when no oracle is configured.
+    NoOracleConfigured = 12,
+    /// Returned by `claim_airdrop()` when the user has no weight at the
+    /// snapshot ledger.
+    InsufficientStake = 13,
+}
+
+impl From<VaultError> for VaultFeature2Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature2Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature2Error::NotInitialized,
+            VaultError::ZeroAmount => VaultFeature2Error::ZeroAmount,
+            VaultError::ArithmeticError => VaultFeature2Error::ArithmeticError,
+            VaultError::PositionNotFound => VaultFeature2Error::PositionNotFound,
+            VaultError::VaultPaused => VaultFeature2Error::VaultPaused,
+            VaultError::InsufficientRewardPool => VaultFeature2Error::InsufficientRewardPool,
+            _ => VaultFeature2Error::Unauthorized,
+        }
+    }
+}
