@@ -111,7 +111,9 @@ impl VaultContract {
     /// `MAX_RATE_BPS`.
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultOpsError> {
         admin::require_admin(&env)?;
-        if rate_bps > balance::MAX_RATE_BPS {
+        if rate_bps > balance::MAX_RATE_BPS
+            || !crate::reward_rate_ceiling::within_ceiling(&env, rate_bps)
+        {
             return Err(VaultOpsError::RateTooHigh);
         }
         // Runway is evaluated against the *new* rate, before it is applied.

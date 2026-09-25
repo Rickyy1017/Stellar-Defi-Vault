@@ -1297,6 +1297,10 @@ impl VaultContract {
                 // reports `InsufficientRunway`.
                 crate::runway_guard::enforce_runway(env, rate_bps)
                     .map_err(|_| VaultExtError::ActionNotFound)?;
+                // Issue #532: the reward rate ceiling applies here too.
+                if !crate::reward_rate_ceiling::within_ceiling(env, rate_bps) {
+                    return Err(VaultExtError::ActionNotFound);
+                }
                 balance::set_reward_rate_bps(env, rate_bps);
                 Ok(())
             }

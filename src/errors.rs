@@ -822,6 +822,9 @@ pub enum VaultFeature3Error {
     /// Returned by `set_max_pause_duration()` while the vault is paused, or
     /// when the supplied duration is below `MIN_MAX_PAUSE_LEDGERS`.
     InvalidPauseDuration = 5,
+    /// Returned by `set_max_reward_rate()` when the new ceiling is zero,
+    /// higher than the current ceiling, or below the current reward rate.
+    InvalidRateCeiling = 6,
 }
 
 impl From<VaultError> for VaultFeature3Error {
