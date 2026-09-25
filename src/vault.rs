@@ -58,7 +58,7 @@ pub(crate) const MAX_STAKE_HISTORY: u32 = 5;
 /// Maximum number of admin changelog entries retained (issue #114).
 pub(crate) const MAX_CHANGELOG_ENTRIES: u32 = 10;
 
-pub(crate) const CONTRACT_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "0.1.0";
 pub(crate) const CONTRACT_NAME: &str = "stellar-staking-pool";
 pub(crate) const CONTRACT_DESCRIPTION: &str =
     "A staking pool contract for Stellar DeFi vault positions.";
@@ -252,6 +252,20 @@ impl VaultContract {
     /// Deposit tokens into the vault (alias for stake).
     pub fn deposit(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         Self::stake(env, user, amount)
+    }
+
+    /// Admin: set the base reward APR in basis points.
+    pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
+        admin::require_admin(&env)?;
+        Self::validate_rate_bps(rate_bps)?;
+        crate::vault_extensions_538_541::clear_rate_ramp(&env);
+        balance::set_reward_rate_bps(&env, rate_bps);
+        Ok(())
+    }
+
+    /// Read-only reward rate APR in basis points (interpolated if a rate ramp is active).
+    pub fn get_reward_rate_bps(env: Env) -> u32 {
+        crate::vault_extensions_538_541::compute_current_rate(&env)
     }
 
     /// Sets or replaces the secondary emergency admin address.
@@ -2227,14 +2241,16 @@ impl VaultContract {
         let total_deposited = balance::get_total_deposited(env);
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
+        let token_addr = Self::token_address(env)?;
+        let unstake_fee_bps =
+            crate::vault_extensions_538_541::get_effective_unstake_fee_bps(env, &token_addr);
         let fee = amount
-            .checked_mul(balance::get_unstake_fee_bps(env) as i128)
+            .checked_mul(unstake_fee_bps as i128)
             .and_then(|v| v.checked_div(10_000))
             .ok_or(VaultError::ArithmeticError)?;
         let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
         // Issue #554: per-user rolling 24h cap on the gross amount withdrawn.
         crate::daily_withdrawal_limit::enforce_and_record(env, staker, amount);
-        let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &payout);
         balance::set_shares(env, staker, user_shares - shares);
