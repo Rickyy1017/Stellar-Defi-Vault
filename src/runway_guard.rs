@@ -111,7 +111,18 @@ impl VaultContract {
     /// `MAX_RATE_BPS`.
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultOpsError> {
         admin::require_admin(&env)?;
-        apply_reward_rate(&env, rate_bps)
+        if rate_bps > balance::MAX_RATE_BPS
+            || !crate::reward_rate_ceiling::within_ceiling(&env, rate_bps)
+        {
+            return Err(VaultOpsError::RateTooHigh);
+        }
+        // Runway is evaluated against the *new* rate, before it is applied.
+        enforce_runway(&env, rate_bps)?;
+
+        let old_rate = balance::get_reward_rate_bps(&env);
+        balance::set_reward_rate_bps(&env, rate_bps);
+        events::rate_changed(&env, old_rate, rate_bps);
+        Ok(())
     }
 
     /// Admin: configure the minimum reward-pool runway, in ledgers, required

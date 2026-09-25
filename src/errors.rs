@@ -862,70 +862,44 @@ impl From<VaultError> for VaultFeature2Error {
     }
 }
 
-/// Ninth error enum for issues #510-#513 (dynamic reward rate, claim vesting,
-/// fee-on-transfer safety, role-based access control). All prior
-/// `#[contracterror]` enums are at Soroban's 50-variant cap.
+/// Ninth error enum for issues #530-#533 (activity log, invariant checker,
+/// reward-rate ceiling, pause grace period).
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum VaultAccessError {
+pub enum VaultFeature3Error {
     /// Mirrors `VaultError::Unauthorized`.
     Unauthorized = 1,
     /// Mirrors `VaultError::NotInitialized`.
     NotInitialized = 2,
-    /// Mirrors `VaultError::ZeroAmount`.
-    ZeroAmount = 3,
-    /// Mirrors `VaultError::ArithmeticError`.
-    ArithmeticError = 4,
-    /// Mirrors `VaultError::RateTooHigh`.
-    RateTooHigh = 5,
-    /// Mirrors `VaultOpsError::InsufficientRunway`.
-    InsufficientRunway = 6,
-    /// Mirrors `VaultError::ContractStopped`.
-    ContractStopped = 7,
-    /// Mirrors `VaultError::DescriptionTooLong`.
-    DescriptionTooLong = 8,
-    /// Mirrors `VaultError::UnstakeFeeTooHigh`.
-    UnstakeFeeTooHigh = 9,
-    /// Returned by a role-gated entrypoint when the caller is neither the
-    /// admin nor a holder of the required role (issue #513).
-    MissingRole = 10,
-    /// Returned by `set_claim_vesting_duration` when the duration exceeds
-    /// the supported maximum (issue #511).
-    InvalidVestingDuration = 11,
-    /// Returned by `set_dynamic_rate_config` when the curve parameters are
-    /// inconsistent (issue #510).
-    InvalidDynamicRateConfig = 12,
-    /// Mirrors `VaultOpsError::DynamicRateActive` (issue #510).
-    DynamicRateActive = 13,
+    /// Returned by `force_unpause()` when the vault is not paused.
+    NotPaused = 3,
+    /// Returned by `force_unpause()` before the maximum pause duration has
+    /// elapsed.
+    GracePeriodNotElapsed = 4,
+    /// Returned by `set_max_pause_duration()` while the vault is paused, or
+    /// when the supplied duration is below `MIN_MAX_PAUSE_LEDGERS`.
+    InvalidPauseDuration = 5,
+    /// Returned by `set_max_reward_rate()` when the new ceiling is zero,
+    /// higher than the current ceiling, or below the current reward rate.
+    InvalidRateCeiling = 6,
+    /// Returned by `assert_invariants()` when a core accounting total
+    /// (shares, deposits, reward pool) is negative.
+    NegativeAccounting = 7,
+    /// Returned by `assert_invariants()` when the sum of all stakers' share
+    /// balances differs from total shares outstanding.
+    SharesMismatch = 8,
+    /// Returned by `assert_invariants()` when the vault's actual token
+    /// balance is below what its accounting says it holds.
+    Undercollateralized = 9,
 }
 
-impl From<VaultError> for VaultAccessError {
+impl From<VaultError> for VaultFeature3Error {
     fn from(err: VaultError) -> Self {
         match err {
-            VaultError::Unauthorized => VaultAccessError::Unauthorized,
-            VaultError::NotInitialized => VaultAccessError::NotInitialized,
-            VaultError::ZeroAmount => VaultAccessError::ZeroAmount,
-            VaultError::ArithmeticError => VaultAccessError::ArithmeticError,
-            VaultError::RateTooHigh => VaultAccessError::RateTooHigh,
-            VaultError::ContractStopped => VaultAccessError::ContractStopped,
-            VaultError::DescriptionTooLong => VaultAccessError::DescriptionTooLong,
-            VaultError::UnstakeFeeTooHigh => VaultAccessError::UnstakeFeeTooHigh,
-            _ => VaultAccessError::Unauthorized,
-        }
-    }
-}
-
-impl From<VaultOpsError> for VaultAccessError {
-    fn from(err: VaultOpsError) -> Self {
-        match err {
-            VaultOpsError::NotInitialized => VaultAccessError::NotInitialized,
-            VaultOpsError::ZeroAmount => VaultAccessError::ZeroAmount,
-            VaultOpsError::ArithmeticError => VaultAccessError::ArithmeticError,
-            VaultOpsError::RateTooHigh => VaultAccessError::RateTooHigh,
-            VaultOpsError::InsufficientRunway => VaultAccessError::InsufficientRunway,
-            VaultOpsError::DynamicRateActive => VaultAccessError::DynamicRateActive,
-            _ => VaultAccessError::Unauthorized,
+            VaultError::Unauthorized => VaultFeature3Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature3Error::NotInitialized,
+            _ => VaultFeature3Error::Unauthorized,
         }
     }
 }

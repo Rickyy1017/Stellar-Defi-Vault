@@ -45,6 +45,12 @@ pub mod snapshot_airdrop; // issue #527 — snapshot-based airdrop distribution
 pub mod external_price_oracle; // issue #528 — external price oracle for collateral valuation
 pub mod co_sponsor; // issue #529 — third-party reward matching via co-sponsors
 
+// Issues #530-#533.
+pub mod pause_grace_period; // issue #533 — max pause duration + forced unpause
+pub mod reward_rate_ceiling; // issue #532 — lower-only max reward rate ceiling
+pub mod invariants; // issue #531 — core accounting invariant checker
+pub mod activity_log; // issue #530 — per-user deposit/withdrawal history
+
 // Pool insights, reward-runway guard, and time-delayed admin recovery.
 pub mod pool_insights; // pool summary + rounding-policy transparency
 pub mod runway_guard; // set_reward_rate_bps runway safety rail
@@ -58,11 +64,6 @@ pub mod admin_recovery; // long-delay admin key-loss recovery
 pub mod claim_fee;
 pub mod community_treasury;
 pub mod mev_claim_protection;
-pub mod allowlist_rate_limits; // #514–#517: allowlist, withdrawal rate limit, partial claim, claim cooldown
-pub mod access_roles; // issue #513 — role-based access control (RateSetter, Pauser, TreasuryManager)
-pub mod transfer_safety; // issue #512 — fee-on-transfer safety via actual-received-amount checks
-pub mod claim_vesting; // issue #511 — optional linear vesting for claimed rewards
-pub mod dynamic_reward_rate; // issue #510 — utilization-driven algorithmic reward rate
 pub mod peg_stabilization;
 pub mod position_mirroring;
 
@@ -88,7 +89,6 @@ pub use vault::VaultContract;
 
 #[cfg(test)]
 mod test_issues_568_571;
-mod test_issues_514_571;
 
 #[cfg(test)]
 mod test_issues_526_529;

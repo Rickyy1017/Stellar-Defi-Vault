@@ -243,8 +243,13 @@ impl VaultContract {
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
 
-        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
-        crate::dynamic_reward_rate::sync(&env);
+        crate::activity_log::record(
+            &env,
+            &user,
+            crate::activity_log::ActivityKind::Deposit,
+            amount,
+            shares_minted,
+        );
 
         Ok(shares_minted)
     }
@@ -1311,6 +1316,10 @@ impl VaultContract {
                 // reports `InsufficientRunway`.
                 crate::runway_guard::enforce_runway(env, rate_bps)
                     .map_err(|_| VaultExtError::ActionNotFound)?;
+                // Issue #532: the reward rate ceiling applies here too.
+                if !crate::reward_rate_ceiling::within_ceiling(env, rate_bps) {
+                    return Err(VaultExtError::ActionNotFound);
+                }
                 balance::set_reward_rate_bps(env, rate_bps);
                 Ok(())
             }
@@ -1495,6 +1504,17 @@ impl VaultContract {
         message: soroban_sdk::String,
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        Self::require_not_stopped(&env)?;
+        // Issue #533: no re-pause during the cooldown after a forced unpause.
+        if crate::pause_grace_period::repause_blocked(&env) {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if message.len() > 200 {
+            return Err(VaultError::DescriptionTooLong);
+        }
+
+        Self::set_paused(&env, true);
         let admin = admin::get_admin(&env)?;
         Self::pause_by(&env, &admin, reason, message)
     }
@@ -1528,6 +1548,10 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::require_not_stopped(&env)?;
+        // Issue #533: no re-pause during the cooldown after a forced unpause.
+        if crate::pause_grace_period::repause_blocked(&env) {
+            return Err(VaultError::Unauthorized);
+        }
 
         if message.len() > 200 {
             return Err(VaultError::DescriptionTooLong);
@@ -2196,8 +2220,13 @@ impl VaultContract {
             balance::register_staker(env, user);
         }
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
-        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
-        crate::dynamic_reward_rate::sync(env);
+        crate::activity_log::record(
+            env,
+            user,
+            crate::activity_log::ActivityKind::Deposit,
+            amount,
+            shares,
+        );
         Ok(shares)
     }
 
@@ -2251,8 +2280,13 @@ impl VaultContract {
             symbol_short!("unstake"),
             amount,
         );
-        // Issue #510: TVL changed, re-derive the algorithmic reward rate.
-        crate::dynamic_reward_rate::sync(env);
+        crate::activity_log::record(
+            env,
+            staker,
+            crate::activity_log::ActivityKind::Withdrawal,
+            amount,
+            shares,
+        );
         Ok(amount)
     }
 
