@@ -36,6 +36,7 @@ pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-c
 pub mod meta_staking; // meta-staking layer — restake reward tokens for a bonus meta-reward rate
 pub mod batch_vote; // governance batch voting (issue #160)
 pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit
+pub mod vault_extensions_538_541; // issues #538-#541 — version query, token fee override, rate ramp, deposit memo
 
 // Pre-existing modules that `vault.rs` already calls into (e.g. `do_unstake`'s
 // `community_treasury::route_fee_revenue` / `position_mirroring::maybe_mirror_action`)
@@ -81,3 +82,7 @@ mod test_issues_459_462;
 
 #[cfg(test)]
 mod test_staker_region_tag;
+
+#[cfg(test)]
+mod test_issues_538_541;
+
