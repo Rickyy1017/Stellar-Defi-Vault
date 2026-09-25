@@ -111,16 +111,7 @@ impl VaultContract {
     /// `MAX_RATE_BPS`.
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultOpsError> {
         admin::require_admin(&env)?;
-        if rate_bps > balance::MAX_RATE_BPS {
-            return Err(VaultOpsError::RateTooHigh);
-        }
-        // Runway is evaluated against the *new* rate, before it is applied.
-        enforce_runway(&env, rate_bps)?;
-
-        let old_rate = balance::get_reward_rate_bps(&env);
-        balance::set_reward_rate_bps(&env, rate_bps);
-        events::rate_changed(&env, old_rate, rate_bps);
-        Ok(())
+        apply_reward_rate(&env, rate_bps)
     }
 
     /// Admin: configure the minimum reward-pool runway, in ledgers, required
@@ -166,29 +157,56 @@ impl VaultContract {
     ) -> Result<(), VaultOpsError> {
         admin_addr.require_auth();
         admin::require_admin(&env)?;
-        if amount <= 0 {
-            return Err(VaultOpsError::ZeroAmount);
-        }
-
-        let token_addr: Address = match balance::get_reward_token(&env) {
-            Some(token) => token,
-            None => env
-                .storage()
-                .instance()
-                .get(&crate::storage::DataKey::Token)
-                .ok_or(VaultOpsError::NotInitialized)?,
-        };
-        token::Client::new(&env, &token_addr).transfer(
-            &admin_addr,
-            &env.current_contract_address(),
-            &amount,
-        );
-
-        let pool = balance::get_reward_pool_balance(&env);
-        let updated = pool
-            .checked_add(amount)
-            .ok_or(VaultOpsError::ArithmeticError)?;
-        balance::set_reward_pool_balance(&env, updated);
-        Ok(())
+        credit_reward_pool_from(&env, &admin_addr, amount)
     }
+}
+
+/// Validates and applies a new reward rate, shared by `set_reward_rate_bps`
+/// and the role-gated `role_set_reward_rate_bps` (issue #513). Callers must
+/// have authorized the change beforehand.
+pub(crate) fn apply_reward_rate(env: &Env, rate_bps: u32) -> Result<(), VaultOpsError> {
+    if rate_bps > balance::MAX_RATE_BPS {
+        return Err(VaultOpsError::RateTooHigh);
+    }
+    // Runway is evaluated against the *new* rate, before it is applied.
+    enforce_runway(env, rate_bps)?;
+
+    let old_rate = balance::get_reward_rate_bps(env);
+    balance::set_reward_rate_bps(env, rate_bps);
+    events::rate_changed(env, old_rate, rate_bps);
+    Ok(())
+}
+
+/// Pulls `amount` of the reward token from `from` and credits it to the
+/// reward pool, shared by `fund_reward_pool` and the role-gated
+/// `role_fund_reward_pool` (issue #513). Callers must authorize `from`.
+pub(crate) fn credit_reward_pool_from(
+    env: &Env,
+    from: &Address,
+    amount: i128,
+) -> Result<(), VaultOpsError> {
+    if amount <= 0 {
+        return Err(VaultOpsError::ZeroAmount);
+    }
+
+    let token_addr: Address = match balance::get_reward_token(env) {
+        Some(token) => token,
+        None => env
+            .storage()
+            .instance()
+            .get(&crate::storage::DataKey::Token)
+            .ok_or(VaultOpsError::NotInitialized)?,
+    };
+    token::Client::new(env, &token_addr).transfer(
+        from,
+        &env.current_contract_address(),
+        &amount,
+    );
+
+    let pool = balance::get_reward_pool_balance(env);
+    let updated = pool
+        .checked_add(amount)
+        .ok_or(VaultOpsError::ArithmeticError)?;
+    balance::set_reward_pool_balance(env, updated);
+    Ok(())
 }
