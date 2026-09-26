@@ -59,6 +59,8 @@ pub mod activity_log; // issue #530 — per-user deposit/withdrawal history
 pub mod pool_insights; // pool summary + rounding-policy transparency
 pub mod runway_guard; // set_reward_rate_bps runway safety rail
 pub mod admin_recovery; // long-delay admin key-loss recovery
+pub mod ttl_management; // issue #589 - storage TTL management
+pub mod foreign_token_sweep; // issue #590 - foreign token rescue
 
 // Pre-existing modules that `vault.rs` already calls into (e.g. `do_unstake`'s
 // `community_treasury::route_fee_revenue` / `position_mirroring::maybe_mirror_action`)
@@ -108,6 +110,9 @@ mod test_issue_522; // issue #522 — get_rate_history() rate-change changelog
 
 #[cfg(test)]
 mod test_issue_525; // issue #525 — graceful pool sunset via initiate_sunset()
+
+#[cfg(test)]
+mod test_issues_589_590_592;
 
 // #[cfg(test)]
 // mod test_issues_463_466;

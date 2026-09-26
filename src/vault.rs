@@ -271,6 +271,9 @@ impl VaultContract {
         // Issue #544: single-shot low-balance alert on state-changing calls.
         crate::vault_extensions_542_545::check_and_emit_low_balance(&env);
 
+        // Issue #589: best-effort instance TTL bump on a high-traffic path.
+        crate::ttl_management::bump(&env);
+
         Ok(shares_minted)
     }
 
@@ -2530,6 +2533,8 @@ impl VaultContract {
         );
         // Issue #544: single-shot low-balance alert on state-changing calls.
         crate::vault_extensions_542_545::check_and_emit_low_balance(env);
+        // Issue #589: best-effort instance TTL bump on a high-traffic path.
+        crate::ttl_management::bump(env);
         Ok(amount)
     }
 
