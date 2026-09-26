@@ -123,3 +123,6 @@ mod test_issue_525; // issue #525 — graceful pool sunset via initiate_sunset()
 mod test_issues_498_501;
 #[cfg(test)]
 mod test_issues_502_505;
+pub mod vault_extensions_490_493;
+#[cfg(test)]
+mod test_issues_490_493;

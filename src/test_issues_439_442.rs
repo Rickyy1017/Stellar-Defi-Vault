@@ -93,7 +93,7 @@ fn test_set_ipfs_storage_config_requires_admin() {
 fn test_qualifying_staker_pins_hash() {
     let f = Fixture::new();
     f.vault.set_ipfs_storage_config(&f.admin, &500_i128, &5_u32);
-    f.vault.stake(&f.alice, &1000);
+    f.vault.stake(&f.alice, &1000, &0);
     let hash = String::from_str(&f.env, "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG");
     let desc = String::from_str(&f.env, "vault diagram");
     f.vault
@@ -110,7 +110,7 @@ fn test_qualifying_staker_pins_hash() {
 fn test_below_threshold_rejected() {
     let f = Fixture::new();
     f.vault.set_ipfs_storage_config(&f.admin, &500_i128, &5_u32);
-    f.vault.stake(&f.bob, &100);
+    f.vault.stake(&f.bob, &100, &0);
     let hash = String::from_str(&f.env, "hash-below-threshold");
     let desc = String::from_str(&f.env, "too small");
     let result = f.vault.try_pin_ipfs_hash(&f.bob, &hash, &desc);
@@ -121,7 +121,7 @@ fn test_below_threshold_rejected() {
 fn test_hash_length_limits_enforced() {
     let f = Fixture::new();
     f.vault.set_ipfs_storage_config(&f.admin, &500_i128, &5_u32);
-    f.vault.stake(&f.alice, &1000);
+    f.vault.stake(&f.alice, &1000, &0);
 
     let short_desc = String::from_str(&f.env, "");
 
@@ -141,7 +141,7 @@ fn test_hash_length_limits_enforced() {
 fn test_max_hashes_per_user_enforced() {
     let f = Fixture::new();
     f.vault.set_ipfs_storage_config(&f.admin, &500_i128, &2_u32);
-    f.vault.stake(&f.alice, &1000);
+    f.vault.stake(&f.alice, &1000, &0);
     let d = String::from_str(&f.env, "d");
     f.vault
         .pin_ipfs_hash(&f.alice, &String::from_str(&f.env, "h1"), &d)
@@ -160,7 +160,7 @@ fn test_max_hashes_per_user_enforced() {
 fn test_unpin_removes_correctly() {
     let f = Fixture::new();
     f.vault.set_ipfs_storage_config(&f.admin, &500_i128, &5_u32);
-    f.vault.stake(&f.alice, &1000);
+    f.vault.stake(&f.alice, &1000, &0);
     let d = String::from_str(&f.env, "d");
     f.vault
         .pin_ipfs_hash(&f.alice, &String::from_str(&f.env, "h1"), &d)
@@ -180,7 +180,7 @@ fn test_unpin_removes_correctly() {
 fn test_unpin_missing_hash_fails() {
     let f = Fixture::new();
     f.vault.set_ipfs_storage_config(&f.admin, &500_i128, &5_u32);
-    f.vault.stake(&f.alice, &1000);
+    f.vault.stake(&f.alice, &1000, &0);
     let result = f
         .vault
         .try_unpin_ipfs_hash(&f.alice, &String::from_str(&f.env, "nope"));
@@ -229,7 +229,7 @@ fn test_daily_emission_formula() {
     f.vault.set_reward_rate_bps(&10_000_u32);
     f.token_admin
         .mint(&f.alice, &(STELLAR_LEDGERS_PER_YEAR as i128));
-    f.vault.stake(&f.alice, &(STELLAR_LEDGERS_PER_YEAR as i128));
+    f.vault.stake(&f.alice, &(STELLAR_LEDGERS_PER_YEAR as i128), &0);
     f.vault.take_emission_sample(&f.admin).unwrap();
 
     let history = f.vault.get_emission_history();
@@ -311,7 +311,7 @@ fn test_unstake_above_minimum_succeeds() {
     f.vault
         .set_min_unstake_amount(&f.admin, &1000_i128)
         .unwrap();
-    f.vault.stake(&f.alice, &5000);
+    f.vault.stake(&f.alice, &5000, &0);
     assert!(f.vault.unstake(&f.alice, &4000).is_ok());
 }
 
@@ -321,7 +321,7 @@ fn test_unstake_below_minimum_fails() {
     f.vault
         .set_min_unstake_amount(&f.admin, &1000_i128)
         .unwrap();
-    f.vault.stake(&f.alice, &5000);
+    f.vault.stake(&f.alice, &5000, &0);
     let result = f.vault.try_unstake(&f.alice, &500);
     assert!(result.is_err());
 }
@@ -333,7 +333,7 @@ fn test_full_position_exit_always_allowed() {
         .set_min_unstake_amount(&f.admin, &1000_i128)
         .unwrap();
     // Direction: min 1000, so unstaking a fully-open 500 position is a full exit.
-    f.vault.stake(&f.alice, &500);
+    f.vault.stake(&f.alice, &500, &0);
     assert!(f.vault.unstake(&f.alice, &500).is_ok());
 }
 
@@ -344,7 +344,7 @@ fn test_min_zero_disables_check() {
         .set_min_unstake_amount(&f.admin, &1000_i128)
         .unwrap();
     f.vault.set_min_unstake_amount(&f.admin, &0_i128).unwrap();
-    f.vault.stake(&f.alice, &5000);
+    f.vault.stake(&f.alice, &5000, &0);
     assert!(f.vault.unstake(&f.alice, &500).is_ok());
 }
 

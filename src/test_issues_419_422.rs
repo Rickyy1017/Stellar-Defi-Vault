@@ -197,7 +197,7 @@ fn test_get_total_donated_tracks_accumulation() {
 fn test_create_shadow_clone_succeeds() {
     let f = Fixture::new();
     f.token_admin.mint(&f.alice, &1000);
-    f.vault.deposit(&f.alice, &1000);
+    f.vault.deposit(&f.alice, &1000, &0);
     let clone_id = f.vault.create_shadow_clone(&f.alice);
     assert!(clone_id == 0 || clone_id > 0);
     let clone = f.vault.get_shadow_clone(&clone_id).unwrap();
@@ -210,7 +210,7 @@ fn test_create_shadow_clone_succeeds() {
 fn test_shadow_clone_matches_position_state() {
     let f = Fixture::new();
     f.token_admin.mint(&f.alice, &5000);
-    f.vault.deposit(&f.alice, &5000);
+    f.vault.deposit(&f.alice, &5000, &0);
     let clone_id = f.vault.create_shadow_clone(&f.alice);
     let clone = f.vault.get_shadow_clone(&clone_id).unwrap();
     assert_eq!(clone.amount, 5000);
@@ -221,13 +221,13 @@ fn test_shadow_clone_matches_position_state() {
 fn test_live_position_change_does_not_affect_clone() {
     let f = Fixture::new();
     f.token_admin.mint(&f.alice, &5000);
-    f.vault.deposit(&f.alice, &5000);
+    f.vault.deposit(&f.alice, &5000, &0);
     let clone_id = f.vault.create_shadow_clone(&f.alice);
     let clone = f.vault.get_shadow_clone(&clone_id).unwrap();
     assert_eq!(clone.amount, 5000);
     // Deposit more — clone should still reflect original snapshot
     f.token_admin.mint(&f.alice, &3000);
-    f.vault.deposit(&f.alice, &3000);
+    f.vault.deposit(&f.alice, &3000, &0);
     let clone_after = f.vault.get_shadow_clone(&clone_id).unwrap();
     assert_eq!(clone_after.amount, 5000);
 }
@@ -236,7 +236,7 @@ fn test_live_position_change_does_not_affect_clone() {
 fn test_max_clones_enforced() {
     let f = Fixture::new();
     f.token_admin.mint(&f.alice, &100_000);
-    f.vault.deposit(&f.alice, &1000);
+    f.vault.deposit(&f.alice, &1000, &0);
     for _ in 0..5 {
         f.vault.create_shadow_clone(&f.alice);
     }
@@ -248,7 +248,7 @@ fn test_max_clones_enforced() {
 fn test_owner_can_delete_clone() {
     let f = Fixture::new();
     f.token_admin.mint(&f.alice, &1000);
-    f.vault.deposit(&f.alice, &1000);
+    f.vault.deposit(&f.alice, &1000, &0);
     let clone_id = f.vault.create_shadow_clone(&f.alice);
     assert!(f.vault.get_shadow_clone(&clone_id).is_some());
     f.vault.delete_shadow_clone(&f.alice, &clone_id);
@@ -259,7 +259,7 @@ fn test_owner_can_delete_clone() {
 fn test_get_user_shadow_clones_returns_all() {
     let f = Fixture::new();
     f.token_admin.mint(&f.alice, &100_000);
-    f.vault.deposit(&f.alice, &1000);
+    f.vault.deposit(&f.alice, &1000, &0);
     let id1 = f.vault.create_shadow_clone(&f.alice);
     let id2 = f.vault.create_shadow_clone(&f.alice);
     let clones = f.vault.get_user_shadow_clones(&f.alice);

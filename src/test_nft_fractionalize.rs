@@ -75,7 +75,7 @@ impl<'a> Fixture<'a> {
 #[test]
 fn fractionalize_locks_position() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -93,7 +93,7 @@ fn fractionalize_rejects_non_staker() {
 #[test]
 fn fractionalize_below_min_fractions_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     let result = f.vault.try_fractionalize_nft(&f.alice, &(MIN_FRACTIONS - 1));
     assert_eq!(result, Err(Ok(VaultError::InvalidRate)));
@@ -102,7 +102,7 @@ fn fractionalize_below_min_fractions_rejected() {
 #[test]
 fn fractionalize_above_max_fractions_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     let result = f.vault.try_fractionalize_nft(&f.alice, &(MAX_FRACTIONS + 1));
     assert_eq!(result, Err(Ok(VaultError::InvalidRate)));
@@ -111,7 +111,7 @@ fn fractionalize_above_max_fractions_rejected() {
 #[test]
 fn fractionalize_min_and_max_valid() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &MIN_FRACTIONS);
     assert!(f.vault.is_position_fractionalized(&f.alice));
@@ -126,7 +126,7 @@ fn fractionalize_min_and_max_valid() {
 #[test]
 fn double_fractionalize_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -137,7 +137,7 @@ fn double_fractionalize_rejected() {
 #[test]
 fn non_owner_cannot_fractionalize() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     // bob tries to fractionalize alice's NFT — bob has no position, so
     // PositionNotFound is returned.
@@ -148,7 +148,7 @@ fn non_owner_cannot_fractionalize() {
 #[test]
 fn fractionalize_gives_owner_all_fractions() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &100);
 
@@ -160,7 +160,7 @@ fn fractionalize_gives_owner_all_fractions() {
 #[test]
 fn fractionalized_position_cannot_unstake() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -172,7 +172,7 @@ fn fractionalized_position_cannot_unstake() {
 #[test]
 fn reconstructed_position_can_unstake() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
     f.vault.reconstruct_nft(&f.alice);
@@ -186,7 +186,7 @@ fn reconstructed_position_can_unstake() {
 #[test]
 fn reconstruct_restores_position() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
     assert!(f.vault.is_position_fractionalized(&f.alice));
@@ -198,7 +198,7 @@ fn reconstruct_restores_position() {
 #[test]
 fn reconstruct_with_partial_fractions_fails() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -213,7 +213,7 @@ fn reconstruct_with_partial_fractions_fails() {
 #[test]
 fn reconstruct_after_returning_all_fractions() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
     f.vault.transfer_fractions(&f.alice, &f.bob, &5);
@@ -228,7 +228,7 @@ fn reconstruct_after_returning_all_fractions() {
 #[test]
 fn reconstruct_when_not_fractionalized_fails() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     let result = f.vault.try_reconstruct_nft(&f.alice);
     assert_eq!(result, Err(Ok(VaultError::PositionNotFound)));
@@ -239,7 +239,7 @@ fn reconstruct_when_not_fractionalized_fails() {
 #[test]
 fn transfer_fractions_updates_balances() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &100);
     f.vault.transfer_fractions(&f.alice, &f.bob, &30);
@@ -251,7 +251,7 @@ fn transfer_fractions_updates_balances() {
 #[test]
 fn transfer_more_than_balance_fails() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -262,7 +262,7 @@ fn transfer_more_than_balance_fails() {
 #[test]
 fn zero_transfer_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -275,7 +275,7 @@ fn zero_transfer_rejected() {
 #[test]
 fn is_position_fractionalized_false_initially() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     assert!(!f.vault.is_position_fractionalized(&f.alice));
 }
@@ -283,7 +283,7 @@ fn is_position_fractionalized_false_initially() {
 #[test]
 fn get_fraction_balance_zero_for_non_holder() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -293,7 +293,7 @@ fn get_fraction_balance_zero_for_non_holder() {
 #[test]
 fn get_fraction_holders_returns_owner() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &10);
 
@@ -305,7 +305,7 @@ fn get_fraction_holders_returns_owner() {
 #[test]
 fn get_fraction_holders_after_transfer() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     f.vault.fractionalize_nft(&f.alice, &100);
     f.vault.transfer_fractions(&f.alice, &f.bob, &25);

@@ -226,3 +226,10 @@ In fixed-point math, calculating reward using standard division leads to roundin
 [MIT](./LICENSE)
 # Stellar-Defi-Vault
 
+
+## Testnet Integration Tests
+You can run the integration test suite against the Stellar Testnet by executing:
+```bash
+./scripts/integration-test.sh
+```
+Note: Ensure you have the Stellar CLI configured with testnet credentials before running this script.
