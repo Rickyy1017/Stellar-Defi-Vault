@@ -2490,8 +2490,22 @@ impl VaultContract {
             let remaining_fee = fee
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
-            let recipients = balance::get_fee_recipients(env);
-            if !recipients.is_empty() {
+            
+            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+                let token_addr = Self::token_address(env)?;
+                let token_client = token::Client::new(env, &token_addr);
+                for i in 0..split.recipients.len() {
+                    let recipient = split.recipients.get(i).unwrap();
+                    let bps = split.bps_shares.get(i).unwrap();
+                    let amount = (remaining_fee * (bps as i128)) / 10000;
+                    if amount > 0 {
+                        token_client.transfer(&env.current_contract_address(), &recipient, &amount);
+                    }
+                }
+            } else {
+                let recipients = balance::get_fee_recipients(env);
+                if !recipients.is_empty() {
+    
                 Self::distribute_fee(env, &token_addr, remaining_fee, &recipients);
             } else if balance::fee_buyback_enabled(env) {
                 balance::add_unstake_fee_reserve(env, remaining_fee);
@@ -3569,8 +3583,22 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             let remaining_fee = fee
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
-            let recipients = balance::get_fee_recipients(&env);
-            if !recipients.is_empty() {
+            
+            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+                let token_addr = Self::token_address(&env)?;
+                let token_client = token::Client::new(env, &token_addr);
+                for i in 0..split.recipients.len() {
+                    let recipient = split.recipients.get(i).unwrap();
+                    let bps = split.bps_shares.get(i).unwrap();
+                    let amount = (remaining_fee * (bps as i128)) / 10000;
+                    if amount > 0 {
+                        token_client.transfer(&env.current_contract_address(), &recipient, &amount);
+                    }
+                }
+            } else {
+                let recipients = balance::get_fee_recipients(&env);
+                if !recipients.is_empty() {
+    
                 Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
             } else if balance::fee_buyback_enabled(&env) {
                 balance::add_unstake_fee_reserve(&env, remaining_fee);
