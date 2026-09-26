@@ -117,7 +117,7 @@ fn deposits_are_rejected_from_the_moment_the_sunset_starts() {
     );
     assert_eq!(
         f.vault
-            .try_deposit_for_many(&f.bob, &vec![&f.env, &f.bob], &vec![&f.env, &500],),
+            .try_deposit_for_many(&f.bob, &vec![&f.env, f.bob.clone()], &vec![&f.env, 500i128]),
         Err(Ok(VaultError::PoolShuttingDown))
     );
 }
@@ -300,8 +300,8 @@ fn initiating_a_sunset_emits_sunset_initiated() {
 
     let all = f.env.events().all();
     let found = all.iter().any(|(_, topics, _)| {
-        let first: Val = topics.get(0).unwrap().into_val(&f.env);
-        first == Val::from(Symbol::new(&f.env, "snst_ini"))
+        let first: Symbol = topics.get(0).unwrap().into_val(&f.env);
+        first == Symbol::new(&f.env, "snst_ini")
     });
     assert!(
         found,

@@ -903,3 +903,116 @@ impl From<VaultError> for VaultFeature4Error {
         }
     }
 }
+
+/// Error enum for issue #513 (role-based access control) and issue #510
+/// (utilization-driven dynamic reward rate). All ten prior `#[contracterror]`
+/// enums are either at Soroban's 50-variant cap or scoped to another feature
+/// batch, so the access-control cases live here.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultAccessError {
+    /// Mirrors `VaultError::Unauthorized` — the caller is not the admin and
+    /// does not hold the required role.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Returned by `require_role()` when the caller is neither the admin nor
+    /// an explicit grantee of the required `Role` (issue #513).
+    MissingRole = 3,
+    /// Mirrors `VaultError::UnstakeFeeTooHigh` — returned by
+    /// `role_set_unstake_fee_bps()` when the fee exceeds 500 bps.
+    UnstakeFeeTooHigh = 4,
+    /// Mirrors `VaultError::RateTooHigh`.
+    RateTooHigh = 5,
+    /// Returned by `set_dynamic_rate_config()` when the curve is invalid:
+    /// `target_tvl <= 0`, or `min_rate_bps > target_rate_bps`, or
+    /// `target_rate_bps > max_rate_bps` (issue #510).
+    InvalidDynamicRateConfig = 6,
+    /// Mirrors `VaultOpsError::InsufficientRunway`, surfaced through the
+    /// role-gated rate setter.
+    InsufficientRunway = 7,
+    /// Mirrors `VaultOpsError::DynamicRateActive`, surfaced through the
+    /// role-gated rate setter.
+    DynamicRateActive = 8,
+}
+
+impl From<VaultError> for VaultAccessError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultAccessError::Unauthorized,
+            VaultError::NotInitialized => VaultAccessError::NotInitialized,
+            VaultError::RateTooHigh => VaultAccessError::RateTooHigh,
+            VaultError::UnstakeFeeTooHigh => VaultAccessError::UnstakeFeeTooHigh,
+            _ => VaultAccessError::Unauthorized,
+        }
+    }
+}
+
+impl From<VaultOpsError> for VaultAccessError {
+    fn from(err: VaultOpsError) -> Self {
+        match err {
+            VaultOpsError::Unauthorized => VaultAccessError::Unauthorized,
+            VaultOpsError::NotInitialized => VaultAccessError::NotInitialized,
+            VaultOpsError::RateTooHigh => VaultAccessError::RateTooHigh,
+            VaultOpsError::InsufficientRunway => VaultAccessError::InsufficientRunway,
+            VaultOpsError::DynamicRateActive => VaultAccessError::DynamicRateActive,
+            _ => VaultAccessError::Unauthorized,
+        }
+    }
+}
+
+/// Twelfth error enum, added for issue #593: replaces the last ad-hoc string
+/// `panic!`s in the issue #498–#505 extension modules with typed, matchable
+/// error codes. Every prior `#[contracterror]` enum is either at Soroban's
+/// 50-variant cap or scoped to another feature batch. The variant names keep
+/// the exact wording of the string panics they replace so integrators can map
+/// old revert messages to stable numeric codes one-to-one.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature5Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Replaces `panic!("InvalidSplitRecipients")` — returned by
+    /// `set_treasury_split()` when more than 3 recipients are supplied or the
+    /// `recipients` / `bps_shares` lengths differ (issue #499).
+    InvalidSplitRecipients = 3,
+    /// Replaces `panic!("InvalidSplitBpsSum")` — returned by
+    /// `set_treasury_split()` when the `bps_shares` values do not sum to
+    /// exactly 10 000 (issue #499).
+    InvalidSplitBpsSum = 4,
+    /// Replaces `panic!("UnregisteredToken")` — returned by
+    /// `swap_secondary_reward()` when no DEX router is registered for the
+    /// supplied source token (issue #501).
+    UnregisteredToken = 5,
+    /// Replaces `panic!("TimelockNotExpired")` — returned by
+    /// `execute_admin_action()` when the queued action's `executable_at`
+    /// ledger has not been reached yet (issue #503).
+    TimelockNotExpired = 6,
+    /// Replaces `panic!("ActionNotFound")` — returned by
+    /// `execute_admin_action()` / `cancel_admin_action()` when the given
+    /// action id does not exist (issue #503).
+    ActionNotFound = 7,
+    /// Replaces `panic!("AutoCompoundNotEnabled")` — returned by `compound()`
+    /// when the user has not opted into auto-compounding (issue #504).
+    AutoCompoundNotEnabled = 8,
+    /// Replaces `panic!("NoSharesToTokenize")` — returned by
+    /// `tokenize_position()` when the caller holds no shares (issue #505).
+    NoSharesToTokenize = 9,
+    /// Replaces `panic!("NotNFTOwner")` — returned by `redeem_position_nft()`
+    /// when the caller is not the recorded owner of the token id (issue #505).
+    NotNftOwner = 10,
+}
+
+impl From<VaultError> for VaultFeature5Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature5Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature5Error::NotInitialized,
+            _ => VaultFeature5Error::Unauthorized,
+        }
+    }
+}

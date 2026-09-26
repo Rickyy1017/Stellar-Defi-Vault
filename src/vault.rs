@@ -870,7 +870,7 @@ impl VaultContract {
     }
 
     /// Shared accessor for the vault token address stored during initialization.
-    fn token_address(env: &Env) -> Result<Address, VaultError> {
+    pub(crate) fn token_address(env: &Env) -> Result<Address, VaultError> {
         env.storage()
             .instance()
             .get(&DataKey::Token)
@@ -2491,7 +2491,7 @@ impl VaultContract {
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
             
-            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+            if let Some(split) = Self::get_treasury_split(env.clone()) {
                 let token_addr = Self::token_address(env)?;
                 let token_client = token::Client::new(env, &token_addr);
                 for i in 0..split.recipients.len() {
@@ -2505,13 +2505,13 @@ impl VaultContract {
             } else {
                 let recipients = balance::get_fee_recipients(env);
                 if !recipients.is_empty() {
-    
-                Self::distribute_fee(env, &token_addr, remaining_fee, &recipients);
-            } else if balance::fee_buyback_enabled(env) {
-                balance::add_unstake_fee_reserve(env, remaining_fee);
-            } else {
-                let reward_pool = balance::get_reward_pool_balance(env);
-                balance::set_reward_pool_balance(env, reward_pool + remaining_fee);
+                    Self::distribute_fee(env, &token_addr, remaining_fee, &recipients);
+                } else if balance::fee_buyback_enabled(env) {
+                    balance::add_unstake_fee_reserve(env, remaining_fee);
+                } else {
+                    let reward_pool = balance::get_reward_pool_balance(env);
+                    balance::set_reward_pool_balance(env, reward_pool + remaining_fee);
+                }
             }
         }
         // Issue #453: trigger mirroring for unstake
@@ -3584,9 +3584,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
             
-            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+            if let Some(split) = Self::get_treasury_split(env.clone()) {
                 let token_addr = Self::token_address(&env)?;
-                let token_client = token::Client::new(env, &token_addr);
+                let token_client = token::Client::new(&env, &token_addr);
                 for i in 0..split.recipients.len() {
                     let recipient = split.recipients.get(i).unwrap();
                     let bps = split.bps_shares.get(i).unwrap();
@@ -3598,13 +3598,13 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             } else {
                 let recipients = balance::get_fee_recipients(&env);
                 if !recipients.is_empty() {
-    
-                Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
-            } else if balance::fee_buyback_enabled(&env) {
-                balance::add_unstake_fee_reserve(&env, remaining_fee);
-            } else {
-                let reward_pool = balance::get_reward_pool_balance(&env);
-                balance::set_reward_pool_balance(&env, reward_pool + remaining_fee);
+                    Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
+                } else if balance::fee_buyback_enabled(&env) {
+                    balance::add_unstake_fee_reserve(&env, remaining_fee);
+                } else {
+                    let reward_pool = balance::get_reward_pool_balance(&env);
+                    balance::set_reward_pool_balance(&env, reward_pool + remaining_fee);
+                }
             }
         }
 
@@ -3789,3 +3789,79 @@ impl VaultContract {
         Ok(())
     }
 }
+
+// ── Extension modules with `#[contractimpl]` blocks ─────────────────────────
+//
+// soroban-sdk's macros generate the contract client (with private mock-auth
+// fields) and the testutils function-set registry inside THIS module. A
+// `#[contractimpl]` block anywhere else would reference those private items
+// from outside the module tree and fail to compile under
+// `cargo test --features testutils`. Rust privacy lets descendant modules
+// touch them, so every extension module that adds entrypoints to
+// `VaultContract` is declared here as a child. `lib.rs` re-exports them with
+// `pub use vault::...` so existing `crate::module` paths keep working.
+
+#[path = "activity_log.rs"]
+pub mod activity_log;
+#[path = "invariants.rs"]
+pub mod invariants;
+#[path = "pause_grace_period.rs"]
+pub mod pause_grace_period;
+#[path = "reward_rate_ceiling.rs"]
+pub mod reward_rate_ceiling;
+#[path = "runway_guard.rs"]
+pub mod runway_guard;
+#[path = "pool_insights.rs"]
+pub mod pool_insights;
+#[path = "admin_recovery.rs"]
+pub mod admin_recovery;
+#[path = "access_roles.rs"]
+pub mod access_roles;
+#[path = "dynamic_reward_rate.rs"]
+pub mod dynamic_reward_rate;
+#[path = "keeper_registry.rs"]
+pub mod keeper_registry;
+#[path = "scheduled_exit.rs"]
+pub mod scheduled_exit;
+#[path = "snapshot_airdrop.rs"]
+pub mod snapshot_airdrop;
+#[path = "external_price_oracle.rs"]
+pub mod external_price_oracle;
+#[path = "co_sponsor.rs"]
+pub mod co_sponsor;
+#[path = "vault_extensions_498_501.rs"]
+pub mod vault_extensions_498_501;
+#[path = "vault_extensions_502_505.rs"]
+pub mod vault_extensions_502_505;
+#[path = "vault_extensions_538_541.rs"]
+pub mod vault_extensions_538_541;
+#[path = "vault_extensions_542_545.rs"]
+pub mod vault_extensions_542_545;
+#[path = "vault_extensions_463_466.rs"]
+pub mod vault_extensions_463_466;
+#[path = "position_health_auto_recovery.rs"]
+pub mod position_health_auto_recovery;
+#[path = "lockdrop_campaign.rs"]
+pub mod lockdrop_campaign;
+#[path = "proof_of_humanity_hook.rs"]
+pub mod proof_of_humanity_hook;
+#[path = "roadmap_voting.rs"]
+pub mod roadmap_voting;
+#[path = "staker_region_tag.rs"]
+pub mod staker_region_tag;
+#[path = "staker_network_graph.rs"]
+pub mod staker_network_graph;
+#[path = "staker_favor_rounding.rs"]
+pub mod staker_favor_rounding;
+#[path = "daily_community_tip.rs"]
+pub mod daily_community_tip;
+#[path = "time_locked_admin_proposal.rs"]
+pub mod time_locked_admin_proposal;
+#[path = "meta_staking.rs"]
+pub mod meta_staking;
+#[path = "batch_vote.rs"]
+pub mod batch_vote;
+#[path = "daily_withdrawal_limit.rs"]
+pub mod daily_withdrawal_limit;
+#[path = "position_mirroring.rs"]
+pub mod position_mirroring;

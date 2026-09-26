@@ -18,7 +18,7 @@ use soroban_sdk::{contractimpl, token, Address, Env};
 use crate::balance;
 use crate::errors::VaultFeature4Error;
 use crate::storage::DataKey;
-use crate::vault::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 /// Runs every invariant, returning the first violation found.
 pub(crate) fn check_invariants(env: &Env) -> Result<(), VaultFeature4Error> {

@@ -105,27 +105,6 @@ pub(crate) fn enforce_runway(env: &Env, rate_bps: u32) -> Result<(), VaultOpsErr
 
 #[contractimpl]
 impl VaultContract {
-    /// Admin: set the annual reward rate (basis points), reverting with
-    /// `InsufficientRunway` when the new rate would exhaust the reward pool
-    /// before the configured minimum runway. Reverts with `RateTooHigh` above
-    /// `MAX_RATE_BPS`.
-    pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultOpsError> {
-        admin::require_admin(&env)?;
-        if rate_bps > balance::MAX_RATE_BPS
-            || !crate::reward_rate_ceiling::within_ceiling(&env, rate_bps)
-        {
-            return Err(VaultOpsError::RateTooHigh);
-        }
-        // Runway is evaluated against the *new* rate, before it is applied.
-        enforce_runway(&env, rate_bps)?;
-
-        let old_rate = balance::get_reward_rate_bps(&env);
-        balance::set_reward_rate_bps(&env, rate_bps);
-        balance::record_rate_change(&env, old_rate, rate_bps);
-        events::rate_changed(&env, old_rate, rate_bps);
-        Ok(())
-    }
-
     /// Admin: configure the minimum reward-pool runway, in ledgers, required
     /// by `set_reward_rate_bps`. `0` disables the guard. Non-zero values below
     /// `MIN_RUNWAY_LEDGERS_FLOOR` (one day) revert with `InvalidRunway`.
@@ -146,11 +125,6 @@ impl VaultContract {
     /// Read-only: the configured minimum runway in ledgers (`0` = disabled).
     pub fn get_min_runway_ledgers(env: Env) -> u32 {
         read_min_runway_ledgers(&env)
-    }
-
-    /// Read-only: the current annual reward rate in basis points.
-    pub fn get_reward_rate_bps(env: Env) -> u32 {
-        balance::get_reward_rate_bps(&env)
     }
 
     /// Read-only: projected reward-pool runway at the current rate and TVL,

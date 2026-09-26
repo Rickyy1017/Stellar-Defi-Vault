@@ -16,7 +16,7 @@
 
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
-use crate::vault::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 const ACTIVITY_LOG_KEY: Symbol = symbol_short!("act_log");
 

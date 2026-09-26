@@ -17,7 +17,7 @@ use crate::admin;
 use crate::balance;
 use crate::errors::VaultError;
 use crate::events;
-use crate::vault::{VaultContract, LEDGERS_PER_DAY};
+use crate::vault::{VaultContract, VaultContractClient, LEDGERS_PER_DAY};
 
 // ── Issue #543: APY history ─────────────────────────────────────────────────
 

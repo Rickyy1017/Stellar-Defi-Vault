@@ -10,7 +10,7 @@ use crate::admin;
 use crate::balance;
 use crate::errors::VaultError;
 use crate::events;
-use crate::vault::{VaultContract, CONTRACT_VERSION};
+use crate::vault::{VaultContract, VaultContractClient, CONTRACT_VERSION};
 
 const RAMP_KEY: Symbol = symbol_short!("rate_rmp");
 const FEE_OVERRIDE_KEY: Symbol = symbol_short!("tok_fee");
