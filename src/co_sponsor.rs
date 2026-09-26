@@ -14,11 +14,12 @@
 //!
 //! Raw `Symbol`-keyed storage, matching `balance.rs`.
 
-use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contractimpl, contracttype, symbol_short, token, Address, Env, Symbol};
 
 use crate::admin;
-use crate::errors::VaultOverflowError;
+use crate::errors::VaultFeature2Error;
 use crate::balance;
+use crate::vault::VaultContractClient;
 use crate::VaultContract;
 
 const CO_SPONSOR_KEY: Symbol = symbol_short!("co_spg");
@@ -83,13 +84,13 @@ pub fn distribute_matched_reward(
     env: &Env,
     sponsor: &Address,
     base_reward: i128,
-) -> Result<i128, VaultOverflowError> {
+) -> Result<i128, VaultFeature2Error> {
     let record = get_co_sponsor(env, sponsor)
-        .ok_or(VaultOverflowError::PositionNotFound)?;
+        .ok_or(VaultFeature2Error::PositionNotFound)?;
 
     let current = env.ledger().sequence();
     if record.expires_at <= current {
-        return Err(VaultOverflowError::AlreadyInitialized);
+        return Err(VaultFeature2Error::SponsorExpired);
     }
 
     let fund = get_co_sponsor_fund(env, sponsor);
@@ -100,9 +101,9 @@ pub fn distribute_matched_reward(
     // Matched reward = base_reward * match_bps / 10000, capped by fund.
     let matched = base_reward
         .checked_mul(record.match_bps as i128)
-        .ok_or(VaultOverflowError::ArithmeticError)?
+        .ok_or(VaultFeature2Error::ArithmeticError)?
         .checked_div(10_000)
-        .ok_or(VaultOverflowError::ArithmeticError)?;
+        .ok_or(VaultFeature2Error::ArithmeticError)?;
 
     let actual = matched.min(fund);
     if actual > 0 {
@@ -112,7 +113,7 @@ pub fn distribute_matched_reward(
     Ok(actual)
 }
 
-#[cfg_attr(not(feature = "testutils"), contractimpl)]
+#[contractimpl]
 impl VaultContract {
     /// Admin approves a sponsor to contribute matched rewards.
     /// `match_bps` is the percentage of base reward to match (100 = 1%).
@@ -122,16 +123,16 @@ impl VaultContract {
         sponsor: Address,
         match_bps: u32,
         expires_at: u32,
-    ) -> Result<(), VaultOverflowError> {
+    ) -> Result<(), VaultFeature2Error> {
         admin::require_admin(&env)?;
 
         if match_bps == 0 || match_bps > 10_000 {
-            return Err(VaultOverflowError::InvalidRecoveryConfig);
+            return Err(VaultFeature2Error::InvalidRecoveryConfig);
         }
 
         let current = env.ledger().sequence();
         if expires_at <= current {
-            return Err(VaultOverflowError::InvalidRecoveryConfig);
+            return Err(VaultFeature2Error::InvalidRecoveryConfig);
         }
 
         let record = CoSponsor {
@@ -155,29 +156,24 @@ impl VaultContract {
         env: Env,
         sponsor: Address,
         amount: i128,
-    ) -> Result<(), VaultOverflowError> {
+    ) -> Result<(), VaultFeature2Error> {
         // Verify the caller is the sponsor.
-        if sponsor != env_invoker(&env) {
-            return Err(VaultOverflowError::Unauthorized);
-        }
+        sponsor.require_auth();
 
         if amount <= 0 {
-            return Err(VaultOverflowError::ZeroAmount);
+            return Err(VaultFeature2Error::ZeroAmount);
         }
 
         if !is_active_sponsor(&env, &sponsor) {
-            return Err(VaultOverflowError::AlreadyInitialized);
+            return Err(VaultFeature2Error::SponsorExpired);
         }
 
         // Transfer tokens from sponsor to contract.
         // The sponsor must have approved the contract to spend their tokens.
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&symbol_short!("token"))
-            .ok_or(VaultOverflowError::NotInitialized)?;
+        let token_addr = VaultContract::token_address(&env)
+            .map_err(|_| VaultFeature2Error::NotInitialized)?;
 
-        let token_client = crate::vault::VaultContractClient::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&sponsor, &env.current_contract_address(), &amount);
 
         let current_fund = get_co_sponsor_fund(&env, &sponsor);
@@ -189,10 +185,4 @@ impl VaultContract {
         );
         Ok(())
     }
-}
-
-/// Helper to get the transaction invoker address. In Soroban, this is the
-/// address that authorized the invocation.
-fn env_invoker(env: &Env) -> Address {
-    env.invoker()
 }

@@ -55,7 +55,7 @@ pub fn get_decay_bps(env: &Env) -> u32 {
 pub fn get_last_interaction(env: &Env, user: &Address) -> u32 {
     env.storage()
         .persistent()
-        .get(&symbol_short!("ina_li"), &user)
+        .get(&(symbol_short!("ina_li"), user.clone()))
         .unwrap_or(0)
 }
 
@@ -63,7 +63,7 @@ pub fn get_last_interaction(env: &Env, user: &Address) -> u32 {
 pub fn record_interaction(env: &Env, user: &Address) {
     env.storage()
         .persistent()
-        .set(&symbol_short!("ina_li"), &user, &env.ledger().sequence());
+        .set(&(symbol_short!("ina_li"), user.clone()), &env.ledger().sequence());
 }
 
 /// Calculate the decay multiplier for a user based on inactivity.

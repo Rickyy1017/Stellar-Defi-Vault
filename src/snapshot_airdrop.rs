@@ -8,10 +8,10 @@
 //!
 //! Raw `Symbol`-keyed persistent storage, matching `balance.rs`.
 
-use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{contractimpl, contracttype, symbol_short, token, Address, Env, Symbol};
 
 use crate::admin;
-use crate::errors::VaultOverflowError;
+use crate::errors::VaultFeature2Error;
 use crate::vault::VaultContractClient;
 use crate::VaultContract;
 
@@ -70,7 +70,7 @@ fn mark_claimed(env: &Env, user: &Address, airdrop_id: u32) {
     );
 }
 
-#[cfg_attr(not(feature = "testutils"), contractimpl)]
+#[contractimpl]
 impl VaultContract {
     /// Admin creates a new airdrop keyed to a past snapshot ledger.
     /// The snapshot_ledger must be in the past.
@@ -80,16 +80,16 @@ impl VaultContract {
         token: Address,
         total_amount: i128,
         snapshot_ledger: u32,
-    ) -> Result<u32, VaultOverflowError> {
+    ) -> Result<u32, VaultFeature2Error> {
         admin::require_admin(&env)?;
 
         if total_amount <= 0 {
-            return Err(VaultOverflowError::ZeroAmount);
+            return Err(VaultFeature2Error::ZeroAmount);
         }
 
         let current_ledger = env.ledger().sequence();
         if snapshot_ledger >= current_ledger {
-            return Err(VaultOverflowError::InvalidRecoveryConfig);
+            return Err(VaultFeature2Error::InvalidRecoveryConfig);
         }
 
         // Snapshot the total weight at the given ledger.
@@ -126,16 +126,16 @@ impl VaultContract {
         env: Env,
         user: Address,
         airdrop_id: u32,
-    ) -> Result<i128, VaultOverflowError> {
+    ) -> Result<i128, VaultFeature2Error> {
         let record = get_airdrop(&env, airdrop_id)
-            .ok_or(VaultOverflowError::PositionNotFound)?;
+            .ok_or(VaultFeature2Error::PositionNotFound)?;
 
         if has_claimed(&env, &user, airdrop_id) {
-            return Err(VaultOverflowError::AlreadyInitialized);
+            return Err(VaultFeature2Error::AlreadyClaimed);
         }
 
         if record.total_weight_at_snapshot <= 0 {
-            return Err(VaultOverflowError::ZeroAmount);
+            return Err(VaultFeature2Error::ZeroAmount);
         }
 
         // Look up user's weight at the snapshot ledger.
@@ -146,18 +146,18 @@ impl VaultContract {
             .unwrap_or(0);
 
         if user_weight <= 0 {
-            return Err(VaultOverflowError::InsufficientStake);
+            return Err(VaultFeature2Error::InsufficientStake);
         }
 
         // Calculate proportional payout using checked arithmetic.
         let payout = user_weight
             .checked_mul(record.total_amount)
-            .ok_or(VaultOverflowError::ArithmeticError)?
+            .ok_or(VaultFeature2Error::ArithmeticError)?
             .checked_div(record.total_weight_at_snapshot)
-            .ok_or(VaultOverflowError::ArithmeticError)?;
+            .ok_or(VaultFeature2Error::ArithmeticError)?;
 
         if payout <= 0 {
-            return Err(VaultOverflowError::ZeroAmount);
+            return Err(VaultFeature2Error::ZeroAmount);
         }
 
         mark_claimed(&env, &user, airdrop_id);
@@ -169,7 +169,7 @@ impl VaultContract {
 
         // Transfer tokens from the contract to the user.
         // The admin must have funded the contract with the airdrop token beforehand.
-        let token_client = crate::vault::VaultContractClient::new(&env, &record.token);
+        let token_client = token::Client::new(&env, &record.token);
         token_client.transfer(&env.current_contract_address(), &user, &payout);
 
         env.events().publish(

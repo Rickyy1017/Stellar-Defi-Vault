@@ -11,10 +11,9 @@
 
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol};
 
-use crate::admin;
-use crate::errors::VaultOverflowError;
+use crate::errors::VaultFeature2Error;
 use crate::balance;
-use crate::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 const SCHEDULED_EXIT_KEY: Symbol = symbol_short!("sch_exit");
 
@@ -47,16 +46,16 @@ fn remove_scheduled_exit(env: &Env, user: &Address) {
         .remove(&(SCHEDULED_EXIT_KEY, user.clone()));
 }
 
-#[cfg_attr(not(feature = "testutils"), contractimpl)]
+#[contractimpl]
 impl VaultContract {
     /// Records the user's intended exit ledger. Must be in the future.
     /// Overwrites any existing schedule for this user.
-    pub fn schedule_exit(env: Env, user: Address, target_ledger: u32) -> Result<(), VaultOverflowError> {
-        admin::require_auth(&env, &user)?;
+    pub fn schedule_exit(env: Env, user: Address, target_ledger: u32) -> Result<(), VaultFeature2Error> {
+        user.require_auth();
 
         let current_ledger = env.ledger().sequence();
         if target_ledger <= current_ledger {
-            return Err(VaultOverflowError::InvalidRecoveryConfig);
+            return Err(VaultFeature2Error::InvalidRecoveryConfig);
         }
 
         let record = ScheduledExit {
@@ -75,23 +74,30 @@ impl VaultContract {
     /// Callable by anyone once `target_ledger` is reached. Withdraws the
     /// user's full position. Reverts if the target ledger has not arrived yet
     /// or if no schedule exists.
-    pub fn execute_scheduled_exit(env: Env, user: Address) -> Result<(), VaultOverflowError> {
+    pub fn execute_scheduled_exit(env: Env, user: Address) -> Result<(), VaultFeature2Error> {
         let record = get_scheduled_exit(&env, &user)
-            .ok_or(VaultOverflowError::PositionNotFound)?;
+            .ok_or(VaultFeature2Error::PositionNotFound)?;
 
         let current_ledger = env.ledger().sequence();
         if current_ledger < record.target_ledger {
-            return Err(VaultOverflowError::InvalidRecoveryConfig);
+            return Err(VaultFeature2Error::InvalidRecoveryConfig);
         }
 
         // Remove the schedule before executing so it cannot be re-triggered.
         remove_scheduled_exit(&env, &user);
 
-        // Withdraw the user's full position via the core vault.
+        // Burn the user's full share position and unwind the accounting
+        // in-place (the token leg is settled through the normal withdraw
+        // flow by the caller).
         let shares = balance::get_shares(&env, &user);
         if shares > 0 {
-            balance::burn_shares(&env, &user, shares)?;
-            // The actual token transfer is handled by the vault's withdraw flow.
+            let total_shares = balance::get_total_shares(&env);
+            let total_deposited = balance::get_total_deposited(&env);
+            let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+                .ok_or(VaultFeature2Error::ArithmeticError)?;
+            balance::set_shares(&env, &user, 0);
+            balance::set_total_shares(&env, total_shares - shares);
+            balance::set_total_deposited(&env, total_deposited - amount);
         }
 
         env.events().publish(
@@ -102,11 +108,11 @@ impl VaultContract {
     }
 
     /// User can cancel their schedule before it triggers.
-    pub fn cancel_scheduled_exit(env: Env, user: Address) -> Result<(), VaultOverflowError> {
-        admin::require_auth(&env, &user)?;
+    pub fn cancel_scheduled_exit(env: Env, user: Address) -> Result<(), VaultFeature2Error> {
+        user.require_auth();
 
         let record = get_scheduled_exit(&env, &user)
-            .ok_or(VaultOverflowError::PositionNotFound)?;
+            .ok_or(VaultFeature2Error::PositionNotFound)?;
 
         remove_scheduled_exit(&env, &user);
 

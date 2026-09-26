@@ -20,50 +20,48 @@ pub mod vault;
 // file. `DataKey` is at Soroban's 50-variant cap for `#[contracttype]` enums,
 // so all of them use raw `Symbol`-keyed storage as `balance.rs` does.
 pub mod vesting_cliff; // issue #287 — reward vesting cliff
-pub mod vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log
-pub mod vault_extensions_538_541; // issues #538-#541 — version, token fee, rate ramp, memo
-pub mod vault_extensions_542_545;
-pub mod vault_extensions_498_501; // issues #498-#501
-pub mod vault_extensions_502_505; // issues #502-#505 — withdrawal queue, timelock, compound, tokenize // issues #542-#545 — seed liquidity, APY history, low-balance alert, notifications
+pub use vault::vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::vault_extensions_538_541; // issues #538-#541 — version, token fee, rate ramp, memo // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::vault_extensions_542_545; // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::vault_extensions_498_501; // issues #498-#501 // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::vault_extensions_502_505; // issues #502-#505 — withdrawal queue, timelock, compound, tokenize // issues #542-#545 — seed liquidity, APY history, low-balance alert, notifications // child of `vault` — see the note at the bottom of vault.rs
 pub mod minimum_unstake_amount; // issue #441 — minimum unstake amount
 pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
 pub mod position_value_appreciation_log; // issue #469 — position value appreciation log
-pub mod position_health_auto_recovery; // issue #459 — position health auto-recovery
-pub mod lockdrop_campaign; // issue #460 — lockdrop campaign
-pub mod proof_of_humanity_hook; // issue #461 — proof-of-humanity hook
-pub mod roadmap_voting; // issue #462 — roadmap voting
-pub mod staker_region_tag; // issue #430 — voluntary staker region tags
-pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph
-pub mod staker_favor_rounding; // issue #457 — always round in the staker's favor
-pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
-pub mod time_locked_admin_proposal; // issue #455 — time-locked admin config-change announcements
-pub mod meta_staking; // meta-staking layer — restake reward tokens for a bonus meta-reward rate
-pub mod batch_vote; // governance batch voting (issue #160)
-pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit
+pub use vault::position_health_auto_recovery; // issue #459 — position health auto-recovery // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::lockdrop_campaign; // issue #460 — lockdrop campaign // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::proof_of_humanity_hook; // issue #461 — proof-of-humanity hook // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::roadmap_voting; // issue #462 — roadmap voting // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::staker_region_tag; // issue #430 — voluntary staker region tags // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::staker_favor_rounding; // issue #457 — always round in the staker's favor // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::daily_community_tip; // issue #458 — daily stake-weighted featured tip vote // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::time_locked_admin_proposal; // issue #455 — time-locked admin config-change announcements // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::meta_staking; // meta-staking layer — restake reward tokens for a bonus meta-reward rate // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::batch_vote; // governance batch voting (issue #160) // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit // child of `vault` — see the note at the bottom of vault.rs
 pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
 pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
 pub mod vault_extensions_546_549; // issues #546-#549 — positions cap, precision, large-deposit lock, min funding
 
 // Issues #526-#529: scheduled exit, snapshot airdrop, external price oracle, co-sponsor.
-pub mod scheduled_exit; // issue #526 — scheduled self-withdrawal
-pub mod snapshot_airdrop; // issue #527 — snapshot-based airdrop distribution
-pub mod external_price_oracle; // issue #528 — external price oracle for collateral valuation
-pub mod co_sponsor; // issue #529 — third-party reward matching via co-sponsors
+pub use vault::scheduled_exit; // issue #526 — scheduled self-withdrawal // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::snapshot_airdrop; // issue #527 — snapshot-based airdrop distribution // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::external_price_oracle; // issue #528 — external price oracle for collateral valuation // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::co_sponsor; // issue #529 — third-party reward matching via co-sponsors // child of `vault` — see the note at the bottom of vault.rs
 
 // Issues #530-#533.
-pub mod pause_grace_period; // issue #533 — max pause duration + forced unpause
-pub mod reward_rate_ceiling; // issue #532 — lower-only max reward rate ceiling
-pub mod invariants; // issue #531 — core accounting invariant checker
-pub mod activity_log; // issue #530 — per-user deposit/withdrawal history
+pub use vault::pause_grace_period; // issue #533 — max pause duration + forced unpause // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::reward_rate_ceiling; // issue #532 — lower-only max reward rate ceiling // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::invariants; // issue #531 — core accounting invariant checker // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::activity_log; // issue #530 — per-user deposit/withdrawal history // child of `vault` — see the note at the bottom of vault.rs
 
 // Pool insights, reward-runway guard, and time-delayed admin recovery.
-pub mod pool_insights; // pool summary + rounding-policy transparency
-pub mod runway_guard; // set_reward_rate_bps runway safety rail
-pub mod admin_recovery; // long-delay admin key-loss recovery
-pub mod ttl_management; // issue #589 - storage TTL management
-pub mod foreign_token_sweep; // issue #590 - foreign token rescue
+pub use vault::pool_insights; // pool summary + rounding-policy transparency // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::runway_guard; // set_reward_rate_bps runway safety rail // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::admin_recovery; // long-delay admin key-loss recovery // child of `vault` — see the note at the bottom of vault.rs
 
 // Pre-existing modules that `vault.rs` already calls into (e.g. `do_unstake`'s
 // `community_treasury::route_fee_revenue` / `position_mirroring::maybe_mirror_action`)
@@ -74,7 +72,17 @@ pub mod claim_fee;
 pub mod community_treasury;
 pub mod mev_claim_protection;
 pub mod peg_stabilization;
-pub mod position_mirroring;
+pub use vault::position_mirroring; // child of `vault` — see the note at the bottom of vault.rs
+
+// More pre-existing modules that `vault.rs` / `runway_guard.rs` /
+// `vault_extensions_542_545.rs` call into but that were never declared here,
+// leaving `main` unable to compile. `access_roles` (issue #513) additionally
+// backs `dynamic_reward_rate` (issue #510). Wired in as a prerequisite to
+// building/testing the issue #593 error-handling refactor.
+pub use vault::access_roles; // issue #513 — role-based access control // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::dynamic_reward_rate; // issue #510 — utilization-driven reward rate // child of `vault` — see the note at the bottom of vault.rs
+pub use vault::keeper_registry; // admin-approved keeper registry // child of `vault` — see the note at the bottom of vault.rs
+pub mod transfer_safety; // issue #512 — fee-on-transfer token safety
 
 #[cfg(not(feature = "vault-wasm"))]
 pub use nft::StakeReceiptNFT;
@@ -138,10 +146,6 @@ mod test_issues_605_608;
 mod test_issues_498_501;
 #[cfg(test)]
 mod test_issues_502_505;
-pub mod vault_extensions_490_493;
-#[cfg(test)]
-mod test_issues_490_493;
 
-pub mod migration_path; // vault v2 migration: set_migration_target, migrate_position
-pub mod circuit_breaker; // single-tx withdrawal circuit breaker: set_circuit_breaker_threshold_bps
-pub mod withdrawal_cooldown; // withdrawal cooldown: set_withdrawal_cooldown, request_withdrawal, execute_withdrawal
+#[cfg(test)]
+mod test_issue_593; // issue #593 — typed error codes replace ad-hoc panics

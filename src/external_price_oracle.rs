@@ -12,12 +12,21 @@
 use soroban_sdk::{contractimpl, symbol_short, Address, Env, Symbol};
 
 use crate::admin;
-use crate::errors::VaultOverflowError;
+use crate::errors::VaultFeature2Error;
 use crate::balance;
-use crate::vault::VaultContractClient;
-use crate::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 const ORACLE_KEY: Symbol = symbol_short!("ext_orcl");
+
+/// Client for the standard price-feed interface the registered oracle must
+/// implement: `fn get_price(token: Address) -> i128`, returning the price in
+/// the smallest unit (e.g. cents). Only the generated client is called; the
+/// trait itself just declares that client's shape.
+#[allow(dead_code)]
+#[soroban_sdk::contractclient(name = "PriceOracleClient")]
+pub trait PriceOracleInterface {
+    fn get_price(env: Env, token: Address) -> i128;
+}
 
 /// Register an oracle contract implementing a standard price-feed interface.
 pub fn set_oracle(env: &Env, oracle: &Address) {
@@ -29,10 +38,10 @@ pub fn get_oracle(env: &Env) -> Option<Address> {
     env.storage().instance().get(&ORACLE_KEY)
 }
 
-#[cfg_attr(not(feature = "testutils"), contractimpl)]
+#[contractimpl]
 impl VaultContract {
     /// Admin registers an oracle contract for collateral valuation.
-    pub fn set_price_oracle(env: Env, oracle: Address) -> Result<(), VaultOverflowError> {
+    pub fn set_price_oracle(env: Env, oracle: Address) -> Result<(), VaultFeature2Error> {
         admin::require_admin(&env)?;
 
         set_oracle(&env, &oracle);
@@ -45,11 +54,11 @@ impl VaultContract {
     }
 
     /// Returns the user's position value in USD by combining the local
-    /// `preview_redeem` output with the oracle's current price.
-    /// Reverts with `OracleNotConfigured` if no oracle is set.
-    pub fn get_position_value_usd(env: Env, user: Address) -> Result<i128, VaultOverflowError> {
+    /// share balance with the oracle's current price.
+    /// Reverts with `NoOracleConfigured` if no oracle is set.
+    pub fn get_position_value_usd(env: Env, user: Address) -> Result<i128, VaultFeature2Error> {
         let oracle_addr = get_oracle(&env)
-            .ok_or(VaultOverflowError::NoOracleConfigured)?;
+            .ok_or(VaultFeature2Error::NoOracleConfigured)?;
 
         // Get the user's redeemable value in the vault's token.
         let shares = balance::get_shares(&env, &user);
@@ -57,26 +66,17 @@ impl VaultContract {
             return Ok(0);
         }
 
-        // Call the oracle's get_price() function to get the price per token in USD.
-        // The oracle contract must implement: fn get_price(token: Address) -> i128
-        // returning the price in the smallest unit (e.g. cents).
-        let token_addr = env
-            .storage()
-            .instance()
-            .get(&symbol_short!("token"))
-            .ok_or(VaultOverflowError::NotInitialized)?;
+        let token_addr = VaultContract::token_address(&env)
+            .map_err(|_| VaultFeature2Error::NotInitialized)?;
 
-        let oracle_client = VaultContractClient::new(&env, &oracle_addr);
-        let price_per_token: i128 = oracle_client
-            .try_get_price(&token_addr)
-            .map_err(|_| VaultOverflowError::ArithmeticError)?
-            .ok_or(VaultOverflowError::ArithmeticError)?;
+        let price_per_token: i128 = PriceOracleClient::new(&env, &oracle_addr)
+            .get_price(&token_addr);
 
         // Calculate total value: shares * price_per_token.
         // Assumes price is in 7-decimal fixed point (same as the vault's token).
         let value_usd = shares
             .checked_mul(price_per_token)
-            .ok_or(VaultOverflowError::ArithmeticError)?;
+            .ok_or(VaultFeature2Error::ArithmeticError)?;
 
         Ok(value_usd)
     }
