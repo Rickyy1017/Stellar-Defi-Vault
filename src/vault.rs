@@ -2439,7 +2439,18 @@ impl VaultContract {
         Ok(shares)
     }
 
-    fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultError> {
+
+    pub(crate) fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultError> {
+        if crate::vault_extensions_502_505::is_withdrawal_queue_enabled(env) {
+            crate::vault_extensions_502_505::enqueue_withdrawal(env, staker.clone(), shares);
+            // Deduct shares so they can't queue the same shares twice, but don't pay out.
+            let user_shares = balance::get_shares(env, staker);
+            if user_shares < shares {
+                return Err(VaultError::InsufficientShares);
+            }
+            balance::set_shares(env, staker, user_shares - shares);
+            return Ok(0); // Payout is deferred
+        }
         if shares <= 0 {
             return Err(VaultError::ZeroAmount);
         }
