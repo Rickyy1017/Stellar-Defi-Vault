@@ -122,6 +122,17 @@ fn inactive_user_score_decays() {
 }
 
 #[test]
+fn apply_reputation_decay_requires_affected_user_auth() {
+    let f = Fixture::new();
+    f.vault.stake(&f.alice, &5_000);
+    f.vault.set_reputation_decay_rate(&100_u32, &10_000_u32);
+    set_ledger(&f.env, 11_000);
+    f.env.set_auths(&[]);
+
+    assert!(f.vault.try_apply_reputation_decay(&f.alice).is_err());
+}
+
+#[test]
 fn active_user_score_unchanged() {
     let f = Fixture::new();
     f.vault.stake(&f.alice, &5_000);

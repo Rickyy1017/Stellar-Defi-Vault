@@ -7,6 +7,7 @@ use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
     token, Address, Bytes, Env, Symbol, TryFromVal, Vec,
 };
+use proptest::{prelude::*, test_runner::Config as ProptestConfig};
 
 use crate::{
     errors::{VaultError, VaultExtError, VaultFeatureError},
@@ -206,6 +207,56 @@ impl<'a> VaultFixture<'a> {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 32,
+        ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn randomized_share_invariants_hold(
+        operations in prop::collection::vec((0_u8..2, 0_u8..3, 1_u32..100_001), 1..80)
+    ) {
+        let f = VaultFixture::new();
+
+        for (user_index, operation, raw_amount) in operations {
+            let user = if user_index % 2 == 0 {
+                f.alice.clone()
+            } else {
+                f.bob.clone()
+            };
+            let amount = i128::from(raw_amount);
+
+            match operation {
+                0 => {
+                    f.vault.deposit(&user, &amount);
+                }
+                1 => {
+                    let user_shares = f.vault.shares_of(&user);
+                    if user_shares > 0 {
+                        let shares = (amount % user_shares) + 1;
+                        f.vault.withdraw(&user, &shares);
+                    }
+                }
+                _ => {
+                    f.vault.claim(&user);
+                }
+            }
+
+            let (total_shares, total_deposited) = f.vault.vault_state();
+            let user_shares = f.vault.shares_of(&f.alice) + f.vault.shares_of(&f.bob);
+            prop_assert_eq!(total_shares, user_shares);
+            prop_assert!(total_shares >= 0);
+            prop_assert!(total_deposited >= 0);
+            if total_shares > 0 {
+                prop_assert_eq!(f.vault.preview_redeem(&total_shares), total_deposited);
+            } else {
+                prop_assert_eq!(total_deposited, 0);
+            }
+        }
+    }
+}
+
 // ── initialization ────────────────────────────────────────────────────────────
 
 #[test]
@@ -226,6 +277,40 @@ fn test_double_initialize_fails() {
         .vault
         .try_initialize(&f.admin, &token_addr, &0_u32, &None, &None);
     assert_eq!(result, Err(Ok(VaultError::AlreadyInitialized)));
+}
+
+#[test]
+fn test_initialize_rejects_contract_addresses_for_admin_and_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (token_addr, _, _) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+
+    assert_eq!(
+        vault.try_initialize(&vault_id, &token_addr, &0_u32, &None, &None),
+        Err(Ok(VaultError::InvalidAddress))
+    );
+    assert_eq!(
+        vault.try_initialize(&admin, &vault_id, &0_u32, &None, &None),
+        Err(Ok(VaultError::InvalidAddress))
+    );
+}
+
+#[test]
+fn test_initialize_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (token_addr, _, _) = create_token(&env, &admin);
+    let vault_id = env.register_contract(None, VaultContract);
+    let vault = VaultContractClient::new(&env, &vault_id);
+    env.set_auths(&[]);
+
+    assert!(vault
+        .try_initialize(&admin, &token_addr, &0_u32, &None, &None)
+        .is_err());
 }
 
 #[test]
@@ -311,6 +396,12 @@ fn test_deposit_zero_fails() {
 }
 
 #[test]
+fn test_deposit_rejects_missing_depositor_auth() {
+    let f = VaultFixture::with_mock_auths(false);
+    assert!(f.vault.try_deposit(&f.alice, &1_000).is_err());
+}
+
+#[test]
 fn test_deposit_negative_fails() {
     let f = VaultFixture::new();
     let result = f.vault.try_deposit(&f.alice, &-100);
@@ -362,6 +453,16 @@ fn test_withdraw_zero_fails() {
 
     let result = f.vault.try_withdraw(&f.alice, &0);
     assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
+}
+
+#[test]
+fn test_withdraw_and_claim_reject_missing_user_auth() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &10_000);
+    f.env.set_auths(&[]);
+
+    assert!(f.vault.try_withdraw(&f.alice, &1_000).is_err());
+    assert!(f.vault.try_claim(&f.alice).is_err());
 }
 
 #[test]
@@ -510,6 +611,31 @@ fn test_add_yield_requires_admin_auth() {
 }
 
 #[test]
+fn test_admin_entrypoint_rejects_mismatched_admin_parameter() {
+    let f = VaultFixture::new();
+    let result = f.vault.try_set_fee_buyback_enabled(&f.bob, &true);
+    assert_eq!(result, Err(Ok(VaultFeatureError::Unauthorized)));
+}
+
+#[test]
+fn test_export_state_rejects_mismatched_admin_parameter() {
+    let f = VaultFixture::new();
+    let result = f.vault.try_export_state(&f.bob);
+    assert_eq!(result, Err(Ok(VaultExtError::Unauthorized)));
+}
+
+#[test]
+fn test_import_state_rejects_signer_different_from_exported_admin() {
+    let f = VaultFixture::new();
+    let exported_state = f.vault.export_state(&f.admin);
+    let target_id = f.env.register_contract(None, VaultContract);
+    let target = VaultContractClient::new(&f.env, &target_id);
+
+    let result = target.try_import_state(&f.bob, &exported_state);
+    assert_eq!(result, Err(Ok(VaultExtError::Unauthorized)));
+}
+
+#[test]
 fn test_add_yield_paused_blocks() {
     let f = VaultFixture::new();
     f.token_admin.mint(&f.admin, &50_000);
@@ -655,6 +781,7 @@ fn test_deposit_emits_event() {
 
     assert_eq!(deposit_events.len(), 1);
     let event = &deposit_events[0];
+    assert_eq!(event.1.len(), 2);
     assert_eq!(
         Address::try_from_val(&f.env, &event.1.get(1).unwrap()).unwrap(),
         f.alice
@@ -678,6 +805,7 @@ fn test_withdraw_emits_event() {
 
     assert_eq!(withdraw_events.len(), 1);
     let event = &withdraw_events[0];
+    assert_eq!(event.1.len(), 2);
     assert_eq!(
         Address::try_from_val(&f.env, &event.1.get(1).unwrap()).unwrap(),
         f.alice
@@ -702,6 +830,11 @@ fn test_pause_emits_event() {
         .collect();
 
     assert_eq!(paused_events.len(), 1);
+    assert_eq!(paused_events[0].1.len(), 2);
+    assert_eq!(
+        Address::try_from_val(&f.env, &paused_events[0].1.get(1).unwrap()).unwrap(),
+        f.admin
+    );
 }
 
 #[test]
@@ -721,6 +854,11 @@ fn test_unpause_emits_event() {
         .collect();
 
     assert_eq!(unpaused_events.len(), 1);
+    assert_eq!(unpaused_events[0].1.len(), 2);
+    assert_eq!(
+        Address::try_from_val(&f.env, &unpaused_events[0].1.get(1).unwrap()).unwrap(),
+        f.admin
+    );
     let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &unpaused_events[0].2).unwrap();
     let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(0).unwrap()).unwrap();
 }
@@ -741,8 +879,52 @@ fn test_claim_emits_event() {
         .collect();
 
     assert_eq!(claimed_events.len(), 1);
+    assert_eq!(claimed_events[0].1.len(), 2);
+    assert_eq!(
+        Address::try_from_val(&f.env, &claimed_events[0].1.get(1).unwrap()).unwrap(),
+        f.alice
+    );
     let data_vec = Vec::<soroban_sdk::Val>::try_from_val(&f.env, &claimed_events[0].2).unwrap();
     let _ledger: u32 = u32::try_from_val(&f.env, &data_vec.get(1).unwrap()).unwrap();
+}
+
+#[test]
+fn test_initialize_event_indexes_admin_separately() {
+    let f = VaultFixture::new();
+    let events = f.env.events().all();
+    let initialized: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "init"))
+        .collect();
+
+    assert_eq!(initialized.len(), 1);
+    assert_eq!(initialized[0].1.len(), 2);
+    assert_eq!(
+        Address::try_from_val(&f.env, &initialized[0].1.get(1).unwrap()).unwrap(),
+        f.admin
+    );
+}
+
+#[test]
+fn test_admin_action_event_indexes_actor_before_action_type() {
+    let f = VaultFixture::new();
+    f.vault.set_reward_rate_bps(&1_000);
+    let events = f.env.events().all();
+    let admin_actions: std::vec::Vec<_> = events
+        .into_iter()
+        .filter(|(_, topics, _)| topic_matches(&f.env, topics, "adm_act"))
+        .collect();
+
+    assert_eq!(admin_actions.len(), 1);
+    assert_eq!(admin_actions[0].1.len(), 3);
+    assert_eq!(
+        Address::try_from_val(&f.env, &admin_actions[0].1.get(1).unwrap()).unwrap(),
+        f.admin
+    );
+    assert_eq!(
+        AdminAction::try_from_val(&f.env, &admin_actions[0].1.get(2).unwrap()).unwrap(),
+        AdminAction::SetRewardRate
+    );
 }
 
 #[test]

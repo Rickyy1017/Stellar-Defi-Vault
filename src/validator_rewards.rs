@@ -69,10 +69,14 @@ impl VaultContract {
     /// Only the registered node may call `deposit_validator_rewards`.
     pub fn set_validator_node(env: Env, node_address: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        if node_address == env.current_contract_address() {
+            return Err(VaultError::InvalidAddress);
+        }
         set_validator_node(&env, &node_address);
 
+        let admin = admin::get_admin(&env)?;
         env.events().publish(
-            (symbol_short!("vr_set"),),
+            (symbol_short!("vr_set"), admin),
             (node_address, env.ledger().sequence()),
         );
         Ok(())
@@ -173,8 +177,9 @@ impl VaultContract {
         // Zero the pool. Any rounding dust stays in the contract.
         set_vr_pool(&env, 0);
 
+        let admin = admin::get_admin(&env)?;
         env.events().publish(
-            (symbol_short!("vr_dist"),),
+            (symbol_short!("vr_dist"), admin),
             (distributed, staker_count, env.ledger().sequence()),
         );
         Ok(())

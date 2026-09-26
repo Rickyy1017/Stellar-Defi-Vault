@@ -4,8 +4,20 @@ All events include the current ledger sequence number (`u32`) in their data payl
 that indexers can reconstruct full pool history from events alone.
 
 ## Topic conventions
-- First topic: action symbol (≤ 9 ASCII chars)
-- Second topic (where present): the relevant address (user, admin, etc.)
+
+Every event starts with two indexed topics:
+
+1. `topic[0]`: a stable event-type `Symbol` (at most 9 ASCII characters).
+2. `topic[1]`: the primary affected `Address` (user, administrator, recipient,
+   guarantor, or the vault contract for pool-wide/system events).
+
+Admin audit events use `topic[2]` for the `AdminAction` discriminator. Other
+event data remains in the non-indexed payload; an address may also remain in
+the payload when needed to preserve the event's existing data shape.
+
+Indexers should filter by the event symbol first, then by the address in
+`topic[1]`. Pool-wide events use the current vault contract address in that
+slot because no individual account is the event's primary subject.
 
 ## Event Reference
 
@@ -74,6 +86,7 @@ Emitted when the admin changes the reward rate.
 | Field | Type | Description |
 |-------|------|-------------|
 | topic[0] | Symbol | `"rate_chg"` |
+| topic[1] | Address | vault contract |
 | data.0 | u32 | old rate in basis points |
 | data.1 | u32 | new rate in basis points |
 | data.2 | u32 | ledger sequence |
@@ -94,6 +107,7 @@ Emitted when the admin rescues a non-stake, non-reward token from the vault.
 | Field | Type | Description |
 |-------|------|-------------|
 | topic[0] | Symbol | `"tk_rescue"` |
+| topic[1] | Address | recipient |
 | data.0 | Address | token address rescued |
 | data.1 | i128 | amount rescued |
 | data.2 | Address | recipient address |
@@ -105,7 +119,8 @@ Emitted for on-chain admin audit logging when an admin action is taken.
 | Field | Type | Description |
 |-------|------|-------------|
 | topic[0] | Symbol | `"adm_act"` |
-| topic[1] | AdminAction | admin action type |
+| topic[1] | Address | admin actor |
+| topic[2] | AdminAction | admin action type |
 | data.0 | Address | admin actor |
 | data.1 | u32 | ledger sequence |
 | data.2+ | mixed | action-specific parameters |
@@ -129,3 +144,21 @@ Emitted when the admin sets a new per-transaction withdrawal limit.
 | topic[1] | Address | admin |
 | data.0 | i128 | new limit in shares |
 | data.1 | u32 | ledger sequence |
+
+### Pool-wide event topics
+
+Events that do not have a single user or administrator as their primary
+subject use the vault contract address as `topic[1]`. This applies to:
+`boot_str`, `boot_end`, `act_queue`, `act_exec`, `rate_chg`, `rate_rbk`,
+`auto_ps`, `rfil_alt`, `prop_enct`, `buyback`, `pen_rdst`,
+`halving`, `pool_act`, `pool_dact`, `rwd_act`, `smth_sch`, `smth_rel`,
+`auct_st`, `auct_fin`, `gini_cmp`, `seas_str`, `seas_end`, `snst_chg`,
+`mkt_rsl`, and `rev_dist`.
+
+Other event types index their affected account in `topic[1]`, including
+deposit/withdraw/claim, admin configuration and audit events, governance
+votes, guarantees, validator rewards, content curation, and position/NFT
+operations. For example, `fee_buyb` indexes the admin actor, while `cc_apprv`
+indexes the admin who closed the vote. `ins_dep`, `rd_set`, `vr_set`,
+`vr_dist`, and `updated` likewise index the administrator; `test_ev` indexes
+the vault contract address.

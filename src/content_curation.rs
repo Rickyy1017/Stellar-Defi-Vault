@@ -223,8 +223,9 @@ impl VaultContract {
                 items.set(i, updated.clone());
 
                 if updated.votes_for > updated.votes_against {
+                    let admin = admin::get_admin(&env)?;
                     env.events().publish(
-                        (symbol_short!("cc_apprv"),),
+                        (symbol_short!("cc_apprv"), admin),
                         (
                             content_hash.clone(),
                             updated.votes_for,

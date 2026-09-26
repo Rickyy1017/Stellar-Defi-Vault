@@ -178,13 +178,12 @@ Boost multiplier: 11000 bps
 
 ## Events
 
-| Event | Fields |
-|---|---|
-| `deposit` | `(depositor, amount, shares_minted)` |
-| `withdraw` | `(withdrawer, shares_burned, amount_returned)` |
-| `paused` | `(admin)` |
-| `unpaused` | `(admin)` |
-| `yield_add` | `(admin, amount)` |
+Every emitted event indexes an event-type symbol in topic 0 and its primary
+affected address in topic 1. Pool-wide events use the vault contract address;
+admin audit events additionally index the action type in topic 2.
+
+See [docs/EVENTS.md](./docs/EVENTS.md) for the topic conventions and event
+reference used by off-chain indexers.
 
 ## Roadmap / Open Issues
 
@@ -225,4 +224,3 @@ In fixed-point math, calculating reward using standard division leads to roundin
 
 [MIT](./LICENSE)
 # Stellar-Defi-Vault
-

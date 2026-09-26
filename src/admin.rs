@@ -18,3 +18,12 @@ pub fn require_admin(env: &Env) -> Result<(), VaultError> {
     admin.require_auth();
     Ok(())
 }
+
+pub fn require_admin_as(env: &Env, claimed_admin: &Address) -> Result<(), VaultError> {
+    let admin = get_admin(env)?;
+    if &admin != claimed_admin {
+        return Err(VaultError::Unauthorized);
+    }
+    admin.require_auth();
+    Ok(())
+}

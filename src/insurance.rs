@@ -90,9 +90,12 @@ impl VaultContract {
         coverage_amount: i128,
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        if guarantor == env.current_contract_address() {
+            return Err(VaultError::InvalidAddress);
+        }
 
         if coverage_amount <= 0 {
-            return Err(VaultError::InvalidRewardAmount);
+            return Err(VaultError::ZeroAmount);
         }
         if is_insolvent(&env) {
             // Registering a new guarantor after insolvency would let an admin
@@ -134,7 +137,7 @@ impl VaultContract {
             return Err(VaultError::RelayerNotApproved);
         }
         if amount <= 0 {
-            return Err(VaultError::InvalidRewardAmount);
+            return Err(VaultError::ZeroAmount);
         }
 
         let updated = get_reserve(&env)
@@ -185,7 +188,7 @@ impl VaultContract {
             return Err(VaultError::NotInitialized);
         }
         if amount <= 0 {
-            return Err(VaultError::InvalidRewardAmount);
+            return Err(VaultError::ZeroAmount);
         }
 
         let reserve = get_reserve(&env);
