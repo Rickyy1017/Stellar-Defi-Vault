@@ -80,6 +80,10 @@ pub fn set_emergency_admin(env: &Env, emergency_admin: &Address) -> Result<(), V
     let primary_admin = get_admin(env)?;
     primary_admin.require_auth();
 
+    if emergency_admin == &env.current_contract_address() {
+        return Err(VaultError::InvalidAddress);
+    }
+
     env.storage().instance().set(&symbol_short!("emg_adm"), emergency_admin);
 
     // Enforce requirement 5: Emit event: emergency_admin_set
