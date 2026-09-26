@@ -18,7 +18,7 @@ fn test_issues_502_505() {
     // (mock state setup isn't fully necessary if we just check defaults, 
     // but the endpoints are available on the client now).
     // Test 503: Admin Timelock
-    client.set_timelock_delay(&admin, &100);
+    client.set_legacy_timelock_delay(&admin, &100);
     let action_id = client.queue_admin_action(&admin, &AdminAction::Pause);
     
     // Test 504: Auto Compound

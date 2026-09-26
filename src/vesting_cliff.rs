@@ -67,7 +67,7 @@ pub fn cliff_unlock_ledger_for(env: &Env, user: &Address) -> Option<u32> {
 /// address look permanently locked.
 pub fn is_past_cliff_for(env: &Env, user: &Address) -> bool {
     match cliff_unlock_ledger_for(env, user) {
-        Some(unlock_at) => env.ledger().sequence() >= unlock_at,
+        Some(unlock_at) => crate::ledger_boundary::is_reached(env.ledger().sequence(), unlock_at),
         None => true,
     }
 }
@@ -117,7 +117,6 @@ pub fn reset_cliff_marker(env: &Env, user: &Address) {
         .persistent()
         .remove(&(CLIFF_EVENT_KEY, user.clone()));
 }
-
 
 
 

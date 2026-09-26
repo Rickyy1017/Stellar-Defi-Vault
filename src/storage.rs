@@ -16,8 +16,6 @@ use soroban_sdk::{contracttype, Address, String, Vec};
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
-    ReentrancyGuard,
-    WasmHash,
     Admin,
     Token,
     TotalShares,
@@ -1494,5 +1492,4 @@ pub struct ProposalComment {
     pub stake_weight: i128,
     pub posted_at: u32,
 }
-
 

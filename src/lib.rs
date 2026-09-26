@@ -4,6 +4,8 @@ mod admin;
 mod balance;
 mod errors;
 mod events;
+mod ledger_boundary;
+#[cfg(not(feature = "vault-wasm"))]
 pub mod example_consumer;
 pub mod interface;
 pub mod nft;
@@ -74,6 +76,7 @@ pub mod mev_claim_protection;
 pub mod peg_stabilization;
 pub mod position_mirroring;
 
+#[cfg(not(feature = "vault-wasm"))]
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
 pub use interface::VaultTrait;
@@ -118,6 +121,9 @@ mod test_issue_497; // issue #497 — paused break-glass principal withdrawal
 
 #[cfg(test)]
 mod test_issues_589_590_592;
+
+#[cfg(test)]
+mod test_issues_605_608;
 
 // #[cfg(test)]
 // mod test_issues_463_466;

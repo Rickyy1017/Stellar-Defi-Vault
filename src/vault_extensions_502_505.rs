@@ -5,7 +5,7 @@ use crate::vault::VaultContract;
 use crate::storage::AdminAction;
 use crate::admin;
 use crate::balance;
-use crate::errors::{VaultError, VaultExtError};
+use crate::errors::{PublicApiError, VaultError};
 
 // ----------------------------------------------------------------------------
 // Issue #502: Withdrawal Queue
@@ -67,13 +67,16 @@ impl VaultContract {
     // ------------------------------------------------------------------------
     // Issue #502: Withdrawal Queue
     // ------------------------------------------------------------------------
-    pub fn enable_withdrawal_queue(env: Env, admin: Address, enabled: bool) {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn enable_withdrawal_queue(env: Env, admin: Address, enabled: bool) -> Result<(), PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         env.storage().instance().set(&WQ_ENABLED, &enabled);
+        Ok(())
     }
     
     pub fn process_withdrawal_queue(env: Env, admin: Address, max_entries: u32) -> Result<(), VaultError> {
-        admin::require_admin(&env, &admin).unwrap();
+        admin.require_auth();
+        admin::require_admin(&env)?;
         let mut q: Vec<QueueEntry> = env.storage().instance().get(&WQ_QUEUE).unwrap_or(Vec::new(&env));
         let mut processed = 0;
         
@@ -107,16 +110,22 @@ impl VaultContract {
     // ------------------------------------------------------------------------
     // Issue #503: Admin Timelock
     // ------------------------------------------------------------------------
-    pub fn set_timelock_delay(env: Env, admin: Address, ledgers: u32) {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn set_legacy_timelock_delay(env: Env, admin: Address, ledgers: u32) -> Result<(), PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         env.storage().instance().set(&TL_DELAY, &ledgers);
+        Ok(())
     }
     
-    pub fn queue_admin_action(env: Env, admin: Address, action: AdminAction) -> u32 {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn queue_admin_action(env: Env, admin: Address, action: AdminAction) -> Result<u32, PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         let delay: u32 = env.storage().instance().get(&TL_DELAY).unwrap_or(0);
         let action_id: u32 = env.storage().instance().get(&TL_NEXT_ID).unwrap_or(1);
-        env.storage().instance().set(&TL_NEXT_ID, &(action_id + 1));
+        let next_id = action_id
+            .checked_add(1)
+            .ok_or(PublicApiError::ArithmeticError)?;
+        env.storage().instance().set(&TL_NEXT_ID, &next_id);
         
         let queued = QueuedAction {
             action: action.clone(),
@@ -126,34 +135,38 @@ impl VaultContract {
         map.set(action_id, queued);
         env.storage().instance().set(&TL_ACTIONS, &map);
         env.events().publish((symbol_short!("act_queue"),), (action_id, action));
-        action_id
+        Ok(action_id)
     }
     
-    pub fn execute_admin_action(env: Env, admin: Address, action_id: u32) {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn execute_admin_action(env: Env, admin: Address, action_id: u32) -> Result<(), PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         let mut map: soroban_sdk::Map<u32, QueuedAction> = env.storage().instance().get(&TL_ACTIONS).unwrap_or(soroban_sdk::Map::new(&env));
         if let Some(queued) = map.get(action_id) {
             if env.ledger().sequence() < queued.executable_at {
-                panic!("TimelockNotExpired");
+                return Err(PublicApiError::ActionNotYetExecutable);
             }
             env.events().publish((symbol_short!("act_exec"),), (action_id,));
             map.remove(action_id);
             env.storage().instance().set(&TL_ACTIONS, &map);
         } else {
-            panic!("ActionNotFound");
+            return Err(PublicApiError::ActionNotFound);
         }
+        Ok(())
     }
     
-    pub fn cancel_admin_action(env: Env, admin: Address, action_id: u32) {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn cancel_admin_action(env: Env, admin: Address, action_id: u32) -> Result<(), PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         let mut map: soroban_sdk::Map<u32, QueuedAction> = env.storage().instance().get(&TL_ACTIONS).unwrap_or(soroban_sdk::Map::new(&env));
         if map.contains_key(action_id) {
             map.remove(action_id);
             env.storage().instance().set(&TL_ACTIONS, &map);
             env.events().publish((symbol_short!("act_canc"),), (action_id,));
         } else {
-            panic!("ActionNotFound");
+            return Err(PublicApiError::ActionNotFound);
         }
+        Ok(())
     }
 
     // ------------------------------------------------------------------------
@@ -166,10 +179,11 @@ impl VaultContract {
         env.storage().instance().set(&AUTO_COMPOUND, &map);
     }
     
-    pub fn compound(env: Env, user: Address) -> Result<(), VaultError> {
+    pub fn compound(env: Env, user: Address) -> Result<(), PublicApiError> {
+        user.require_auth();
         let map: soroban_sdk::Map<Address, bool> = env.storage().instance().get(&AUTO_COMPOUND).unwrap_or(soroban_sdk::Map::new(&env));
         if !map.get(user.clone()).unwrap_or(false) {
-            panic!("AutoCompoundNotEnabled");
+            return Err(PublicApiError::AutoCompoundDisabled);
         }
         
         let pending = balance::get_accrued_reward(&env, &user);
@@ -181,14 +195,33 @@ impl VaultContract {
             let shares = if total_deposited == 0 {
                 pending
             } else {
-                (pending * total_shares) / total_deposited
+                pending
+                    .checked_mul(total_shares)
+                    .and_then(|value| value.checked_div(total_deposited))
+                    .ok_or(PublicApiError::ArithmeticError)?
             };
             
-            balance::set_shares(&env, &user, balance::get_shares(&env, &user) + shares);
-            balance::set_total_shares(&env, total_shares + shares);
-            balance::set_total_deposited(&env, total_deposited + pending);
+            balance::set_shares(
+                &env,
+                &user,
+                balance::get_shares(&env, &user)
+                    .checked_add(shares)
+                    .ok_or(PublicApiError::ArithmeticError)?,
+            );
+            balance::set_total_shares(
+                &env,
+                total_shares
+                    .checked_add(shares)
+                    .ok_or(PublicApiError::ArithmeticError)?,
+            );
+            balance::set_total_deposited(
+                &env,
+                total_deposited
+                    .checked_add(pending)
+                    .ok_or(PublicApiError::ArithmeticError)?,
+            );
             
-            env.events().publish((symbol_short!("compounded"),), (user, pending, shares, env.ledger().sequence()));
+            env.events().publish((symbol_short!("compound"),), (user, pending, shares, env.ledger().sequence()));
         }
         Ok(())
     }
@@ -196,17 +229,20 @@ impl VaultContract {
     // ------------------------------------------------------------------------
     // Issue #505: Tokenize Position
     // ------------------------------------------------------------------------
-    pub fn tokenize_position(env: Env, user: Address) -> u32 {
+    pub fn tokenize_position(env: Env, user: Address) -> Result<u32, PublicApiError> {
         user.require_auth();
         let shares = balance::get_shares(&env, &user);
         if shares <= 0 {
-            panic!("NoSharesToTokenize");
+            return Err(PublicApiError::PositionNotFound);
         }
         
         balance::set_shares(&env, &user, 0); 
         
         let token_id: u32 = env.storage().instance().get(&NEXT_NFT_ID).unwrap_or(1);
-        env.storage().instance().set(&NEXT_NFT_ID, &(token_id + 1));
+        let next_token_id = token_id
+            .checked_add(1)
+            .ok_or(PublicApiError::ArithmeticError)?;
+        env.storage().instance().set(&NEXT_NFT_ID, &next_token_id);
         
         let mut owns: soroban_sdk::Map<u32, Address> = env.storage().instance().get(&NFT_OWNERS).unwrap_or(soroban_sdk::Map::new(&env));
         owns.set(token_id, user.clone());
@@ -217,15 +253,15 @@ impl VaultContract {
         env.storage().instance().set(&NFT_BALANCES, &bals);
         
         env.events().publish((symbol_short!("tok_pos"),), (user, token_id, shares));
-        token_id
+        Ok(token_id)
     }
     
-    pub fn redeem_position_nft(env: Env, user: Address, token_id: u32) {
+    pub fn redeem_position_nft(env: Env, user: Address, token_id: u32) -> Result<(), PublicApiError> {
         user.require_auth();
         let mut owns: soroban_sdk::Map<u32, Address> = env.storage().instance().get(&NFT_OWNERS).unwrap_or(soroban_sdk::Map::new(&env));
         
         if owns.get(token_id) != Some(user.clone()) {
-            panic!("NotNFTOwner");
+            return Err(PublicApiError::NotNftOwner);
         }
         
         let mut bals: soroban_sdk::Map<u32, i128> = env.storage().instance().get(&NFT_BALANCES).unwrap_or(soroban_sdk::Map::new(&env));
@@ -236,7 +272,11 @@ impl VaultContract {
         env.storage().instance().set(&NFT_OWNERS, &owns);
         env.storage().instance().set(&NFT_BALANCES, &bals);
         
-        balance::set_shares(&env, &user, balance::get_shares(&env, &user) + shares);
-        env.events().publish((symbol_short!("nft_redeem"),), (user, token_id, shares));
+        let restored = balance::get_shares(&env, &user)
+            .checked_add(shares)
+            .ok_or(PublicApiError::ArithmeticError)?;
+        balance::set_shares(&env, &user, restored);
+        env.events().publish((symbol_short!("nft_redm"),), (user, token_id, shares));
+        Ok(())
     }
 }

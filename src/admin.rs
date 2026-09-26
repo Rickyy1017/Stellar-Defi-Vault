@@ -2,15 +2,37 @@ use crate::errors::VaultError;
 use crate::storage::DataKey;
 use soroban_sdk::{symbol_short, Address, Env};
 
+const ADMIN_RENOUNCED_KEY: soroban_sdk::Symbol = symbol_short!("adm_none");
+
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
 }
 
 pub fn get_admin(env: &Env) -> Result<Address, VaultError> {
+    if is_renounced(env) {
+        return Err(VaultError::NoAdmin);
+    }
     env.storage()
         .instance()
         .get(&DataKey::Admin)
         .ok_or(VaultError::NotInitialized)
+}
+
+pub fn is_renounced(env: &Env) -> bool {
+    env.storage().instance().get(&ADMIN_RENOUNCED_KEY).unwrap_or(false)
+}
+
+/// Permanently removes primary and emergency admin authority.
+pub fn renounce(env: &Env, expected_admin: &Address) -> Result<(), VaultError> {
+    let current_admin = get_admin(env)?;
+    if &current_admin != expected_admin {
+        return Err(VaultError::Unauthorized);
+    }
+    expected_admin.require_auth();
+    env.storage().instance().set(&ADMIN_RENOUNCED_KEY, &true);
+    env.storage().instance().remove(&DataKey::Admin);
+    env.storage().instance().remove(&symbol_short!("emg_adm"));
+    Ok(())
 }
 
 /// Sets a new emergency admin address.
