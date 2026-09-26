@@ -4,6 +4,8 @@ mod admin;
 mod balance;
 mod errors;
 mod events;
+mod ledger_boundary;
+#[cfg(not(feature = "vault-wasm"))]
 pub mod example_consumer;
 pub mod interface;
 pub mod nft;
@@ -74,6 +76,7 @@ pub mod mev_claim_protection;
 pub mod peg_stabilization;
 pub mod position_mirroring;
 
+#[cfg(not(feature = "vault-wasm"))]
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
 
@@ -118,6 +121,9 @@ mod test_issue_497; // issue #497 — paused break-glass principal withdrawal
 #[cfg(test)]
 mod test_issues_589_590_592;
 
+#[cfg(test)]
+mod test_issues_605_608;
+
 // #[cfg(test)]
 // mod test_issues_463_466;
 // #[cfg(test)]
@@ -136,7 +142,6 @@ pub mod vault_extensions_490_493;
 #[cfg(test)]
 mod test_issues_490_493;
 
-pub mod multisig_admin; // multi-sig signer management: set_admin_signers, propose_admin_action
 pub mod migration_path; // vault v2 migration: set_migration_target, migrate_position
 pub mod circuit_breaker; // single-tx withdrawal circuit breaker: set_circuit_breaker_threshold_bps
 pub mod withdrawal_cooldown; // withdrawal cooldown: set_withdrawal_cooldown, request_withdrawal, execute_withdrawal

@@ -1,5 +1,8 @@
 ﻿use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
 
+#[cfg(feature = "vault-wasm")]
+use soroban_sdk::contractclient;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -26,9 +29,11 @@ enum NftDataKey {
     Receipt(Address),
 }
 
+#[cfg(not(feature = "vault-wasm"))]
 #[contract]
 pub struct StakeReceiptNFT;
 
+#[cfg(not(feature = "vault-wasm"))]
 #[cfg_attr(not(test), contractimpl)]
 impl StakeReceiptNFT {
     /// Initialize the NFT contract. `minter` is the vault contract allowed to mint/burn.
@@ -98,6 +103,17 @@ impl StakeReceiptNFT {
             .get(&NftDataKey::Receipt(user))
             .ok_or(NftError::NoReceipt)
     }
+}
+
+#[cfg(feature = "vault-wasm")]
+#[contractclient(name = "StakeReceiptNFTClient")]
+pub trait StakeReceiptNFTInterface {
+    fn initialize(env: Env, minter: Address) -> Result<(), NftError>;
+    fn mint(env: Env, to: Address, pool_contract: Address, staked_amount: i128, staked_at_ledger: u32) -> Result<(), NftError>;
+    fn burn(env: Env, user: Address) -> Result<(), NftError>;
+    fn transfer(env: Env, from: Address, to: Address) -> Result<(), NftError>;
+    fn has_receipt(env: Env, user: Address) -> bool;
+    fn get_receipt(env: Env, user: Address) -> Result<Receipt, NftError>;
 }
 
 

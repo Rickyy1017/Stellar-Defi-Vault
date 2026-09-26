@@ -155,7 +155,7 @@ impl VaultContract {
 
         let cooldown = get_cooldown_ledgers(&env);
         let now = env.ledger().sequence();
-        if cooldown > 0 && now < req.requested_at.saturating_add(cooldown) {
+        if cooldown > 0 && !crate::ledger_boundary::duration_elapsed(now, req.requested_at, cooldown) {
             return Err(VaultError::UseCooldownFlow);
         }
 

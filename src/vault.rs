@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, symbol_short, token, Address, Bytes,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Bytes,
     Env, String, Symbol, Vec,
 };
 
@@ -21,7 +21,7 @@ use crate::{
         RateChange, RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
         RevenueShareMerkleRoot, RevenueSharingConfig, RewardMultiplierBreakdown, RewardTier,
         RoundingPolicy, Season, SmoothingSchedule, SmoothingStatus, StakeAction, StakeHistoryEntry,
-        StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
+        SharePriceSnapshot, StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
         StorageUsageReport, SunsetState, SwapOffer, TaxReport, Tournament, TriggerDirection,
         UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary, VestingEntry,
         YieldComparison,
@@ -141,6 +141,26 @@ pub struct WaitlistEntry {
 #[contract]
 pub struct VaultContract;
 
+const REENTRANCY_KEY: Symbol = symbol_short!("re_entry");
+
+struct ReentrancyGuard { env: Env }
+
+impl ReentrancyGuard {
+    fn new(env: &Env) -> Result<Self, VaultError> {
+        if env.storage().instance().get(&REENTRANCY_KEY).unwrap_or(false) {
+            return Err(VaultError::Unauthorized);
+        }
+        env.storage().instance().set(&REENTRANCY_KEY, &true);
+        Ok(Self { env: env.clone() })
+    }
+}
+
+impl Drop for ReentrancyGuard {
+    fn drop(&mut self) {
+        self.env.storage().instance().remove(&REENTRANCY_KEY);
+    }
+}
+
 #[contractimpl]
 impl VaultContract {
     /// Initialize the vault with an admin and the token it accepts.
@@ -161,7 +181,7 @@ impl VaultContract {
         stake_decimals: Option<u32>,
         reward_decimals: Option<u32>,
     ) -> Result<(), VaultError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if env.storage().instance().has(&DataKey::Admin) || admin::is_renounced(&env) {
             return Err(VaultError::AlreadyInitialized);
         }
 
@@ -360,7 +380,7 @@ impl VaultContract {
     /// appended to the on-chain changelog returned by `get_rate_history`.
     
     pub fn upgrade_wasm(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), VaultError> {
-        if admin != admin::get_admin(&env) {
+        if admin != admin::get_admin(&env)? {
             return Err(VaultError::Unauthorized);
         }
         admin.require_auth();
@@ -465,7 +485,7 @@ impl VaultContract {
         admin_addr: Address,
         export: MigrationExport,
     ) -> Result<(), VaultExtError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if env.storage().instance().has(&DataKey::Admin) || admin::is_renounced(&env) {
             return Err(VaultExtError::AlreadyInitialized);
         }
         admin_addr.require_auth();
@@ -871,7 +891,7 @@ impl VaultContract {
 
         // Stake the requested amount; do_stake_inner skips require_auth since
         // the single auth above already covers both actions.
-        Self::do_stake_inner(&env, &user, amount, min_shares_out)?;
+        Self::do_stake_inner(&env, &user, amount, 0)?;
 
         Ok(claimed_amount)
     }
@@ -885,7 +905,7 @@ impl VaultContract {
     /// this method, making it suitable for keepers. Returns `true` when a
     /// snapshot was recorded and `false` when the rate limit has not elapsed.
     pub fn take_share_price_snapshot(env: Env) -> bool {
-        let key = symbol_short!("sh_pr_hist");
+        let key = symbol_short!("sh_price");
         let mut history: Vec<SharePriceSnapshot> = env
             .storage()
             .instance()
@@ -921,7 +941,7 @@ impl VaultContract {
     pub fn get_share_price_history(env: Env) -> Vec<SharePriceSnapshot> {
         env.storage()
             .instance()
-            .get(&symbol_short!("sh_pr_hist"))
+            .get(&symbol_short!("sh_price"))
             .unwrap_or_else(|| Vec::new(&env))
     }
 
@@ -1039,7 +1059,9 @@ impl VaultContract {
             .storage()
             .persistent()
             .get(&(symbol_short!("p_lock"), user));
-        status.filter(|(unlocks_at, _)| env.ledger().sequence() < *unlocks_at)
+        status.filter(|(unlocks_at, _)| crate::ledger_boundary::is_before(env.ledger().sequence(), *unlocks_at))
+    }
+
     /// Query staked amount of a user (matches IStakingPool interface).
     pub fn staked_amount(env: Env, user: Address) -> i128 {
         balance::get_shares(&env, &user)
@@ -1048,6 +1070,17 @@ impl VaultContract {
     /// Read-only query for the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, VaultError> {
         admin::get_admin(&env)
+    }
+
+    /// Permanently remove all admin authority. The address is repeated as an
+    /// explicit confirmation and must authorize the irreversible call.
+    pub fn renounce_admin(env: Env, admin: Address) -> Result<(), VaultError> {
+        admin::renounce(&env, &admin)?;
+        env.events().publish(
+            (Symbol::new(&env, "admin_renounced"),),
+            (admin, env.ledger().sequence()),
+        );
+        Ok(())
     }
 
     /// Read-only query for the original deployer address.
@@ -2256,11 +2289,11 @@ impl VaultContract {
             .get(&symbol_short!("max_cap"))
             .unwrap_or(0);
         if max_capacity > 0 && current_staked < max_capacity {
-            panic_with_error!(&env, VaultError::InvalidRate);
+            return Err(VaultError::InvalidRate);
         }
         let mut queue: Vec<WaitlistEntry> = Self::get_waitlist(env.clone());
         if queue.len() >= MAX_WAITLIST_SIZE {
-            panic_with_error!(&env, VaultError::InvalidRate);
+            return Err(VaultError::InvalidRate);
         }
         let entry = WaitlistEntry {
             user: user.clone(),
@@ -2793,7 +2826,7 @@ impl VaultContract {
         // gate that `stake` applies.
 
         let (p_dep, _) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
-        if p_dep { return Err(VaultError::Paused); }
+        if p_dep { return Err(VaultError::VaultPaused); }
         Self::require_no_sunset(env)?;
 
         if amount <= 0 {
@@ -2817,7 +2850,7 @@ impl VaultContract {
         let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
             .ok_or(VaultError::ArithmeticError)?;
         if min_shares_out > 0 && shares < min_shares_out {
-            return Err(VaultError::SlippageExceeded);
+            return Err(VaultError::InvalidRate);
         }
 
         let cur = balance::get_shares(env, user);
@@ -2842,42 +2875,30 @@ impl VaultContract {
         Ok(shares)
     }
 
-<<<<<<< HEAD
-    fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultLockError> {
-=======
-
     pub(crate) fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultError> {
+        if shares <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        let (_, withdrawals_paused) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
+        if withdrawals_paused {
+            return Err(VaultError::VaultPaused);
+        }
+        if Self::get_lock_status(env.clone(), staker.clone()).is_some() {
+            return Err(VaultError::UseCooldownFlow);
+        }
         if crate::vault_extensions_502_505::is_withdrawal_queue_enabled(env) {
-            crate::vault_extensions_502_505::enqueue_withdrawal(env, staker.clone(), shares);
             // Deduct shares so they can't queue the same shares twice, but don't pay out.
             let user_shares = balance::get_shares(env, staker);
             if user_shares < shares {
                 return Err(VaultError::InsufficientShares);
             }
+            crate::vault_extensions_502_505::enqueue_withdrawal(env, staker.clone(), shares);
             balance::set_shares(env, staker, user_shares - shares);
             return Ok(0); // Payout is deferred
         }
-<<<<<<< HEAD
->>>>>>> d8e794f7e1e51dd68d97f5eedd05a998fc3d613a
-        if shares <= 0 {
-            return Err(VaultLockError::ZeroAmount);
-        }
-        if let Some((unlocks_at, _)) = Self::get_lock_status(env.clone(), staker.clone()) {
-            if env.ledger().sequence() < unlocks_at {
-                return Err(VaultLockError::PositionLocked);
-            }
-=======
-
-        let (_, p_with) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
-        if p_with { return Err(VaultError::Paused); }
-        if shares <= 0 {
-
-            return Err(VaultError::ZeroAmount);
->>>>>>> 7f6a88e867e94d45c96aefeb76c28b0fddafd6ae
-        }
         let user_shares = balance::get_shares(env, staker);
         if user_shares < shares {
-            return Err(VaultLockError::InsufficientShares);
+            return Err(VaultError::InsufficientShares);
         }
         // Issue #548: withdrawals only draw from unlocked share tranches.
         crate::vault_extensions_546_549::enforce_unlocked(env, staker, shares)?;
@@ -2904,7 +2925,7 @@ impl VaultContract {
             .ok_or(VaultError::ArithmeticError)?;
         let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
         // Issue #554: per-user rolling 24h cap on the gross amount withdrawn.
-        crate::daily_withdrawal_limit::enforce_and_record(env, staker, amount);
+        crate::daily_withdrawal_limit::enforce_and_record(env, staker, amount)?;
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &payout);
         balance::set_shares(env, staker, user_shares - shares);
@@ -2937,13 +2958,13 @@ impl VaultContract {
             } else {
                 let recipients = balance::get_fee_recipients(env);
                 if !recipients.is_empty() {
-    
-                Self::distribute_fee(env, &token_addr, remaining_fee, &recipients);
-            } else if balance::fee_buyback_enabled(env) {
-                balance::add_unstake_fee_reserve(env, remaining_fee);
-            } else {
-                let reward_pool = balance::get_reward_pool_balance(env);
-                balance::set_reward_pool_balance(env, reward_pool + remaining_fee);
+                    Self::distribute_fee(env, &token_addr, remaining_fee, &recipients);
+                } else if balance::fee_buyback_enabled(env) {
+                    balance::add_unstake_fee_reserve(env, remaining_fee);
+                } else {
+                    let reward_pool = balance::get_reward_pool_balance(env);
+                    balance::set_reward_pool_balance(env, reward_pool + remaining_fee);
+                }
             }
         }
         // Issue #453: trigger mirroring for unstake
@@ -4023,7 +4044,7 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             
 
             if let Some(single_recipient) = crate::vault_extensions_490_493::VaultContract::get_fee_recipient(env.clone()) {
-                let token_addr = Self::token_address(env)?;
+                let token_addr = Self::token_address(&env)?;
                 let token_client = token::Client::new(env, &token_addr);
                 token_client.transfer(&env.current_contract_address(), &single_recipient, &remaining_fee);
             } else if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
@@ -4041,13 +4062,13 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             } else {
                 let recipients = balance::get_fee_recipients(&env);
                 if !recipients.is_empty() {
-    
-                Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
-            } else if balance::fee_buyback_enabled(&env) {
-                balance::add_unstake_fee_reserve(&env, remaining_fee);
-            } else {
-                let reward_pool = balance::get_reward_pool_balance(&env);
-                balance::set_reward_pool_balance(&env, reward_pool + remaining_fee);
+                    Self::distribute_fee(&env, &token_addr, remaining_fee, &recipients);
+                } else if balance::fee_buyback_enabled(&env) {
+                    balance::add_unstake_fee_reserve(&env, remaining_fee);
+                } else {
+                    let reward_pool = balance::get_reward_pool_balance(&env);
+                    balance::set_reward_pool_balance(&env, reward_pool + remaining_fee);
+                }
             }
         }
 
