@@ -59,6 +59,10 @@ pub mod activity_log; // issue #530 — per-user deposit/withdrawal history
 pub mod pool_insights; // pool summary + rounding-policy transparency
 pub mod runway_guard; // set_reward_rate_bps runway safety rail
 pub mod admin_recovery; // long-delay admin key-loss recovery
+pub mod admin_roles; // issue #426 - treasurer / pauser / rater roles
+pub mod age_band_analytics; // issue #425 - stake age band analytics
+pub mod max_deposit_cap; // issue #488 - per-user deposit cap
+pub mod multi_token; // issue #489 - multi-token vault support
 
 // Pre-existing modules that `vault.rs` already calls into (e.g. `do_unstake`'s
 // `community_treasury::route_fee_revenue` / `position_mirroring::maybe_mirror_action`)
