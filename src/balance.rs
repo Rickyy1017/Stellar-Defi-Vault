@@ -1,3 +1,4 @@
+use crate::errors::VaultInvariantError;
 use crate::storage::{
     AccessTier, AdminProposal, AutoConvertConfig, BrandingConfig, ChangelogEntry, ClaimWindow,
     ContractDelegate, DataKey, DayBucket, DynamicFeeConfig, FeeRecipient, FlashStakeReceipt,
@@ -7,7 +8,22 @@ use crate::storage::{
     RevenueSharingConfig, RewardTier, Season, StakePosition, SunsetState, VestingEntry,
 };
 
-use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{panic_with_error, symbol_short, Address, Env, String, Symbol, Vec};
+
+/// Issue #621: last-line-of-defense invariant for every accounting field
+/// this module persists. `i128` is signed, so nothing at the type level stops
+/// a caller from writing a negative share/reward/pool balance — this makes
+/// that impossible in practice by rejecting the write instead. See the
+/// `VaultInvariantError` doc comment in `errors.rs` for why this panics
+/// rather than returning a `Result` (these setters have no `Result` in their
+/// signature, and giving them one would mean updating every one of their
+/// call sites across the crate for a condition that should never occur if
+/// upstream business logic is correct).
+fn assert_non_negative(env: &Env, value: i128) {
+    if value < 0 {
+        panic_with_error!(env, VaultInvariantError::NegativeBalance);
+    }
+}
 
 pub fn get_shares(env: &Env, user: &Address) -> i128 {
     env.storage()
@@ -17,6 +33,7 @@ pub fn get_shares(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_shares(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .persistent()
         .set(&DataKey::ShareBalance(user.clone()), &amount);
@@ -30,6 +47,7 @@ pub fn get_total_shares(env: &Env) -> i128 {
 }
 
 pub fn set_total_shares(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     env.storage().instance().set(&DataKey::TotalShares, &total);
 }
 
@@ -41,6 +59,7 @@ pub fn get_total_deposited(env: &Env) -> i128 {
 }
 
 pub fn set_total_deposited(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     env.storage()
         .instance()
         .set(&DataKey::TotalDeposited, &total);
@@ -215,6 +234,7 @@ pub fn get_reward_pool_balance(env: &Env) -> i128 {
 }
 
 pub fn set_reward_pool_balance(env: &Env, balance: i128) {
+    assert_non_negative(env, balance);
     env.storage()
         .instance()
         .set(&DataKey::RewardPoolBalance, &balance);
@@ -280,6 +300,7 @@ pub fn get_accrued_reward(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_accrued_reward(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .persistent()
         .set(&DataKey::AccruedReward(user.clone()), &amount);
@@ -324,6 +345,7 @@ pub fn get_total_rewards_paid(env: &Env) -> i128 {
 }
 
 pub fn set_total_rewards_paid(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&DataKey::TotalRewardsPaid, &amount);
@@ -587,6 +609,7 @@ pub fn get_reward_remainder(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_reward_remainder(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .persistent()
         .set(&DataKey::RewardRemainder(user.clone()), &amount);
@@ -896,6 +919,7 @@ pub fn get_total_rewards_added(env: &Env) -> i128 {
 }
 
 pub fn set_total_rewards_added(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     let key = (Symbol::new(env, "tot_rwds"),);
     env.storage().instance().set(&key, &total);
 }
@@ -1067,6 +1091,7 @@ pub fn get_yield_deployed(env: &Env) -> i128 {
 }
 
 pub fn set_yield_deployed(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("yld_dep"), &amount);
@@ -1205,6 +1230,7 @@ pub fn get_total_ever_staked(env: &Env) -> i128 {
 }
 
 pub fn set_total_ever_staked(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     env.storage()
         .instance()
         .set(&symbol_short!("everstk"), &total);
@@ -1391,6 +1417,7 @@ pub fn get_insurance_fund_balance(env: &Env) -> i128 {
 }
 
 pub fn set_insurance_fund_balance(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("ins_fund"), &amount);
@@ -2326,6 +2353,7 @@ pub fn get_revenue_share_pool(env: &Env) -> i128 {
 }
 
 pub fn set_revenue_share_pool(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("rev_pool"), &amount);
@@ -2381,6 +2409,7 @@ pub fn get_escrow_balance(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_escrow_balance(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     let key = (Symbol::new(env, "esc_bal"), user.clone());
     env.storage().persistent().set(&key, &amount);
 }
@@ -2546,6 +2575,7 @@ pub fn add_unstake_fee_reserve(env: &Env, amount: i128) {
 }
 
 pub fn set_unstake_fee_reserve(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("fbb_rsv"), &amount);

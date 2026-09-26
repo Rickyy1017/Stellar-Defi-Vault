@@ -1072,3 +1072,29 @@ impl From<VaultError> for VaultFeature5Error {
         }
     }
 }
+
+/// Issue #621: negative-balance impossibility backstop.
+///
+/// `VaultError`, `VaultExtError`, and `VaultFeatureError` are all already at
+/// Soroban's 50-variant cap for `#[contracterror]` enums (see the note on
+/// `DataKey` in `storage.rs`), so this gets its own enum rather than adding a
+/// variant to one of those, matching the established pattern for handling an
+/// exhausted error enum (e.g. `VaultFeature2Error`..`VaultFeature5Error`).
+///
+/// Every balance-decrementing call site (withdraw, fee deduction, penalty,
+/// slash, etc.) is expected to validate the requested amount against the
+/// caller's current balance up front and return its own typed error (e.g.
+/// `VaultError::InsufficientShares`) before ever reaching a `balance::set_*`
+/// helper with a value that would go negative. `balance::assert_non_negative`
+/// (see `balance.rs`) is the last line of defense in those setters: it fires
+/// only if that upstream check was missing or wrong, aborting the transaction
+/// and reverting all state changes so no negative balance is ever committed
+/// to storage.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultInvariantError {
+    /// A `balance::set_*` accounting field would have been written as
+    /// negative; the write was rejected and the call reverted instead.
+    NegativeBalance = 1,
+}

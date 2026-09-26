@@ -74,7 +74,13 @@ pub(crate) fn clear_queued_admin_actions(env: &Env) -> u32 {
 // ----------------------------------------------------------------------------
 // Issue #504: Auto Compound
 // ----------------------------------------------------------------------------
-const AUTO_COMPOUND: Symbol = symbol_short!("auto_comp"); // Map<Address, bool>
+// Issue #609 storage audit: this was previously a single `Map<Address, bool>`
+// under one instance-storage key, which is per-user data misclassified as
+// instance storage — every call rewrote the whole map, and the entry grows
+// without bound as the depositor count grows (see STORAGE.md). Switched to a
+// `(Symbol, Address)` tuple key per user under persistent storage, matching
+// the convention used for every other per-user key in this codebase.
+const AUTO_COMPOUND: Symbol = symbol_short!("auto_comp");
 
 // ----------------------------------------------------------------------------
 // Issue #505: Tokenize Position
@@ -190,14 +196,18 @@ impl VaultContract {
     // ------------------------------------------------------------------------
     pub fn set_auto_compound(env: Env, user: Address, enabled: bool) {
         user.require_auth();
-        let mut map: soroban_sdk::Map<Address, bool> = env.storage().instance().get(&AUTO_COMPOUND).unwrap_or(soroban_sdk::Map::new(&env));
-        map.set(user.clone(), enabled);
-        env.storage().instance().set(&AUTO_COMPOUND, &map);
+        env.storage()
+            .persistent()
+            .set(&(AUTO_COMPOUND, user.clone()), &enabled);
     }
 
     pub fn compound(env: Env, user: Address) -> Result<(), VaultFeature5Error> {
-        let map: soroban_sdk::Map<Address, bool> = env.storage().instance().get(&AUTO_COMPOUND).unwrap_or(soroban_sdk::Map::new(&env));
-        if !map.get(user.clone()).unwrap_or(false) {
+        let enabled: bool = env
+            .storage()
+            .persistent()
+            .get(&(AUTO_COMPOUND, user.clone()))
+            .unwrap_or(false);
+        if !enabled {
             return Err(VaultFeature5Error::AutoCompoundNotEnabled);
         }
 
