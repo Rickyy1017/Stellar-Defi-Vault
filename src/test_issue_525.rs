@@ -108,7 +108,7 @@ fn deposits_are_rejected_from_the_moment_the_sunset_starts() {
         "a new deposit must be rejected while the pool is sunsetting"
     );
     assert_eq!(
-        f.vault.try_deposit(&f.bob, &500),
+        f.vault.try_deposit(&f.bob, &500, &None),
         Err(Ok(VaultError::PoolShuttingDown))
     );
     assert_eq!(

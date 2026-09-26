@@ -7,6 +7,20 @@ pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128
         .publish(topics, (amount, shares_minted, ledger));
 }
 
+pub fn referral_bonus_paid(
+    env: &Env,
+    referrer: &Address,
+    referee: &Address,
+    referrer_bonus: i128,
+    referee_bonus: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("ref_bns"), referrer.clone(), referee.clone()),
+        (referrer_bonus, referee_bonus, ledger),
+    );
+}
+
 pub fn withdraw(
     env: &Env,
     withdrawer: &Address,

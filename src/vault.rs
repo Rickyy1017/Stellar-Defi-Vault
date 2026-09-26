@@ -274,9 +274,75 @@ impl VaultContract {
         Ok(shares_minted)
     }
 
-    /// Deposit tokens into the vault (alias for stake).
-    pub fn deposit(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
-        Self::stake(env, user, amount)
+    /// Deposit tokens into the vault, optionally crediting a referrer on the
+    /// depositor's first-ever deposit.
+    pub fn deposit(
+        env: Env,
+        user: Address,
+        amount: i128,
+        referrer: Option<Address>,
+    ) -> Result<i128, VaultError> {
+        if referrer.as_ref().is_some_and(|address| address == &user) {
+            return Err(VaultError::InvalidAddress);
+        }
+        let is_first_deposit = !balance::get_all_stakers(&env)
+            .iter()
+            .any(|staker| &staker == &user);
+        let total_before = balance::get_total_deposited(&env);
+        let shares_minted = Self::stake(env.clone(), user.clone(), amount)?;
+
+        if is_first_deposit {
+            if let Some(referrer) = referrer {
+                let deposit_amount = balance::get_total_deposited(&env)
+                    .checked_sub(total_before)
+                    .ok_or(VaultError::ArithmeticError)?;
+                Self::pay_referral_bonus(&env, &referrer, &user, deposit_amount)?;
+            }
+        }
+
+        Ok(shares_minted)
+    }
+
+    /// Enable an existing or former staker to refer new depositors.
+    pub fn register_referrer(env: Env, user: Address) -> Result<(), VaultError> {
+        user.require_auth();
+        let has_position_history = balance::get_shares(&env, &user) > 0
+            || balance::get_all_stakers(&env)
+                .iter()
+                .any(|staker| &staker == &user);
+        if !has_position_history {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let mut registry = balance::get_referral_registry(&env);
+        if !registry.iter().any(|referrer| referrer == user) {
+            registry.push_back(user);
+            balance::set_referral_registry(&env, &registry);
+        }
+        Ok(())
+    }
+
+    /// Admin: configure referral rewards in basis points of the first deposit.
+    pub fn set_referral_bonus_bps(
+        env: Env,
+        admin_addr: Address,
+        referrer_bps: u32,
+        referee_bps: u32,
+    ) -> Result<(), VaultError> {
+        admin_addr.require_auth();
+        if admin_addr != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if referrer_bps > 10_000 || referee_bps > 10_000 {
+            return Err(VaultError::InvalidRate);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("ref_rb"), &referrer_bps);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("ref_fb"), &referee_bps);
+        Ok(())
     }
 
     /// Admin: set the base reward APR in basis points. Every accepted update is
@@ -2505,6 +2571,82 @@ impl VaultContract {
         }
         let accrued = balance::get_accrued_reward(env, user);
         Ok(accrued)
+    }
+
+    fn pay_referral_bonus(
+        env: &Env,
+        referrer: &Address,
+        referee: &Address,
+        deposit_amount: i128,
+    ) -> Result<(), VaultError> {
+        if referrer == referee {
+            return Err(VaultError::InvalidAddress);
+        }
+        let registry = balance::get_referral_registry(env);
+        if !registry.iter().any(|registered| &registered == referrer) {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let referrer_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("ref_rb"))
+            .unwrap_or(0);
+        let referee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("ref_fb"))
+            .unwrap_or(0);
+        let bonus = |bps: u32| {
+            deposit_amount
+                .checked_mul(bps as i128)
+                .and_then(|value| value.checked_div(10_000))
+                .ok_or(VaultError::ArithmeticError)
+        };
+        let referrer_bonus = bonus(referrer_bps)?;
+        let referee_bonus = bonus(referee_bps)?;
+        let total_bonus = referrer_bonus
+            .checked_add(referee_bonus)
+            .ok_or(VaultError::ArithmeticError)?;
+        let reward_pool = balance::get_reward_pool_balance(env);
+        if total_bonus > reward_pool {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
+        if total_bonus > 0 {
+            let reward_token = Self::reward_token_address(env)?;
+            let client = token::Client::new(env, &reward_token);
+            let pool_address = env.current_contract_address();
+            if client.balance(&pool_address) < total_bonus {
+                return Err(VaultError::InsufficientRewardPool);
+            }
+            if referrer_bonus > 0 {
+                client.transfer(&pool_address, referrer, &referrer_bonus);
+            }
+            if referee_bonus > 0 {
+                client.transfer(&pool_address, referee, &referee_bonus);
+            }
+            balance::set_reward_pool_balance(env, reward_pool - total_bonus);
+        }
+
+        balance::set_referrer_of(env, referee, referrer);
+        balance::add_referee(env, referrer, referee);
+        let mut stats = balance::get_referral_stats(env, referrer);
+        stats.total_referred_stake = stats
+            .total_referred_stake
+            .checked_add(deposit_amount)
+            .ok_or(VaultError::ArithmeticError)?;
+        stats.referral_count = stats.referral_count.saturating_add(1);
+        balance::set_referral_stats(env, referrer, &stats);
+        events::referral_bonus_paid(
+            env,
+            referrer,
+            referee,
+            referrer_bonus,
+            referee_bonus,
+            env.ledger().sequence(),
+        );
+        Ok(())
     }
 
     fn normalize_to_reward_decimals(env: &Env, amount: i128) -> Result<i128, VaultError> {

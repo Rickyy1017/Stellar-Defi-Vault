@@ -105,17 +105,17 @@ fn depositor_cap_blocks_only_new_addresses() {
     f.vault.set_max_depositor_count(&f.admin, &2_u32);
     assert_eq!(f.vault.get_max_depositor_count(), 2);
 
-    f.vault.deposit(&alice, &100);
-    f.vault.deposit(&bob, &100);
+    f.vault.deposit(&alice, &100, &None);
+    f.vault.deposit(&bob, &100, &None);
     assert_eq!(f.vault.get_depositor_count(), 2);
 
     // A brand-new address is rejected once the cap is met.
-    let res = f.vault.try_deposit(&carol, &100);
+    let res = f.vault.try_deposit(&carol, &100, &None);
     assert_eq!(res, Err(Ok(VaultError::DepositorCapReached)));
     assert_eq!(f.vault.get_depositor_count(), 2);
 
     // Existing depositors can still add to their own position.
-    f.vault.deposit(&alice, &50);
+    f.vault.deposit(&alice, &50, &None);
     assert_eq!(f.vault.get_depositor_count(), 2);
 }
 
@@ -126,7 +126,7 @@ fn depositor_cap_zero_disables_the_limit() {
 
     for _ in 0..3 {
         let user = f.funded_user(100);
-        f.vault.deposit(&user, &10);
+        f.vault.deposit(&user, &10, &None);
     }
     assert_eq!(f.vault.get_depositor_count(), 3);
 }
@@ -151,7 +151,7 @@ fn stake_and_claim_honours_the_depositor_cap() {
 fn gas_rebate_is_paid_when_the_pool_is_funded() {
     let f = Fixture::new();
     let alice = f.funded_user(1_000);
-    f.vault.deposit(&alice, &100);
+    f.vault.deposit(&alice, &100, &None);
 
     f.token_admin.mint(&f.admin, &60);
     f.vault.fund_gas_rebate_pool(&f.admin, &60);
@@ -173,7 +173,7 @@ fn gas_rebate_is_paid_when_the_pool_is_funded() {
 fn claim_succeeds_without_a_rebate_when_the_pool_is_empty() {
     let f = Fixture::new();
     let alice = f.funded_user(1_000);
-    f.vault.deposit(&alice, &100);
+    f.vault.deposit(&alice, &100, &None);
 
     // Rebate configured but never funded.
     f.vault.set_gas_rebate_amount(&f.admin, &25);
@@ -193,7 +193,7 @@ fn claim_succeeds_without_a_rebate_when_the_pool_is_empty() {
 fn gas_rebate_pool_depletes_one_claim_at_a_time() {
     let f = Fixture::new();
     let alice = f.funded_user(1_000);
-    f.vault.deposit(&alice, &100);
+    f.vault.deposit(&alice, &100, &None);
 
     f.token_admin.mint(&f.admin, &50);
     f.vault.fund_gas_rebate_pool(&f.admin, &50);
@@ -221,7 +221,7 @@ fn gas_rebate_pool_depletes_one_claim_at_a_time() {
 fn zero_rebate_amount_disables_rebates() {
     let f = Fixture::new();
     let alice = f.funded_user(1_000);
-    f.vault.deposit(&alice, &100);
+    f.vault.deposit(&alice, &100, &None);
 
     f.token_admin.mint(&f.admin, &60);
     f.vault.fund_gas_rebate_pool(&f.admin, &60);
@@ -246,7 +246,7 @@ fn preview_deposit_matches_a_real_deposit() {
 
     // Empty pool: first deposit is 1:1.
     assert_eq!(f.vault.preview_deposit(&100), 100);
-    let minted = f.vault.deposit(&alice, &100);
+    let minted = f.vault.deposit(&alice, &100, &None);
     assert_eq!(minted, 100);
 
     // Seed a non-1:1 share ratio to prove the preview tracks the real math.
@@ -254,7 +254,7 @@ fn preview_deposit_matches_a_real_deposit() {
 
     let preview = f.vault.preview_deposit(&250);
     assert_eq!(preview, 500);
-    let minted_again = f.vault.deposit(&alice, &250);
+    let minted_again = f.vault.deposit(&alice, &250, &None);
     assert_eq!(preview, minted_again);
 }
 
@@ -262,7 +262,7 @@ fn preview_deposit_matches_a_real_deposit() {
 fn preview_deposit_is_read_only_and_safe_for_bad_amounts() {
     let f = Fixture::new();
     let alice = f.funded_user(100);
-    f.vault.deposit(&alice, &100);
+    f.vault.deposit(&alice, &100, &None);
 
     let shares_before = f.vault.shares_of(&alice);
     assert_eq!(f.vault.preview_deposit(&0), 0);

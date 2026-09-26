@@ -51,7 +51,7 @@ impl<'a> Fixture<'a> {
     fn depositor(&self, amount: i128) -> Address {
         let user = Address::generate(&self.env);
         self.token_admin.mint(&user, &amount);
-        self.vault.deposit(&user, &amount);
+        self.vault.deposit(&user, &amount, &None);
         user
     }
 

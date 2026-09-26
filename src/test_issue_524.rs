@@ -84,7 +84,7 @@ impl<'a> Fixture<'a> {
 
     /// Gives `alice` an open position, so a claim has someone to pay.
     fn staked_user(&self) -> Address {
-        self.vault.deposit(&self.alice, &100);
+        self.vault.deposit(&self.alice, &100, &None);
         self.alice.clone()
     }
 

@@ -119,7 +119,7 @@ fn test_deposit_with_memo_oversized_reverts() {
 fn test_deposit_without_memo_still_works() {
     let f = Fixture::new();
     // Standard deposit without memo still works via existing function
-    let shares = f.vault.deposit(&f.alice, &1_000);
+    let shares = f.vault.deposit(&f.alice, &1_000, &None);
     assert_eq!(shares, 1_000);
     assert_eq!(f.vault.shares_of(&f.alice), 1_000);
 
