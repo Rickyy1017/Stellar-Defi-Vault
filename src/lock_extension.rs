@@ -36,7 +36,7 @@ fn get_config(env: &Env) -> Option<LockExtensionConfig> {
     env.storage().instance().get(&CONFIG_KEY)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Sets the lock-extension boost terms. Admin only.
     pub fn set_lock_extension_config(

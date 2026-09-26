@@ -118,7 +118,7 @@ pub fn check_and_rebalance(env: &Env) {
     );
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the TVL-tiered rate thresholds. Admin only. Max 5, must be
     /// strictly ascending by `tvl_threshold`.

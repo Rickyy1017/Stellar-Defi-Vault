@@ -1,4 +1,4 @@
-﻿//! Reward vesting cliff (issue #287).
+//! Reward vesting cliff (issue #287).
 //!
 //! A cliff blocks reward *accrual* entirely until a position has been staked
 //! for a configurable minimum duration. Once the cliff is reached, rewards
@@ -116,47 +116,6 @@ pub fn reset_cliff_marker(env: &Env, user: &Address) {
     env.storage()
         .persistent()
         .remove(&(CLIFF_EVENT_KEY, user.clone()));
-}
-
-#[cfg_attr(not(test), contractimpl)]
-impl VaultContract {
-    /// Set the reward vesting cliff, in ledgers. `0` disables it.
-    ///
-    /// Admin only. Takes effect immediately for every position, including ones
-    /// already staked: the cliff is evaluated against `staked_at_ledger` on
-    /// each read rather than snapshotted at stake time, so lengthening it can
-    /// pull a position back under its cliff. That is deliberate â€” the
-    /// alternative is a per-position copy that an admin cannot correct.
-    pub fn set_vesting_cliff(env: Env, cliff_ledgers: u32) -> Result<(), VaultError> {
-        admin::require_admin(&env)?;
-
-        env.storage().instance().set(&CLIFF_KEY, &cliff_ledgers);
-
-        let admin = admin::get_admin(&env)?;
-        env.events().publish(
-            (symbol_short!("clf_set"), admin),
-            (cliff_ledgers, env.ledger().sequence()),
-        );
-        Ok(())
-    }
-
-    /// The configured cliff length in ledgers. `0` means no cliff.
-    pub fn get_vesting_cliff(env: Env) -> u32 {
-        get_cliff_ledgers(&env)
-    }
-
-    /// Whether `user`'s position has cleared its cliff.
-    pub fn is_past_cliff(env: Env, user: Address) -> bool {
-        is_past_cliff_for(&env, &user)
-    }
-
-    /// The ledger at which `user`'s position clears the cliff
-    /// (`staked_at_ledger + cliff_ledgers`).
-    ///
-    /// Returns `0` when the user has no recorded stake.
-    pub fn cliff_unlock_ledger(env: Env, user: Address) -> u32 {
-        cliff_unlock_ledger_for(&env, &user).unwrap_or(0)
-    }
 }
 
 

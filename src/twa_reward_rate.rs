@@ -115,7 +115,7 @@ fn calc_twa_rate(env: &Env, from_ledger: u32, to_ledger: u32) -> i128 {
     weighted_sum / total_span
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Record a reward-rate checkpoint and update the live spot rate.
     /// Admin only. Oldest checkpoint is dropped once more than

@@ -104,7 +104,7 @@ fn debit(env: &Env, user: &Address, reward_type: RewardType, amount: i128) {
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the priority order rewards are paid in when the pool can't cover
     /// all of them. Admin only. Must list each `RewardType` at most once.

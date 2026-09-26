@@ -226,7 +226,7 @@ fn scan_for_collusion(env: &Env) -> Vec<CollusionAlert> {
     new_alerts
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Scan recent staking activity for coordinated stake/unstake and wash
     /// patterns. Admin only. Any newly-detected alerts are appended to the

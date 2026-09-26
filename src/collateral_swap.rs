@@ -66,7 +66,7 @@ pub fn get_config(env: &Env, user: &Address) -> Option<CollateralSwapConfig> {
     env.storage().persistent().get(&(CONFIG_KEY, user.clone()))
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Swap `user`'s current position from its existing token into
     /// `new_stake_token` via the configured DEX router, without closing the

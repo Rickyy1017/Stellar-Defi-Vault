@@ -68,7 +68,7 @@ fn get_position_amount(env: &Env, user: &Address) -> Option<i128> {
     balance::shares_to_amount(total_shares, total_deposited, shares)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Send a reward-token tip from `sender` to `recipient`.
     ///

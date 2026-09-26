@@ -43,7 +43,7 @@ fn set_frozen(env: &Env, user: &Address, amount: i128) {
         .set(&(FROZEN_KEY, user.clone()), &amount);
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Freeze `amount` of `user`'s position. Admin only. The frozen portion
     /// is tracked separately from the unfrozen, freely-available remainder â€”

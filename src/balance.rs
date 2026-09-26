@@ -3,8 +3,8 @@ use crate::storage::{
     ContractDelegate, DataKey, DayBucket, DynamicFeeConfig, FeeRecipient, FlashStakeReceipt,
     GovernanceProposal, InsurancePolicy, InsuranceProduct, Loan, LoanConfig, LotteryConfig,
     Milestone, MultisigConfig, OnboardingChecklist, PendingAction, PriceCondition,
-    PriorityBidRecord, Quiz, RateHistoryEntry, ReferralStats, RewardTier, RevenueShareMerkleRoot,
-    RevenueSharingConfig, Season, StakePosition, SunsetState, VestingEntry,
+    PriorityBidRecord, Quiz, RateChange, RateHistoryEntry, ReferralStats, RevenueShareMerkleRoot,
+    RevenueSharingConfig, RewardTier, Season, StakePosition, SunsetState, VestingEntry,
 };
 
 use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
@@ -172,15 +172,33 @@ pub fn set_quiz_count(env: &Env, count: u32) {
         .set(&Symbol::new(env, "quiz_count"), &count);
 }
 
-pub fn get_rate_history(env: &Env) -> Vec<(u32, u32)> {
+/// The rolling on-chain log of reward-rate changes written by `set_reward_rate_bps`
+/// and exposed by `get_rate_history` (issue #522), oldest entry first.
+pub fn get_rate_history(env: &Env) -> Vec<RateChange> {
     env.storage()
         .instance()
         .get(&DataKey::RateHistory)
         .unwrap_or(Vec::new(env))
 }
 
-pub fn set_rate_history(env: &Env, history: &Vec<(u32, u32)>) {
+pub fn set_rate_history(env: &Env, history: &Vec<RateChange>) {
     env.storage().instance().set(&DataKey::RateHistory, history);
+}
+
+/// Appends one reward-rate change to the rolling log, evicting the oldest
+/// entries first once `MAX_RATE_HISTORY_ENTRIES` is reached. Changes are logged
+/// even when the rate is unchanged, matching the `rate_changed` event.
+pub fn record_rate_change(env: &Env, old_rate_bps: u32, new_rate_bps: u32) {
+    let mut history = get_rate_history(env);
+    while history.len() >= MAX_RATE_HISTORY_ENTRIES {
+        history.remove(0);
+    }
+    history.push_back(RateChange {
+        old_rate_bps,
+        new_rate_bps,
+        changed_at: env.ledger().sequence(),
+    });
+    set_rate_history(env, &history);
 }
 
 pub const MAX_RATE_HISTORY_ENTRIES: u32 = 50;
@@ -516,6 +534,24 @@ pub fn get_all_stakers(env: &Env) -> Vec<Address> {
 
 pub fn set_all_stakers(env: &Env, stakers: &Vec<Address>) {
     env.storage().instance().set(&DataKey::AllStakers, stakers);
+}
+
+/// Records `user` in the staker registry if they are not already present and
+/// refreshes the `total_stakers` count. Idempotent, so callers can invoke it on
+/// every stake without worrying about duplicates. Keeps the registry (and thus
+/// `get_pool_summary().depositor_count`) in sync with real depositors.
+pub fn register_staker(env: &Env, user: &Address) {
+    let mut stakers = get_all_stakers(env);
+    let already_present = stakers.iter().any(|a| &a == user);
+    if !already_present {
+        stakers.push_back(user.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllStakers, &stakers);
+    }
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalStakers, &stakers.len());
 }
 
 // ── Share math ────────────────────────────────────────────────────────────────
@@ -941,6 +977,47 @@ pub fn set_pause_info(env: &Env, info: &crate::storage::PauseInfo) {
 
 pub fn clear_pause_info(env: &Env) {
     env.storage().instance().remove(&symbol_short!("ps_info"));
+}
+
+// ── Issue #556: scheduled auto-unpause ───────────────────────────────────────
+
+/// Ledger sequence at which a `pause_until`-scheduled pause should be lifted,
+/// if any. Lazily evaluated on the next call that checks pause state —
+/// Soroban has no native scheduled execution, so nothing runs in the
+/// background; this is just the target the next call compares against.
+pub fn get_scheduled_unpause(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("sch_unp"))
+}
+
+pub fn set_scheduled_unpause(env: &Env, target_ledger: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("sch_unp"), &target_ledger);
+}
+
+pub fn clear_scheduled_unpause(env: &Env) {
+    env.storage().instance().remove(&symbol_short!("sch_unp"));
+}
+
+/// Lazily lifts a `pause_until`-scheduled pause once `target_ledger` is
+/// reached (issue #556). Soroban has no native scheduled execution, so this
+/// only ever runs as a side effect of some other call arriving — if no one
+/// calls the contract after the target ledger, the pause stays in storage
+/// (still correctly reported as paused) until the next call clears it.
+/// `pub(crate)` free function rather than a `VaultContract` method so every
+/// mutating entrypoint that gates on pause state can call it, including
+/// ones outside `vault.rs` (e.g. `xlm_wrapper_integration.rs`).
+pub(crate) fn apply_scheduled_unpause_if_due(env: &Env) {
+    if let Some(target_ledger) = get_scheduled_unpause(env) {
+        if env.ledger().sequence() >= target_ledger {
+            env.storage().instance().set(&DataKey::Paused, &false);
+            clear_pause_info(env);
+            clear_scheduled_unpause(env);
+            let current_ledger = env.ledger().sequence();
+            crate::events::auto_unpaused(env, current_ledger);
+            set_last_updated_ledger(env, current_ledger);
+        }
+    }
 }
 
 // ── Issue #218: migration target ─────────────────────────────────────────────
@@ -1494,6 +1571,55 @@ pub fn add_tokens_burned(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&symbol_short!("tot_burn"), &total);
+    // Issue #452: check burn milestones without importing module to avoid cycle
+    {
+        let thresholds: soroban_sdk::Vec<i128> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("burn_thr"))
+            .unwrap_or(soroban_sdk::Vec::new(env));
+        if !thresholds.is_empty() {
+            let total_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("fbb_brn"))
+                .unwrap_or(0);
+            let total_burned = total.saturating_add(total_fees);
+            let mut reached: soroban_sdk::Vec<bool> = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("burn_hit"))
+                .unwrap_or(soroban_sdk::Vec::new(env));
+            if reached.len() != thresholds.len() {
+                let mut new_reached = soroban_sdk::Vec::new(env);
+                for _ in 0..thresholds.len() {
+                    new_reached.push_back(false);
+                }
+                let min_len = if reached.len() < thresholds.len() { reached.len() } else { thresholds.len() };
+                for i in 0..min_len {
+                    new_reached.set(i, reached.get(i).unwrap());
+                }
+                reached = new_reached;
+            }
+            let ledger = env.ledger().sequence();
+            let mut changed = false;
+            for i in 0..thresholds.len() {
+                let thr = thresholds.get(i).unwrap();
+                let is_reached = reached.get(i).unwrap();
+                if !is_reached && total_burned >= thr {
+                    reached.set(i, true);
+                    changed = true;
+                    env.events().publish(
+                        (symbol_short!("burn_ms"),),
+                        (thr, total_burned, amount, ledger),
+                    );
+                }
+            }
+            if changed {
+                env.storage().instance().set(&symbol_short!("burn_hit"), &reached);
+            }
+        }
+    }
 }
 
 // ── Issue #231: Halving Schedule ──────────────────────────────────────────────
@@ -2166,6 +2292,22 @@ pub fn set_grace_period_end(env: &Env, ledger: u32) {
         .set(&symbol_short!("snst_gpe"), &ledger);
 }
 
+/// The ledger by which existing users are asked to have exited a sunsetting
+/// pool, set once by `initiate_sunset` (issue #525). `None` until then, and
+/// never cleared afterwards: the sunset is a one-way action.
+///
+/// Symbol-keyed because `DataKey` is at Soroban's 50-variant cap, the same
+/// reason the #298 sunset accessors above avoid a new variant.
+pub fn get_sunset_exit_deadline(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("snst_dl"))
+}
+
+pub fn set_sunset_exit_deadline(env: &Env, deadline: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("snst_dl"), &deadline);
+}
+
 // ── Issue #281: Fee Revenue Sharing ──────────────────────────────────────────
 
 pub fn get_revenue_sharing_config(env: &Env) -> Option<RevenueSharingConfig> {
@@ -2421,6 +2563,55 @@ pub fn add_fees_burned(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&symbol_short!("fbb_brn"), &total);
+    // Issue #452: same milestone check as add_tokens_burned but with fees path
+    {
+        let thresholds: soroban_sdk::Vec<i128> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("burn_thr"))
+            .unwrap_or(soroban_sdk::Vec::new(env));
+        if !thresholds.is_empty() {
+            let total_tokens: i128 = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("tot_burn"))
+                .unwrap_or(0);
+            let total_burned = total.saturating_add(total_tokens);
+            let mut reached: soroban_sdk::Vec<bool> = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("burn_hit"))
+                .unwrap_or(soroban_sdk::Vec::new(env));
+            if reached.len() != thresholds.len() {
+                let mut new_reached = soroban_sdk::Vec::new(env);
+                for _ in 0..thresholds.len() {
+                    new_reached.push_back(false);
+                }
+                let min_len = if reached.len() < thresholds.len() { reached.len() } else { thresholds.len() };
+                for i in 0..min_len {
+                    new_reached.set(i, reached.get(i).unwrap());
+                }
+                reached = new_reached;
+            }
+            let ledger = env.ledger().sequence();
+            let mut changed = false;
+            for i in 0..thresholds.len() {
+                let thr = thresholds.get(i).unwrap();
+                let is_reached = reached.get(i).unwrap();
+                if !is_reached && total_burned >= thr {
+                    reached.set(i, true);
+                    changed = true;
+                    env.events().publish(
+                        (symbol_short!("burn_ms"),),
+                        (thr, total_burned, amount, ledger),
+                    );
+                }
+            }
+            if changed {
+                env.storage().instance().set(&symbol_short!("burn_hit"), &reached);
+            }
+        }
+    }
 }
 
 // ── Issue #309: staker onboarding checklist ──────────────────────────────────

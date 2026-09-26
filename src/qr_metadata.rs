@@ -27,7 +27,7 @@ pub struct QRMetadata {
     pub generated_at: u32,
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Returns `user`'s current staking position formatted for QR code
     /// generation. Reverts with `PositionNotFound` if the user has no open

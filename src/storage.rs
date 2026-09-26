@@ -318,6 +318,18 @@ pub struct ChangelogEntry {
     pub new_value: i128,
 }
 
+/// One entry in the on-chain reward-rate changelog exposed by
+/// `get_rate_history` (issue #522).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RateChange {
+    pub old_rate_bps: u32,
+    pub new_rate_bps: u32,
+    /// Ledger sequence number of the update, matching the timestamp carried by
+    /// the `rate_changed` event.
+    pub changed_at: u32,
+}
+
 /// One entry in the rich reward-rate history exposed by `get_reward_rate_history` (issue #124).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -1423,6 +1435,62 @@ pub struct Quiz {
     pub answer_hash: soroban_sdk::Bytes,
     pub reward_tier_unlocked: u32,
     pub attempts_allowed: u32,
+}
+
+// ── Issue #377: position health alert ────────────────────────────────────────
+
+/// Result of `position_health_alert()`: a unified check across every
+/// attention-worthy condition a staker's position can be in (issue #377).
+///
+/// Each `Option` field is `None` when that condition doesn't apply to the
+/// position (e.g. no lock period configured, or no outstanding loan) rather
+/// than a false alarm. `needs_attention` is the OR of the four boolean flags,
+/// so a frontend can branch on it alone without inspecting every field.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PositionHealthAlert {
+    pub user: Address,
+    pub needs_attention: bool,
+    pub approaching_expiry: bool,
+    pub ledgers_until_expiry: Option<u32>,
+    pub lock_ending_soon: bool,
+    pub ledgers_until_unlock: Option<u32>,
+    pub loan_at_risk: bool,
+    pub loan_health_factor_bps: Option<u32>,
+    pub rewards_near_cap: bool,
+}
+
+// ── Issue #376: halving countdown ────────────────────────────────────────────
+
+/// Countdown to the next reward halving, returned by `halving_countdown()`
+/// (issue #376). Builds on the halving schedule from issue #231
+/// (`HalvingConfig`). All fields are zero when no halving schedule has been
+/// configured via `set_halving_config()`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HalvingCountdown {
+    pub next_halving_ledger: u32,
+    pub ledgers_remaining: u32,
+    pub estimated_days_remaining: u32,
+    pub halvings_so_far: u32,
+    pub current_rate_bps: i128,
+    pub post_halving_rate_bps: i128,
+}
+
+// ── Issue #375: governance proposal comment thread ───────────────────────────
+
+/// A single stake-weighted comment on a governance proposal (issue #375).
+///
+/// `stake_weight` is the author's staked shares snapshotted at post time —
+/// same convention `GovernanceProposal` voting already uses ("not adjusted
+/// retroactively if the staker's position changes afterward").
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProposalComment {
+    pub author: Address,
+    pub text: String,
+    pub stake_weight: i128,
+    pub posted_at: u32,
 }
 
 

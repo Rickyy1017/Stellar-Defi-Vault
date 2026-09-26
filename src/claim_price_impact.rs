@@ -45,7 +45,7 @@ pub struct PriceImpactEstimate {
     pub pool_liquidity: i128,
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Estimate the DEX price impact of claiming `user`'s pending reward and
     /// (hypothetically) selling it into `dex_pool`.
