@@ -88,7 +88,7 @@ impl<'a> Fixture<'a> {
     }
 
     fn stake_as(&self, user: &Address, amount: i128) -> i128 {
-        self.vault.stake(user, &amount)
+        self.vault.stake(user, &amount, &0)
     }
 }
 

@@ -42,6 +42,7 @@ pub use vault::batch_vote; // governance batch voting (issue #160) // child of `
 pub use vault::daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit // child of `vault` — see the note at the bottom of vault.rs
 pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
 pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
+pub mod vault_extensions_546_549; // issues #546-#549 — positions cap, precision, large-deposit lock, min funding
 
 // Issues #526-#529: scheduled exit, snapshot airdrop, external price oracle, co-sponsor.
 pub use vault::scheduled_exit; // issue #526 — scheduled self-withdrawal // child of `vault` — see the note at the bottom of vault.rs
@@ -118,6 +119,9 @@ mod test_issue_522; // issue #522 — get_rate_history() rate-change changelog
 
 #[cfg(test)]
 mod test_issue_525; // issue #525 — graceful pool sunset via initiate_sunset()
+
+#[cfg(test)]
+mod test_issues_589_590_592;
 
 // #[cfg(test)]
 // mod test_issues_463_466;

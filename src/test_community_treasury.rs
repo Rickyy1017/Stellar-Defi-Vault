@@ -51,7 +51,7 @@ impl<'a> Fixture<'a> {
     fn fund_treasury_from_fee(&self, user: &Address, stake: i128, withdraw: i128, bps: u32) {
         self.vault.set_treasury_contribution_bps(&self.admin, &bps);
         self.vault.set_unstake_fee_bps(&self.admin, &500);
-        self.vault.deposit(user, &stake);
+        self.vault.deposit(user, &stake, &0);
         self.vault.withdraw(user, &withdraw);
     }
 }
@@ -88,7 +88,7 @@ fn treasury_funded_from_protocol_fees() {
 fn proposal_passes_and_pays_recipient() {
     let f = Fixture::new();
     f.fund_treasury_from_fee(&f.alice, 700_000, 300_000, 10_000);
-    f.vault.deposit(&f.bob, &100_000);
+    f.vault.deposit(&f.bob, &100_000, &0);
 
     let proposal_id = f.vault.propose_spending(
         &f.alice,
@@ -119,7 +119,7 @@ fn proposal_passes_and_pays_recipient() {
 fn failed_proposal_is_blocked() {
     let f = Fixture::new();
     f.fund_treasury_from_fee(&f.alice, 700_000, 300_000, 10_000);
-    f.vault.deposit(&f.bob, &800_000);
+    f.vault.deposit(&f.bob, &800_000, &0);
 
     let proposal_id = f.vault.propose_spending(
         &f.alice,
@@ -140,7 +140,7 @@ fn failed_proposal_is_blocked() {
 #[test]
 fn insufficient_treasury_balance_reverts_execution() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &100_000);
+    f.vault.deposit(&f.alice, &100_000, &0);
 
     let proposal_id = f.vault.propose_spending(
         &f.alice,

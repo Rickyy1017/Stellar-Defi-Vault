@@ -41,8 +41,8 @@ fn pool_summary_aggregates_pool_state() {
     mint(&env, &token, &alice, 1_000);
     mint(&env, &token, &bob, 500);
 
-    client.stake(&alice, &1_000);
-    client.stake(&bob, &500);
+    client.stake(&alice, &1_000, &0);
+    client.stake(&bob, &500, &0);
 
     let summary = client.get_pool_summary();
     assert_eq!(summary.total_deposited, 1_500);
@@ -74,7 +74,7 @@ fn rounding_policy_matches_observed_conversion() {
 
     let alice = Address::generate(&env);
     mint(&env, &token, &alice, 1_000);
-    client.stake(&alice, &1_000);
+    client.stake(&alice, &1_000, &0);
     // 1:1 first deposit, and preview_redeem floors to the same amount.
     assert_eq!(client.preview_redeem(&1_000), 1_000);
     assert_eq!(client.preview_redeem(&999), 999);
@@ -89,7 +89,7 @@ fn projected_runway_matches_formula() {
 
     let alice = Address::generate(&env);
     mint(&env, &token, &alice, 1_000);
-    client.stake(&alice, &1_000);
+    client.stake(&alice, &1_000, &0);
     mint(&env, &token, &admin, 1_000);
     client.fund_reward_pool(&admin, &1_000);
 
@@ -108,7 +108,7 @@ fn rate_change_within_runway_succeeds_and_short_runway_reverts() {
 
     let alice = Address::generate(&env);
     mint(&env, &token, &alice, 1_000);
-    client.stake(&alice, &1_000);
+    client.stake(&alice, &1_000, &0);
     mint(&env, &token, &admin, 1_000);
     client.fund_reward_pool(&admin, &1_000);
 

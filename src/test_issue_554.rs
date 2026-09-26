@@ -69,7 +69,7 @@ impl<'a> Fixture<'a> {
 #[test]
 fn withdrawal_under_cap_succeeds_and_is_tracked() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.set_daily_withdrawal_limit(&600);
 
     let returned = f.vault.withdraw(&f.alice, &500);
@@ -80,7 +80,7 @@ fn withdrawal_under_cap_succeeds_and_is_tracked() {
 #[test]
 fn cumulative_withdrawals_exceeding_cap_revert() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.set_daily_withdrawal_limit(&600);
 
     f.vault.withdraw(&f.alice, &500);
@@ -95,7 +95,7 @@ fn cumulative_withdrawals_exceeding_cap_revert() {
 #[test]
 fn window_rolls_forward_and_old_withdrawals_age_out() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.set_daily_withdrawal_limit(&600);
 
     f.vault.withdraw(&f.alice, &600);
@@ -118,7 +118,7 @@ fn window_rolls_forward_and_old_withdrawals_age_out() {
 #[test]
 fn disabled_limit_does_not_restrict_withdrawals() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     // Limit left at its default (0 = disabled).
     let returned = f.vault.withdraw(&f.alice, &1_000);
     assert_eq!(returned, 1_000);
@@ -128,7 +128,7 @@ fn disabled_limit_does_not_restrict_withdrawals() {
 #[test]
 fn unstake_all_is_subject_to_the_same_cap() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.set_daily_withdrawal_limit(&500);
 
     // A full-position exit isn't a backdoor around the per-user cap.
