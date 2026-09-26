@@ -149,3 +149,12 @@ mod test_issues_502_505;
 
 #[cfg(test)]
 mod test_issue_593; // issue #593 — typed error codes replace ad-hoc panics
+
+#[cfg(test)]
+mod test_issue_621_negative_balance; // issue #621 — negative-balance impossibility proof
+
+#[cfg(test)]
+mod test_issue_622_contractmeta; // issue #622 — contractmeta! name/version/description
+
+#[cfg(test)]
+mod test_issue_623_scale; // issue #623 — max realistic depositor count performance

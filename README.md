@@ -203,6 +203,13 @@ See [Issues](../../issues) for the full list, including those tagged **`Stellar 
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup instructions and the Wave contribution workflow.
 
+## Storage
+
+See [docs/STORAGE.md](./docs/STORAGE.md) for the full audit of which Soroban
+storage type (instance, persistent, or temporary) each piece of contract
+state uses and why, including known scaling risks around the depositor
+registry.
+
 ## Security
 
 See [docs/SECURITY.md](./docs/SECURITY.md) for the full security model, including:

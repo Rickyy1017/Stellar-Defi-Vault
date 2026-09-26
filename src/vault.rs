@@ -141,6 +141,23 @@ pub struct WaitlistEntry {
 #[contract]
 pub struct VaultContract;
 
+// Issue #622: identifying metadata embedded directly in the deployed Wasm's
+// `contractmetav0` custom section (readable via `soroban contract inspect`
+// or equivalent XDR tooling without calling into the contract). `key`/`val`
+// must be string literals — `contractmeta!` parses them at macro-expansion
+// time, so they can't be built from a `const` or `env!("CARGO_PKG_VERSION")`
+// — so `val` below is a literal mirror of `CONTRACT_NAME`/`CONTRACT_VERSION`/
+// `CONTRACT_DESCRIPTION` and of `version` in `Cargo.toml`.
+// `contract_metadata_version_matches_cargo_toml` in `test_issue_622_contractmeta.rs`
+// fails the moment any of the four drift apart, so keep all of them in sync
+// by hand when bumping the version.
+soroban_sdk::contractmeta!(key = "name", val = "stellar-staking-pool");
+soroban_sdk::contractmeta!(key = "version", val = "0.1.0");
+soroban_sdk::contractmeta!(
+    key = "description",
+    val = "A staking pool contract for Stellar DeFi vault positions."
+);
+
 const REENTRANCY_KEY: Symbol = symbol_short!("re_entry");
 
 struct ReentrancyGuard { env: Env }
