@@ -18,7 +18,7 @@ use crate::{
         MigrationExport, Milestone, MilestoneCondition, MultisigConfig, OptimalClaimAdvice,
         PauseInfo, PauseReason, PendingAction, PoolComparison, PoolConfig, PoolHealthReport,
         PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam, Quiz,
-        RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
+        RateChange, RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
         RevenueShareMerkleRoot, RevenueSharingConfig, RewardMultiplierBreakdown, RewardTier,
         RoundingPolicy, Season, SmoothingSchedule, SmoothingStatus, StakeAction, StakeHistoryEntry,
         StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
@@ -114,6 +114,15 @@ pub(crate) const LIQUIDATION_LTV_BPS: u32 = 9_000;
 /// Most active stakers `get_reward_gini_coefficient()` will process in one
 /// call before reverting with `TooManyStakers` (issue #275).
 pub(crate) const MAX_GINI_STAKERS: u32 = 100;
+/// Most rows `get_top_depositors()` will return, whatever `limit` asks for
+/// (issue #523). Keeps the response small enough to render in one page and
+/// bounds the memory its ranking sort can occupy.
+pub const MAX_TOP_DEPOSITORS: u32 = 50;
+/// Most registered depositors a single `get_top_depositors()` call will read
+/// (issue #523). This is that call's per-invocation persistent-read ceiling;
+/// see the query's docs for what is traded away past it. Sized to match
+/// `MAX_GINI_STAKERS`, the other full-registry scan in the contract.
+pub const MAX_DEPOSITOR_SCAN: u32 = 200;
 /// Most seasons `add_season()` will keep scheduled at once (issue #276).
 pub(crate) const MAX_SEASONS: u32 = 10;
 /// Longest allowed `set_staker_bio()` bio, in bytes (issue #274).
@@ -205,6 +214,9 @@ impl VaultContract {
     /// first deposit). Returns the number of shares minted.
     pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         user.require_auth();
+        // Issue #525: no new deposits once the pool is sunsetting. Checked
+        // before any state is written so a rejected deposit leaves nothing.
+        Self::require_no_sunset(&env)?;
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
@@ -259,18 +271,28 @@ impl VaultContract {
         Self::stake(env, user, amount)
     }
 
-    /// Admin: set the base reward APR in basis points.
+    /// Admin: set the base reward APR in basis points. Every accepted update is
+    /// appended to the on-chain changelog returned by `get_rate_history`.
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::validate_rate_bps(rate_bps)?;
         crate::vault_extensions_538_541::clear_rate_ramp(&env);
+        let old_rate = balance::get_reward_rate_bps(&env);
         balance::set_reward_rate_bps(&env, rate_bps);
+        balance::record_rate_change(&env, old_rate, rate_bps);
         Ok(())
     }
 
     /// Read-only reward rate APR in basis points (interpolated if a rate ramp is active).
     pub fn get_reward_rate_bps(env: Env) -> u32 {
         crate::vault_extensions_538_541::compute_current_rate(&env)
+    }
+
+    /// Read-only: the on-chain log of reward-rate changes, oldest entry first
+    /// (issue #522). At most `MAX_RATE_HISTORY_ENTRIES` entries are retained;
+    /// further changes evict the oldest entry. Empty before the first change.
+    pub fn get_rate_history(env: Env) -> Vec<RateChange> {
+        balance::get_rate_history(&env)
     }
 
     /// Sets or replaces the secondary emergency admin address.
@@ -608,6 +630,76 @@ impl VaultContract {
         result
     }
 
+    /// Claim `amount` of the pending reward instead of the whole balance,
+    /// paid in the configured reward token (issue #524) and leaving the rest
+    /// of the position's reward pending for a later claim.
+    ///
+    /// `amount` is the *gross* amount taken off the pending balance: the same
+    /// stake-funded bug-bounty contribution and claim fee that `claim`
+    /// deducts are applied to it, and the net remainder is what reaches the
+    /// staker (and is what this call returns), exactly as in `do_claim`.
+    ///
+    /// Reverts with `ZeroAmount` for a non-positive amount, and with
+    /// `InsufficientRewardPool` when `amount` exceeds what has accrued.
+    /// (`VaultError` sits at Soroban's 50-variant cap, so the over-claim case
+    /// reuses that existing slot rather than adding a new variant.)
+    ///
+    /// Returns 0 without touching state while peg protection halts emissions,
+    /// and applies the same standalone-claim rate limit as `claim`. Unlike
+    /// `claim` it is never routed through the MEV large-claim queue: a partial
+    /// claim is a deliberate, bounded withdrawal rather than a large one.
+    pub fn claim_partial(env: Env, staker: Address, amount: i128) -> Result<i128, VaultError> {
+        staker.require_auth();
+        Self::check_claim_rate_limit(&env, &staker);
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        if crate::peg_stabilization::emissions_halted(&env) {
+            return Ok(0);
+        }
+
+        let pending = balance::get_accrued_reward(&env, &staker);
+        if amount > pending {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
+        balance::set_accrued_reward(&env, &staker, pending - amount);
+        let total_paid = balance::get_total_rewards_paid(&env);
+        balance::set_total_rewards_paid(
+            &env,
+            total_paid
+                .checked_add(amount)
+                .ok_or(VaultError::ArithmeticError)?,
+        );
+
+        let bounty_contribution =
+            crate::stake_funded_bug_bounty::deduct_bounty_contribution(&env, &staker, amount);
+        let reward_after_bounty = amount.saturating_sub(bounty_contribution);
+        let user_payout = crate::claim_fee::apply_claim_fee(&env, &staker, reward_after_bounty)?;
+
+        if user_payout > 0 {
+            let reward_token_addr = Self::reward_token_address(&env)?;
+            token::Client::new(&env, &reward_token_addr).transfer(
+                &env.current_contract_address(),
+                &staker,
+                &user_payout,
+            );
+        }
+
+        crate::reward_token_audit_trail::log_reward_movement(
+            &env,
+            crate::reward_token_audit_trail::MovementType::RewardPaid,
+            env.current_contract_address(),
+            staker.clone(),
+            user_payout,
+            String::from_str(&env, "claim_partial"),
+        );
+
+        events::claimed(&env, &staker, user_payout, env.ledger().sequence());
+        balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
+        Ok(user_payout)
+    }
+
     /// Convenience function that claims pending rewards and adds a new stake
     /// position in a single transaction, requiring only one user authorisation.
     ///
@@ -777,6 +869,19 @@ impl VaultContract {
             .ok_or(VaultError::NotInitialized)
     }
 
+    /// The token rewards are paid in (issue #524): the admin-configured reward
+    /// token, or the deposit token when `set_reward_token` was never called.
+    ///
+    /// Single source of truth for the reward payout asset, so `get_reward_token`,
+    /// `claim` and `claim_partial` cannot disagree about which token a staker is
+    /// paid in. `NotInitialized` only when the pool has no deposit token at all.
+    fn reward_token_address(env: &Env) -> Result<Address, VaultError> {
+        match balance::get_reward_token(env) {
+            Some(reward_token) => Ok(reward_token),
+            None => Self::token_address(env),
+        }
+    }
+
     /// Shared accessor for the paused flag to keep pause/unpause reads uniform.
     fn paused(env: &Env) -> bool {
         env.storage()
@@ -795,9 +900,48 @@ impl VaultContract {
         Self::token_address(&env)
     }
 
-    /// Read-only query for the reward token address.
+    /// Read-only query for the reward token address (issue #524).
+    ///
+    /// Returns the admin-configured reward token, or the deposit token when
+    /// `set_reward_token` has never been called, so a pool that never decoupled
+    /// its two assets reports (and pays) the deposit token exactly as before.
+    /// Reverts with `NotInitialized` only when the pool has no deposit token.
     pub fn get_reward_token(env: Env) -> Result<Address, VaultError> {
-        balance::get_reward_token(&env).ok_or(VaultError::NotInitialized)
+        Self::reward_token_address(&env)
+    }
+
+    /// Admin: set the token staking rewards are paid in, decoupling the reward
+    /// asset from the deposit asset (issue #524).
+    ///
+    /// Once set, `claim` and `claim_partial` pay out in `token` rather than the
+    /// deposit token, and `fund_reward_pool` pulls `token` from the funder — the
+    /// vault must therefore hold a balance of this token to pay rewards. Passing
+    /// the deposit token restores the original single-token behaviour.
+    ///
+    /// Reverts with `Unauthorized` when `admin` is not the stored admin, and with
+    /// `InvalidAddress` when `token` is this contract's own address.
+    ///
+    /// Scope note: reward amounts are moved as raw units — this contract applies
+    /// no decimal re-scaling between the two assets — so a reward token with
+    /// different precision from the deposit token pays out in raw reward-token
+    /// units. The precision-aware normalisation the pool documents
+    /// (`reward_decimals`) is not yet implemented in the accrual path.
+    pub fn set_reward_token(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if token == env.current_contract_address() {
+            return Err(VaultError::InvalidAddress);
+        }
+        balance::set_reward_token(&env, &token);
+        events::admin_action_set_reward_token(&env, &admin, &token);
+        balance::increment_admin_action_count(&env);
+        Ok(())
     }
 
     /// Read-only: ledger sequence of the last state-changing operation (issue #69).
@@ -1528,6 +1672,45 @@ impl VaultContract {
         Self::unpause_by(&env, &admin)
     }
 
+    /// Admin: begin a graceful pool sunset (issue #525) — the deprecation path
+    /// for winding a pool down instead of pausing it.
+    ///
+    /// From this call on, new deposits are rejected with
+    /// `VaultError::PoolShuttingDown` on every deposit path, while existing
+    /// users keep a clear window to get out: withdrawals, `unstake_all` and
+    /// claims all stay open, and the unstake fee is waived for as long as the
+    /// sunset is in effect (see `get_sunset_status`).
+    ///
+    /// `exit_deadline` is the ledger by which users are asked to have exited.
+    /// It is informational — nothing force-closes the pool once it passes.
+    ///
+    /// One-way: there is no `cancel_sunset`, so deposits never reopen. The
+    /// issue's notes flag reversibility as a PR discussion point, and adding it
+    /// later is backwards compatible.
+    ///
+    /// Reverts with `Unauthorized` when `admin` is not the stored admin.
+    pub fn initiate_sunset(env: Env, admin: Address, exit_deadline: u32) -> Result<(), VaultError> {
+        admin.require_auth();
+        let stored_admin = admin::get_admin(&env)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        balance::set_sunset_exit_deadline(&env, exit_deadline);
+        events::sunset_initiated(&env, &admin, exit_deadline);
+        Ok(())
+    }
+
+    /// Read-only: the sunset exit deadline in effect, or `None` when the pool
+    /// has never been sunset (issue #525).
+    ///
+    /// Because the sunset is one-way this never returns to `None` once set,
+    /// including after `exit_deadline` has passed — a past deadline means the
+    /// window has elapsed, not that deposits are open again. `Some(_)` is the
+    /// signal that deposits are blocked and withdrawals are fee-free.
+    pub fn get_sunset_status(env: Env) -> Option<u32> {
+        balance::get_sunset_exit_deadline(&env)
+    }
+
     /// Pause all deposits and withdrawals now, scheduling an automatic
     /// unpause once `target_ledger` is reached (issue #556) — useful for
     /// planned maintenance windows where the duration is known in advance,
@@ -2162,6 +2345,17 @@ impl VaultContract {
         Ok(())
     }
 
+    /// Issue #525: reject new deposits once a graceful sunset has been started.
+    /// Withdrawals, `unstake_all` and claims deliberately stay open, and the
+    /// unstake fee is waived (see `do_unstake`/`withdraw_to`), so this is only
+    /// called from the deposit paths.
+    fn require_no_sunset(env: &Env) -> Result<(), VaultError> {
+        if balance::get_sunset_exit_deadline(env).is_some() {
+            return Err(VaultError::PoolShuttingDown);
+        }
+        Ok(())
+    }
+
     fn require_not_stopped(env: &Env) -> Result<(), VaultError> {
         if env.storage().instance().has(&DataKey::Stopped)
             && env
@@ -2195,6 +2389,9 @@ impl VaultContract {
     fn check_claim_rate_limit(_env: &Env, _user: &Address) {}
 
     fn do_stake_inner(env: &Env, user: &Address, amount: i128) -> Result<i128, VaultError> {
+        // Issue #525: the `stake_and_claim` path must not slip past the sunset
+        // gate that `stake` applies.
+        Self::require_no_sunset(env)?;
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
@@ -2243,8 +2440,15 @@ impl VaultContract {
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
         let token_addr = Self::token_address(env)?;
-        let unstake_fee_bps =
-            crate::vault_extensions_538_541::get_effective_unstake_fee_bps(env, &token_addr);
+        // Issue #525: withdrawals are fee-free for the whole sunset window, so
+        // a sunsetting user exits at full value. Everything below is already
+        // gated on `fee > 0`, so a zero fee also skips the treasury/buyback
+        // routing and the protocol-fee accounting.
+        let unstake_fee_bps = if balance::get_sunset_exit_deadline(env).is_some() {
+            0
+        } else {
+            crate::vault_extensions_538_541::get_effective_unstake_fee_bps(env, &token_addr)
+        };
         let fee = amount
             .checked_mul(unstake_fee_bps as i128)
             .and_then(|v| v.checked_div(10_000))
@@ -2298,6 +2502,12 @@ impl VaultContract {
         if crate::peg_stabilization::emissions_halted(env) {
             return Ok(0);
         }
+        // Issue #524: the reward itself is paid in the configured reward token,
+        // which falls back to the deposit token when none is configured. The gas
+        // rebate below stays on the deposit token, because that is the token
+        // `fund_gas_rebate_pool` takes the rebate funds in.
+        let reward_token_addr = Self::reward_token_address(env)?;
+        let reward_token_client = token::Client::new(env, &reward_token_addr);
         let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
         // Ensure contract has enough balance (mock in tests will handle)
@@ -2311,7 +2521,7 @@ impl VaultContract {
         let user_payout = crate::claim_fee::apply_claim_fee(env, staker, reward_after_bounty)?;
 
         if user_payout > 0 {
-            token_client.transfer(&env.current_contract_address(), staker, &user_payout);
+            reward_token_client.transfer(&env.current_contract_address(), staker, &user_payout);
         }
 
         // Issue #569: pay the configured gas rebate out of its dedicated pool,
@@ -2381,6 +2591,49 @@ impl VaultContract {
     /// ever deposited into the pool (issue #568).
     pub fn get_depositor_count(env: Env) -> u32 {
         Self::depositor_count(&env)
+    }
+
+    // ── Issue #523: top-depositor leaderboard ──────────────────────────────
+
+    /// Read-only leaderboard of the largest depositor positions (issue #523),
+    /// so a frontend can render a leaderboard and pool concentration is
+    /// visible at a glance without paging through every position off-chain.
+    ///
+    /// Returns up to `limit` `(depositor, position_size)` pairs sorted
+    /// descending by position size, where size is the depositor's share
+    /// balance converted at the current share price (`shares_to_amount`, i.e.
+    /// stake-token units, not raw shares — every depositor converts at the
+    /// same price, so the ordering is the same either way, but the converted
+    /// value is what a leaderboard should display). `limit` is clamped to
+    /// `MAX_TOP_DEPOSITORS` (50), and `0` returns an empty vec. Depositors
+    /// with no position left are skipped, and equal sizes keep registration
+    /// order, so the output is deterministic for identical state.
+    ///
+    /// No auth required, no state changes, no events, so it is cheap and safe
+    /// to poll.
+    ///
+    /// # Read bounds
+    ///
+    /// One instance read for the staker registry, two for the share price
+    /// (`total_shares`, `total_deposited`), and at most `MAX_DEPOSITOR_SCAN`
+    /// persistent share-balance reads. The running ranking is trimmed back to
+    /// `limit` rows as it is built, so memory never exceeds that cap: worst
+    /// case ~200 persistent reads plus 3 instance reads, no matter how many
+    /// depositors the pool has.
+    ///
+    /// Those bounds are also the honest caveat. The scan is a full pass over
+    /// the registry, truncated at `MAX_DEPOSITOR_SCAN` depositors *in
+    /// registration order*, so on a pool larger than that a later depositor
+    /// is simply not considered and this is a partial leaderboard, not a
+    /// global one. That ceiling is the price of a bounded read; if a pool ever
+    /// needs to grow past it, the fix is a maintained sorted top-N index
+    /// updated on deposit/unstake rather than a wider scan here.
+    pub fn get_top_depositors(env: Env, limit: u32) -> Vec<(Address, i128)> {
+        let limit = limit.min(MAX_TOP_DEPOSITORS);
+        if limit == 0 {
+            return Vec::new(&env);
+        }
+        Self::rank_top_depositors(&env, limit)
     }
 
     // ── Issue #569: reward-claim gas rebate ────────────────────────────────
@@ -2481,6 +2734,61 @@ absent events and must not treat event presence as proof of a balance.",
     }
 
     // ── Shared helpers ─────────────────────────────────────────────────────
+
+    /// Ranks registered depositors by position size, highest first, keeping at
+    /// most `limit` rows (issue #523). `limit` must be non-zero;
+    /// `get_top_depositors()` clamps it.
+    ///
+    /// Reads `total_shares`/`total_deposited` once and reuses them for every
+    /// depositor, so the whole scan costs one registry read plus one share read
+    /// per depositor examined — at most `MAX_DEPOSITOR_SCAN` of those. This is
+    /// the same descending-insertion idiom `competitive_season` uses for its
+    /// season-end ranking.
+    fn rank_top_depositors(env: &Env, limit: u32) -> Vec<(Address, i128)> {
+        let total_shares = balance::get_total_shares(env);
+        let total_deposited = balance::get_total_deposited(env);
+        let all_stakers = balance::get_all_stakers(env);
+
+        let mut ranked: Vec<(Address, i128)> = Vec::new(env);
+        let scan_len = all_stakers.len().min(MAX_DEPOSITOR_SCAN);
+
+        for i in 0..scan_len {
+            let depositor = all_stakers.get(i).unwrap();
+            let shares = balance::get_shares(env, &depositor);
+            if shares <= 0 {
+                continue;
+            }
+            // `None` means the conversion overflowed, which is not a size we
+            // can rank, so it drops out along with exited positions.
+            let size =
+                balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
+            if size <= 0 {
+                continue;
+            }
+
+            // Stop at the first row this depositor outranks, which leaves
+            // equal sizes in registration order behind it.
+            let mut inserted = false;
+            for j in 0..ranked.len() {
+                if size > ranked.get(j).unwrap().1 {
+                    ranked.insert(j, (depositor.clone(), size));
+                    inserted = true;
+                    break;
+                }
+            }
+            if !inserted {
+                ranked.push_back((depositor.clone(), size));
+            }
+
+            // Trim as we go so memory stays bounded by `limit` however many
+            // depositors are scanned.
+            while ranked.len() > limit {
+                ranked.pop_back();
+            }
+        }
+
+        ranked
+    }
 
     fn depositor_count(env: &Env) -> u32 {
         env.storage()
@@ -3206,8 +3514,15 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
 
+        // Issue #525: same fee waiver as `do_unstake` — `withdraw_to` is a
+        // withdrawal too, so it stays open and free during a sunset.
+        let unstake_fee_bps = if balance::get_sunset_exit_deadline(&env).is_some() {
+            0
+        } else {
+            balance::get_unstake_fee_bps(&env)
+        };
         let fee = amount
-            .checked_mul(balance::get_unstake_fee_bps(&env) as i128)
+            .checked_mul(unstake_fee_bps as i128)
             .and_then(|v| v.checked_div(10_000))
             .ok_or(VaultError::ArithmeticError)?;
         let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
@@ -3276,6 +3591,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         amounts: Vec<i128>,
     ) -> Result<(), VaultError> {
         caller.require_auth();
+
+        // Issue #525: batch deposits are deposits too.
+        Self::require_no_sunset(&env)?;
 
         if beneficiaries.len() != amounts.len() {
             return Err(VaultError::ArithmeticError);

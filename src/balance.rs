@@ -3,8 +3,8 @@ use crate::storage::{
     ContractDelegate, DataKey, DayBucket, DynamicFeeConfig, FeeRecipient, FlashStakeReceipt,
     GovernanceProposal, InsurancePolicy, InsuranceProduct, Loan, LoanConfig, LotteryConfig,
     Milestone, MultisigConfig, OnboardingChecklist, PendingAction, PriceCondition,
-    PriorityBidRecord, Quiz, RateHistoryEntry, ReferralStats, RewardTier, RevenueShareMerkleRoot,
-    RevenueSharingConfig, Season, StakePosition, SunsetState, VestingEntry,
+    PriorityBidRecord, Quiz, RateChange, RateHistoryEntry, ReferralStats, RevenueShareMerkleRoot,
+    RevenueSharingConfig, RewardTier, Season, StakePosition, SunsetState, VestingEntry,
 };
 
 use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
@@ -172,15 +172,33 @@ pub fn set_quiz_count(env: &Env, count: u32) {
         .set(&Symbol::new(env, "quiz_count"), &count);
 }
 
-pub fn get_rate_history(env: &Env) -> Vec<(u32, u32)> {
+/// The rolling on-chain log of reward-rate changes written by `set_reward_rate_bps`
+/// and exposed by `get_rate_history` (issue #522), oldest entry first.
+pub fn get_rate_history(env: &Env) -> Vec<RateChange> {
     env.storage()
         .instance()
         .get(&DataKey::RateHistory)
         .unwrap_or(Vec::new(env))
 }
 
-pub fn set_rate_history(env: &Env, history: &Vec<(u32, u32)>) {
+pub fn set_rate_history(env: &Env, history: &Vec<RateChange>) {
     env.storage().instance().set(&DataKey::RateHistory, history);
+}
+
+/// Appends one reward-rate change to the rolling log, evicting the oldest
+/// entries first once `MAX_RATE_HISTORY_ENTRIES` is reached. Changes are logged
+/// even when the rate is unchanged, matching the `rate_changed` event.
+pub fn record_rate_change(env: &Env, old_rate_bps: u32, new_rate_bps: u32) {
+    let mut history = get_rate_history(env);
+    while history.len() >= MAX_RATE_HISTORY_ENTRIES {
+        history.remove(0);
+    }
+    history.push_back(RateChange {
+        old_rate_bps,
+        new_rate_bps,
+        changed_at: env.ledger().sequence(),
+    });
+    set_rate_history(env, &history);
 }
 
 pub const MAX_RATE_HISTORY_ENTRIES: u32 = 50;
@@ -2272,6 +2290,22 @@ pub fn set_grace_period_end(env: &Env, ledger: u32) {
     env.storage()
         .instance()
         .set(&symbol_short!("snst_gpe"), &ledger);
+}
+
+/// The ledger by which existing users are asked to have exited a sunsetting
+/// pool, set once by `initiate_sunset` (issue #525). `None` until then, and
+/// never cleared afterwards: the sunset is a one-way action.
+///
+/// Symbol-keyed because `DataKey` is at Soroban's 50-variant cap, the same
+/// reason the #298 sunset accessors above avoid a new variant.
+pub fn get_sunset_exit_deadline(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("snst_dl"))
+}
+
+pub fn set_sunset_exit_deadline(env: &Env, deadline: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("snst_dl"), &deadline);
 }
 
 // ── Issue #281: Fee Revenue Sharing ──────────────────────────────────────────

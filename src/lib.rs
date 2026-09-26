@@ -93,6 +93,18 @@ mod test_issues_568_571;
 #[cfg(test)]
 mod test_issues_526_529;
 
+#[cfg(test)]
+mod test_top_depositors; // issue #523 — get_top_depositors leaderboard query
+
+#[cfg(test)]
+mod test_issue_524; // issue #524 — configurable reward payout token
+
+#[cfg(test)]
+mod test_issue_522; // issue #522 — get_rate_history() rate-change changelog
+
+#[cfg(test)]
+mod test_issue_525; // issue #525 — graceful pool sunset via initiate_sunset()
+
 // #[cfg(test)]
 // mod test_issues_463_466;
 // #[cfg(test)]
