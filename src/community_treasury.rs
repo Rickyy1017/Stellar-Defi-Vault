@@ -67,7 +67,7 @@ pub fn get_community_treasury_balance(env: &Env) -> i128 {
         .unwrap_or(0)
 }
 
-fn set_community_treasury_balance(env: &Env, amount: i128) {
+pub(crate) fn set_community_treasury_balance(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&COMMUNITY_TREASURY_BALANCE_KEY, &amount);

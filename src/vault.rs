@@ -238,6 +238,9 @@ impl VaultContract {
         // Issue #512: credit what actually arrived, not the stated amount.
         let amount = crate::transfer_safety::pull_tokens(&env, &token_addr, &user, amount)?;
 
+        // Issue #488: cap the user's total position, not just this deposit.
+        crate::max_deposit_cap::enforce(&env, &user, amount);
+
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
         let shares_minted = if total_shares == 0 || total_deposited == 0 {
