@@ -148,4 +148,6 @@ mod test_issues_498_501;
 mod test_issues_502_505;
 
 #[cfg(test)]
+mod test_admin_handover_timelock; // admin change invalidates pending timelocked actions
+#[cfg(test)]
 mod test_issue_593; // issue #593 — typed error codes replace ad-hoc panics

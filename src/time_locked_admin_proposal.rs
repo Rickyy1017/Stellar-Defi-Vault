@@ -59,6 +59,27 @@ fn set_proposals(env: &Env, proposals: &Vec<AdminProposal>) {
     env.storage().instance().set(&PROPOSALS_KEY, proposals);
 }
 
+/// Marks every open (neither executed nor cancelled) proposal as cancelled,
+/// returning how many were cancelled. Called by `admin::set_admin` on an
+/// admin change: an announcement made by the previous admin must not be
+/// executable by, or inherited by, the new one.
+pub(crate) fn cancel_open_proposals(env: &Env) -> u32 {
+    let mut proposals = get_proposals(env);
+    let mut cancelled: u32 = 0;
+    for i in 0..proposals.len() {
+        let mut proposal = proposals.get(i).unwrap();
+        if !proposal.executed && !proposal.cancelled {
+            proposal.cancelled = true;
+            proposals.set(i, proposal);
+            cancelled += 1;
+        }
+    }
+    if cancelled > 0 {
+        set_proposals(env, &proposals);
+    }
+    cancelled
+}
+
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #455: Admin publicly announces an intended configuration
