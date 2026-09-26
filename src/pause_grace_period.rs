@@ -25,7 +25,7 @@ use soroban_sdk::{contractimpl, symbol_short, Address, Env, Symbol};
 
 use crate::admin;
 use crate::balance;
-use crate::errors::VaultFeature3Error;
+use crate::errors::VaultFeature4Error;
 use crate::storage::DataKey;
 use crate::vault::{VaultContract, LEDGERS_PER_DAY};
 
@@ -79,13 +79,13 @@ impl VaultContract {
     /// paused before anyone can call `force_unpause()`. `0` disables the
     /// limit. Reverts with `InvalidPauseDuration` while the vault is paused
     /// or when a non-zero value is below `MIN_MAX_PAUSE_LEDGERS`.
-    pub fn set_max_pause_duration(env: Env, ledgers: u32) -> Result<(), VaultFeature3Error> {
+    pub fn set_max_pause_duration(env: Env, ledgers: u32) -> Result<(), VaultFeature4Error> {
         admin::require_admin(&env)?;
         if is_paused_raw(&env) {
-            return Err(VaultFeature3Error::InvalidPauseDuration);
+            return Err(VaultFeature4Error::InvalidPauseDuration);
         }
         if ledgers != 0 && ledgers < MIN_MAX_PAUSE_LEDGERS {
-            return Err(VaultFeature3Error::InvalidPauseDuration);
+            return Err(VaultFeature4Error::InvalidPauseDuration);
         }
         let old = read_max_pause_ledgers(&env);
         env.storage().instance().set(&MAX_PAUSE_KEY, &ledgers);
@@ -108,15 +108,15 @@ impl VaultContract {
     /// Permissionless: lift a pause that has exceeded the configured maximum
     /// duration. Blocks the admin from re-pausing for another
     /// `max_pause_ledgers`.
-    pub fn force_unpause(env: Env, caller: Address) -> Result<(), VaultFeature3Error> {
+    pub fn force_unpause(env: Env, caller: Address) -> Result<(), VaultFeature4Error> {
         caller.require_auth();
         if !is_paused_raw(&env) {
-            return Err(VaultFeature3Error::NotPaused);
+            return Err(VaultFeature4Error::NotPaused);
         }
-        let deadline = pause_deadline(&env).ok_or(VaultFeature3Error::GracePeriodNotElapsed)?;
+        let deadline = pause_deadline(&env).ok_or(VaultFeature4Error::GracePeriodNotElapsed)?;
         let now = env.ledger().sequence();
         if now < deadline {
-            return Err(VaultFeature3Error::GracePeriodNotElapsed);
+            return Err(VaultFeature4Error::GracePeriodNotElapsed);
         }
 
         env.storage().instance().set(&DataKey::Paused, &false);

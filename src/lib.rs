@@ -19,6 +19,8 @@ pub mod vault;
 // so all of them use raw `Symbol`-keyed storage as `balance.rs` does.
 pub mod vesting_cliff; // issue #287 — reward vesting cliff
 pub mod vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log
+pub mod vault_extensions_538_541; // issues #538-#541 — version, token fee, rate ramp, memo
+pub mod vault_extensions_542_545; // issues #542-#545 — seed liquidity, APY history, low-balance alert, notifications
 pub mod minimum_unstake_amount; // issue #441 — minimum unstake amount
 pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty

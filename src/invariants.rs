@@ -16,47 +16,47 @@
 use soroban_sdk::{contractimpl, token, Address, Env};
 
 use crate::balance;
-use crate::errors::VaultFeature3Error;
+use crate::errors::VaultFeature4Error;
 use crate::storage::DataKey;
 use crate::vault::VaultContract;
 
 /// Runs every invariant, returning the first violation found.
-pub(crate) fn check_invariants(env: &Env) -> Result<(), VaultFeature3Error> {
+pub(crate) fn check_invariants(env: &Env) -> Result<(), VaultFeature4Error> {
     let total_shares = balance::get_total_shares(env);
     let total_deposited = balance::get_total_deposited(env);
     let reward_pool = balance::get_reward_pool_balance(env);
     if total_shares < 0 || total_deposited < 0 || reward_pool < 0 {
-        return Err(VaultFeature3Error::NegativeAccounting);
+        return Err(VaultFeature4Error::NegativeAccounting);
     }
 
     let mut share_sum: i128 = 0;
     for staker in balance::get_all_stakers(env).iter() {
         let shares = balance::get_shares(env, &staker);
         if shares < 0 {
-            return Err(VaultFeature3Error::NegativeAccounting);
+            return Err(VaultFeature4Error::NegativeAccounting);
         }
         share_sum = share_sum
             .checked_add(shares)
-            .ok_or(VaultFeature3Error::SharesMismatch)?;
+            .ok_or(VaultFeature4Error::SharesMismatch)?;
     }
     if share_sum != total_shares {
-        return Err(VaultFeature3Error::SharesMismatch);
+        return Err(VaultFeature4Error::SharesMismatch);
     }
 
     let stake_token: Address = env
         .storage()
         .instance()
         .get(&DataKey::Token)
-        .ok_or(VaultFeature3Error::NotInitialized)?;
+        .ok_or(VaultFeature4Error::NotInitialized)?;
     let mut required = total_deposited;
     if balance::get_reward_token(env).as_ref() == Some(&stake_token) {
         required = required
             .checked_add(reward_pool)
-            .ok_or(VaultFeature3Error::Undercollateralized)?;
+            .ok_or(VaultFeature4Error::Undercollateralized)?;
     }
     let held = token::Client::new(env, &stake_token).balance(&env.current_contract_address());
     if held < required {
-        return Err(VaultFeature3Error::Undercollateralized);
+        return Err(VaultFeature4Error::Undercollateralized);
     }
 
     Ok(())
@@ -67,7 +67,7 @@ impl VaultContract {
     /// Read-only health check: reverts with `NegativeAccounting`,
     /// `SharesMismatch` or `Undercollateralized` when core vault accounting
     /// is inconsistent, and succeeds otherwise.
-    pub fn assert_invariants(env: Env) -> Result<(), VaultFeature3Error> {
+    pub fn assert_invariants(env: Env) -> Result<(), VaultFeature4Error> {
         check_invariants(&env)
     }
 }

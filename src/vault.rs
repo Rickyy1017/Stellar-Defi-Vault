@@ -209,6 +209,11 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
+        // Issue #542: block public deposits until the admin has seeded the
+        // reward pool to the configured minimum. Admin seeding via
+        // `fund_reward_pool` never hits this path, so it can't deadlock.
+        crate::vault_extensions_542_545::require_pool_seeded(&env)?;
+
         // Issue #568: enforce the unique-depositor cap before moving any tokens
         // so a rejected first-time deposit leaves no state behind.
         Self::register_depositor(&env, &user)?;
@@ -250,6 +255,9 @@ impl VaultContract {
             amount,
             shares_minted,
         );
+
+        // Issue #544: single-shot low-balance alert on state-changing calls.
+        crate::vault_extensions_542_545::check_and_emit_low_balance(&env);
 
         Ok(shares_minted)
     }
@@ -2198,6 +2206,8 @@ impl VaultContract {
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
+        // Issue #542: same seed gate as `stake` for the `stake_and_claim` path.
+        crate::vault_extensions_542_545::require_pool_seeded(env)?;
         // Issue #568: same unique-depositor cap as `stake`, so the
         // `stake_and_claim` path can't bypass it.
         Self::register_depositor(env, user)?;
@@ -2227,6 +2237,8 @@ impl VaultContract {
             amount,
             shares,
         );
+        // Issue #544: single-shot low-balance alert on state-changing calls.
+        crate::vault_extensions_542_545::check_and_emit_low_balance(env);
         Ok(shares)
     }
 
@@ -2287,6 +2299,8 @@ impl VaultContract {
             amount,
             shares,
         );
+        // Issue #544: single-shot low-balance alert on state-changing calls.
+        crate::vault_extensions_542_545::check_and_emit_low_balance(env);
         Ok(amount)
     }
 
@@ -2343,6 +2357,8 @@ impl VaultContract {
         crate::position_value_appreciation_log::maybe_auto_snapshot(env, staker);
 
         events::claimed(env, staker, user_payout, env.ledger().sequence());
+        // Issue #544: single-shot low-balance alert on state-changing calls.
+        crate::vault_extensions_542_545::check_and_emit_low_balance(env);
         Ok(user_payout)
     }
 }

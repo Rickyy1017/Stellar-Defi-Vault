@@ -862,12 +862,12 @@ impl From<VaultError> for VaultFeature2Error {
     }
 }
 
-/// Ninth error enum for issues #530-#533 (activity log, invariant checker,
+/// Tenth error enum for issues #530-#533 (activity log, invariant checker,
 /// reward-rate ceiling, pause grace period).
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum VaultFeature3Error {
+pub enum VaultFeature4Error {
     /// Mirrors `VaultError::Unauthorized`.
     Unauthorized = 1,
     /// Mirrors `VaultError::NotInitialized`.
@@ -894,12 +894,12 @@ pub enum VaultFeature3Error {
     Undercollateralized = 9,
 }
 
-impl From<VaultError> for VaultFeature3Error {
+impl From<VaultError> for VaultFeature4Error {
     fn from(err: VaultError) -> Self {
         match err {
-            VaultError::Unauthorized => VaultFeature3Error::Unauthorized,
-            VaultError::NotInitialized => VaultFeature3Error::NotInitialized,
-            _ => VaultFeature3Error::Unauthorized,
+            VaultError::Unauthorized => VaultFeature4Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature4Error::NotInitialized,
+            _ => VaultFeature4Error::Unauthorized,
         }
     }
 }

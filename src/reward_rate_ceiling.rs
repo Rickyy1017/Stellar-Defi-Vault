@@ -19,7 +19,7 @@ use soroban_sdk::{contractimpl, symbol_short, Env, Symbol};
 
 use crate::admin;
 use crate::balance;
-use crate::errors::VaultFeature3Error;
+use crate::errors::VaultFeature4Error;
 use crate::vault::VaultContract;
 
 const MAX_RATE_KEY: Symbol = symbol_short!("max_rate");
@@ -44,14 +44,14 @@ impl VaultContract {
     /// ceiling can never be raised. Reverts with `InvalidRateCeiling` when
     /// `max_bps` is zero, above the current ceiling, or below the currently
     /// active reward rate (lower the rate first).
-    pub fn set_max_reward_rate(env: Env, max_bps: u32) -> Result<(), VaultFeature3Error> {
+    pub fn set_max_reward_rate(env: Env, max_bps: u32) -> Result<(), VaultFeature4Error> {
         admin::require_admin(&env)?;
         let current_ceiling = read_max_reward_rate(&env);
         if max_bps == 0
             || max_bps > current_ceiling
             || max_bps < balance::get_reward_rate_bps(&env)
         {
-            return Err(VaultFeature3Error::InvalidRateCeiling);
+            return Err(VaultFeature4Error::InvalidRateCeiling);
         }
         env.storage().instance().set(&MAX_RATE_KEY, &max_bps);
         env.events()
