@@ -2292,6 +2292,22 @@ pub fn set_grace_period_end(env: &Env, ledger: u32) {
         .set(&symbol_short!("snst_gpe"), &ledger);
 }
 
+/// The ledger by which existing users are asked to have exited a sunsetting
+/// pool, set once by `initiate_sunset` (issue #525). `None` until then, and
+/// never cleared afterwards: the sunset is a one-way action.
+///
+/// Symbol-keyed because `DataKey` is at Soroban's 50-variant cap, the same
+/// reason the #298 sunset accessors above avoid a new variant.
+pub fn get_sunset_exit_deadline(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("snst_dl"))
+}
+
+pub fn set_sunset_exit_deadline(env: &Env, deadline: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("snst_dl"), &deadline);
+}
+
 // ── Issue #281: Fee Revenue Sharing ──────────────────────────────────────────
 
 pub fn get_revenue_sharing_config(env: &Env) -> Option<RevenueSharingConfig> {

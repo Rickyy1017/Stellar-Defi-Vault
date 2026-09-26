@@ -1118,6 +1118,16 @@ pub fn sunset_stage_changed(env: &Env, new_state: crate::storage::SunsetState, l
     env.events().publish(topics, (new_state, ledger));
 }
 
+/// Emitted once when `initiate_sunset` starts a graceful pool sunset
+/// (issue #525). `exit_deadline` is the ledger by which existing users are
+/// asked to have exited; deposits stay blocked for good afterwards, while
+/// withdrawals and claims remain open.
+pub fn sunset_initiated(env: &Env, admin: &Address, exit_deadline: u32) {
+    let topics = (symbol_short!("snst_ini"), admin);
+    env.events()
+        .publish(topics, (exit_deadline, env.ledger().sequence()));
+}
+
 pub fn force_resolved(
     env: &Env,
     user: &Address,

@@ -214,6 +214,9 @@ impl VaultContract {
     /// first deposit). Returns the number of shares minted.
     pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         user.require_auth();
+        // Issue #525: no new deposits once the pool is sunsetting. Checked
+        // before any state is written so a rejected deposit leaves nothing.
+        Self::require_no_sunset(&env)?;
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
@@ -1669,6 +1672,45 @@ impl VaultContract {
         Self::unpause_by(&env, &admin)
     }
 
+    /// Admin: begin a graceful pool sunset (issue #525) — the deprecation path
+    /// for winding a pool down instead of pausing it.
+    ///
+    /// From this call on, new deposits are rejected with
+    /// `VaultError::PoolShuttingDown` on every deposit path, while existing
+    /// users keep a clear window to get out: withdrawals, `unstake_all` and
+    /// claims all stay open, and the unstake fee is waived for as long as the
+    /// sunset is in effect (see `get_sunset_status`).
+    ///
+    /// `exit_deadline` is the ledger by which users are asked to have exited.
+    /// It is informational — nothing force-closes the pool once it passes.
+    ///
+    /// One-way: there is no `cancel_sunset`, so deposits never reopen. The
+    /// issue's notes flag reversibility as a PR discussion point, and adding it
+    /// later is backwards compatible.
+    ///
+    /// Reverts with `Unauthorized` when `admin` is not the stored admin.
+    pub fn initiate_sunset(env: Env, admin: Address, exit_deadline: u32) -> Result<(), VaultError> {
+        admin.require_auth();
+        let stored_admin = admin::get_admin(&env)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        balance::set_sunset_exit_deadline(&env, exit_deadline);
+        events::sunset_initiated(&env, &admin, exit_deadline);
+        Ok(())
+    }
+
+    /// Read-only: the sunset exit deadline in effect, or `None` when the pool
+    /// has never been sunset (issue #525).
+    ///
+    /// Because the sunset is one-way this never returns to `None` once set,
+    /// including after `exit_deadline` has passed — a past deadline means the
+    /// window has elapsed, not that deposits are open again. `Some(_)` is the
+    /// signal that deposits are blocked and withdrawals are fee-free.
+    pub fn get_sunset_status(env: Env) -> Option<u32> {
+        balance::get_sunset_exit_deadline(&env)
+    }
+
     /// Pause all deposits and withdrawals now, scheduling an automatic
     /// unpause once `target_ledger` is reached (issue #556) — useful for
     /// planned maintenance windows where the duration is known in advance,
@@ -2303,6 +2345,17 @@ impl VaultContract {
         Ok(())
     }
 
+    /// Issue #525: reject new deposits once a graceful sunset has been started.
+    /// Withdrawals, `unstake_all` and claims deliberately stay open, and the
+    /// unstake fee is waived (see `do_unstake`/`withdraw_to`), so this is only
+    /// called from the deposit paths.
+    fn require_no_sunset(env: &Env) -> Result<(), VaultError> {
+        if balance::get_sunset_exit_deadline(env).is_some() {
+            return Err(VaultError::PoolShuttingDown);
+        }
+        Ok(())
+    }
+
     fn require_not_stopped(env: &Env) -> Result<(), VaultError> {
         if env.storage().instance().has(&DataKey::Stopped)
             && env
@@ -2336,6 +2389,9 @@ impl VaultContract {
     fn check_claim_rate_limit(_env: &Env, _user: &Address) {}
 
     fn do_stake_inner(env: &Env, user: &Address, amount: i128) -> Result<i128, VaultError> {
+        // Issue #525: the `stake_and_claim` path must not slip past the sunset
+        // gate that `stake` applies.
+        Self::require_no_sunset(env)?;
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
@@ -2384,8 +2440,15 @@ impl VaultContract {
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
         let token_addr = Self::token_address(env)?;
-        let unstake_fee_bps =
-            crate::vault_extensions_538_541::get_effective_unstake_fee_bps(env, &token_addr);
+        // Issue #525: withdrawals are fee-free for the whole sunset window, so
+        // a sunsetting user exits at full value. Everything below is already
+        // gated on `fee > 0`, so a zero fee also skips the treasury/buyback
+        // routing and the protocol-fee accounting.
+        let unstake_fee_bps = if balance::get_sunset_exit_deadline(env).is_some() {
+            0
+        } else {
+            crate::vault_extensions_538_541::get_effective_unstake_fee_bps(env, &token_addr)
+        };
         let fee = amount
             .checked_mul(unstake_fee_bps as i128)
             .and_then(|v| v.checked_div(10_000))
@@ -3451,8 +3514,15 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
 
+        // Issue #525: same fee waiver as `do_unstake` — `withdraw_to` is a
+        // withdrawal too, so it stays open and free during a sunset.
+        let unstake_fee_bps = if balance::get_sunset_exit_deadline(&env).is_some() {
+            0
+        } else {
+            balance::get_unstake_fee_bps(&env)
+        };
         let fee = amount
-            .checked_mul(balance::get_unstake_fee_bps(&env) as i128)
+            .checked_mul(unstake_fee_bps as i128)
             .and_then(|v| v.checked_div(10_000))
             .ok_or(VaultError::ArithmeticError)?;
         let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
@@ -3521,6 +3591,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         amounts: Vec<i128>,
     ) -> Result<(), VaultError> {
         caller.require_auth();
+
+        // Issue #525: batch deposits are deposits too.
+        Self::require_no_sunset(&env)?;
 
         if beneficiaries.len() != amounts.len() {
             return Err(VaultError::ArithmeticError);
