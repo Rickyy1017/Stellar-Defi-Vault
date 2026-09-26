@@ -59,6 +59,8 @@ The compiled `.wasm` file will be at `target/wasm32-unknown-unknown/release/stel
 - Ensure `cargo clippy --features testutils` passes with no warnings.
 - All new functionality must include unit tests.
 - Public functions must have doc comments (`///`).
+- When introducing or altering public contract functions, add the signature to `VaultTrait` (`src/interface.rs`) first before implementing it on `VaultContract`.
+- Update `COSTS.md` with benchmarked CPU instructions and memory consumption for any new public functions.
 - Keep `CONTRACT_VERSION` in sync with `Cargo.toml` when updating the contract version.
 
 ## PR Checklist
@@ -66,6 +68,8 @@ The compiled `.wasm` file will be at `target/wasm32-unknown-unknown/release/stel
 - [ ] Tests pass (`cargo test --features testutils`)
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy` passes with no warnings
+- [ ] New public functions added to `VaultTrait` interface first
+- [ ] `COSTS.md` updated with resource measurements
 - [ ] New logic is covered by tests
 - [ ] PR description references the issue (`Closes #N`)
 
