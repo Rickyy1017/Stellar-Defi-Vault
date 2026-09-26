@@ -1,5 +1,34 @@
 use crate::errors::VaultError;
 use crate::storage::DataKey;
+use soroban_sdk::{Address, Env};
+
+pub fn set_admin(env: &Env, admin: &Address) {
+    env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn get_admin(env: &Env) -> Result<Address, VaultError> {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(VaultError::NotInitialized)
+}
+
+pub fn require_admin(env: &Env) -> Result<(), VaultError> {
+    let admin = get_admin(env)?;
+    admin.require_auth();
+    Ok(())
+}
+
+pub fn require_admin_as(env: &Env, claimed_admin: &Address) -> Result<(), VaultError> {
+    let admin = get_admin(env)?;
+    if &admin != claimed_admin {
+        return Err(VaultError::Unauthorized);
+    }
+    admin.require_auth();
+    Ok(())
+}
+use crate::errors::VaultError;
+use crate::storage::DataKey;
 use soroban_sdk::{symbol_short, Address, Env, Vec};
 
 const ADMIN_RENOUNCED_KEY: soroban_sdk::Symbol = symbol_short!("adm_none");

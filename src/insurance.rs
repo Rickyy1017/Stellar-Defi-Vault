@@ -91,6 +91,9 @@ impl VaultContract {
         coverage_amount: i128,
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        if guarantor == env.current_contract_address() {
+            return Err(VaultError::InvalidAddress);
+        }
 
         if coverage_amount <= 0 {
             return Err(VaultError::ZeroAmount);

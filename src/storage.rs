@@ -1214,6 +1214,7 @@ pub struct WithdrawalReceipt {
     pub lock_penalty_paid: i128,
 }
 
+/// Tracks completion of recommended onboarding steps for a staker.
 
 
 
@@ -1383,13 +1384,7 @@ pub struct OnboardingChecklist {
     pub completed_at: Option<u32>,
 }
 
-// ── Issue #310: contract allowance delegation ─────────────────────────────────
-
-/// A smart-contract address approved to call `stake_via_contract()` on a
-/// user's behalf (issue #310), up to `max_stake_per_call` per invocation and
-/// `total_authorized` lifetime. Distinct from the human-wallet delegation in
-/// `approve_delegate()`/`add_delegate_to_chain()` (issues #23/#200), which
-/// target EOA delegates rather than contracts.
+/// A contract address approved to stake on a user's behalf.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContractDelegate {
