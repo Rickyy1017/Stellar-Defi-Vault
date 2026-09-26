@@ -60,3 +60,22 @@ jobs:
           components: clippy
           targets: wasm32-unknown-unknown
       - run: cargo clippy --features testutils -- -D warnings
+
+  reproducibility:
+    name: Build Reproducibility Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.81.0
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Verify build reproducibility
+        run: ./scripts/verify-build-reproducibility.sh
+
+  costs:
+    name: Resource Costs Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify resource costs documentation
+        run: ./scripts/check-resource-costs.sh

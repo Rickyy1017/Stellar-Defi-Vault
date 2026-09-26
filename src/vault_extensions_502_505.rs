@@ -57,6 +57,20 @@ pub struct QueuedAction {
     pub executable_at: u32,
 }
 
+/// Drops every queued #503 action, returning how many were pending. Called by
+/// `admin::set_admin` on an admin change so a previous admin's queue never
+/// carries over.
+pub(crate) fn clear_queued_admin_actions(env: &Env) -> u32 {
+    let map: Option<soroban_sdk::Map<u32, QueuedAction>> = env.storage().instance().get(&TL_ACTIONS);
+    match map {
+        Some(map) if !map.is_empty() => {
+            env.storage().instance().remove(&TL_ACTIONS);
+            map.len()
+        }
+        _ => 0,
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Issue #504: Auto Compound
 // ----------------------------------------------------------------------------

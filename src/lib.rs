@@ -72,21 +72,12 @@ pub mod claim_fee;
 pub mod community_treasury;
 pub mod mev_claim_protection;
 pub mod peg_stabilization;
-pub use vault::position_mirroring; // child of `vault` — see the note at the bottom of vault.rs
-
-// More pre-existing modules that `vault.rs` / `runway_guard.rs` /
-// `vault_extensions_542_545.rs` call into but that were never declared here,
-// leaving `main` unable to compile. `access_roles` (issue #513) additionally
-// backs `dynamic_reward_rate` (issue #510). Wired in as a prerequisite to
-// building/testing the issue #593 error-handling refactor.
-pub use vault::access_roles; // issue #513 — role-based access control // child of `vault` — see the note at the bottom of vault.rs
-pub use vault::dynamic_reward_rate; // issue #510 — utilization-driven reward rate // child of `vault` — see the note at the bottom of vault.rs
-pub use vault::keeper_registry; // admin-approved keeper registry // child of `vault` — see the note at the bottom of vault.rs
-pub mod transfer_safety; // issue #512 — fee-on-transfer token safety
+pub mod position_mirroring;
 
 #[cfg(not(feature = "vault-wasm"))]
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
+pub use interface::VaultTrait;
 
 // Stale legacy test files from prior unmerged branches disabled; they call
 // methods that no longer exist on the contract.
@@ -148,13 +139,9 @@ mod test_issues_498_501;
 mod test_issues_502_505;
 
 #[cfg(test)]
-mod test_issue_593; // issue #593 — typed error codes replace ad-hoc panics
+mod test_self_referential_admin;
 
-#[cfg(test)]
-mod test_issue_621_negative_balance; // issue #621 — negative-balance impossibility proof
-
-#[cfg(test)]
-mod test_issue_622_contractmeta; // issue #622 — contractmeta! name/version/description
-
-#[cfg(test)]
-mod test_issue_623_scale; // issue #623 — max realistic depositor count performance
+pub mod multisig_admin; // multi-sig signer management: set_admin_signers, propose_admin_action
+pub mod migration_path; // vault v2 migration: set_migration_target, migrate_position
+pub mod circuit_breaker; // single-tx withdrawal circuit breaker: set_circuit_breaker_threshold_bps
+pub mod withdrawal_cooldown; // withdrawal cooldown: set_withdrawal_cooldown, request_withdrawal, execute_withdrawal

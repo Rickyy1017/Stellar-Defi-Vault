@@ -8,8 +8,15 @@ const PAUSE_WITHDRAWALS_KEY: Symbol = symbol_short!("p_with");
 
 #[contractimpl]
 impl VaultContract {
+    /// Configures the fee recipient address.
+    ///
+    /// ### Self-Referential Address Handling (Issue #633)
+    /// Pointing `recipient` to the contract's own address (`env.current_contract_address()`)
+    /// is explicitly allowed. When the fee recipient is the vault contract itself, collected fees
+    /// remain within or return directly to the vault's balance/reserves, preserving solvency
+    /// without risking fund loss or privileged access escalation.
     pub fn set_fee_recipient(env: Env, admin: Address, recipient: Address) {
-        admin::require_admin(&env, &admin).unwrap();
+        admin::require_admin(&env).unwrap();
         let old: Option<Address> = env.storage().instance().get(&FEE_RECIPIENT_KEY);
         env.storage().instance().set(&FEE_RECIPIENT_KEY, &recipient);
         // Emits old_recipient, new_recipient as expected
@@ -28,22 +35,22 @@ impl VaultContract {
     }
 
     pub fn pause_deposits(env: Env, admin: Address) {
-        admin::require_admin(&env, &admin).unwrap();
+        admin::require_admin(&env).unwrap();
         env.storage().instance().set(&PAUSE_DEPOSITS_KEY, &true);
     }
     
     pub fn unpause_deposits(env: Env, admin: Address) {
-        admin::require_admin(&env, &admin).unwrap();
+        admin::require_admin(&env).unwrap();
         env.storage().instance().set(&PAUSE_DEPOSITS_KEY, &false);
     }
     
     pub fn pause_withdrawals(env: Env, admin: Address) {
-        admin::require_admin(&env, &admin).unwrap();
+        admin::require_admin(&env).unwrap();
         env.storage().instance().set(&PAUSE_WITHDRAWALS_KEY, &true);
     }
     
     pub fn unpause_withdrawals(env: Env, admin: Address) {
-        admin::require_admin(&env, &admin).unwrap();
+        admin::require_admin(&env).unwrap();
         env.storage().instance().set(&PAUSE_WITHDRAWALS_KEY, &false);
     }
     

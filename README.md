@@ -234,6 +234,37 @@ In fixed-point math, calculating reward using standard division leads to roundin
 # Stellar-Defi-Vault
 
 
+## Gas & Resource Costs
+
+Approximate CPU instruction and RAM byte costs for each public function are tracked in **[COSTS.md](./COSTS.md)** based on Soroban's test environment budget reporter. Integrators can consult this table when calculating transaction fee buffers.
+
+## Deterministic Build & Bytecode Verification
+
+To support trust minimization and independent verification, the contract Wasm binary is byte-reproducible across different host machines:
+
+- **Path Normalization**: Host file system paths are remapped using `--remap-path-prefix` in `.cargo/config.toml`.
+- **Deterministic Codegen**: Codegen units are pinned to `codegen-units = 1` with LTO enabled.
+
+### Independent Verification Procedure
+
+Any third party can verify that an on-chain deployed contract bytecode matches this source tree:
+
+1. Clone the repository and checkout the target release commit or tag:
+   ```bash
+   git clone https://github.com/Rickyy1017/Stellar-Defi-Vault.git
+   cd Stellar-Defi-Vault
+   git checkout <release-tag-or-commit>
+   ```
+2. Verify with the pinned Rust toolchain (1.81.0) and WASM target:
+   ```bash
+   ./scripts/verify-build-reproducibility.sh
+   ```
+3. Generate the SHA-256 digest:
+   ```bash
+   sha256sum target/wasm32-unknown-unknown/release/stellar_defi_vault.wasm
+   ```
+4. Compare this digest with the contract code hash published on the Stellar ledger explorer.
+
 ## Testnet Integration Tests
 You can run the integration test suite against the Stellar Testnet by executing:
 ```bash

@@ -1,11 +1,49 @@
 use crate::errors::VaultError;
 use crate::storage::DataKey;
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Vec};
 
 const ADMIN_RENOUNCED_KEY: soroban_sdk::Symbol = symbol_short!("adm_none");
 
+/// Writes the admin key. When this replaces an existing, different admin
+/// (a mid-flight handover via admin recovery or any other transfer path),
+/// every still-pending timelocked admin action is invalidated — see
+/// [`invalidate_pending_timelocked_actions`].
 pub fn set_admin(env: &Env, admin: &Address) {
+    let previous: Option<Address> = env.storage().instance().get(&DataKey::Admin);
     env.storage().instance().set(&DataKey::Admin, admin);
+    if let Some(previous) = previous {
+        if &previous != admin {
+            invalidate_pending_timelocked_actions(env, &previous, admin);
+        }
+    }
+}
+
+/// Timelocked admin actions are bound to the admin that queued them. On an
+/// admin change, all of them are dropped so that:
+/// - an outgoing admin's stale action cannot execute under the new admin's
+///   watch (the new admin would otherwise only have to call `execute_*`, or
+///   miss the queue entirely), and
+/// - the new admin does not silently inherit intentions it never signed off
+///   on.
+///
+/// Covers the #195 `queue_action` queue and the #503 `queue_admin_action`
+/// queue (both removed), and the #455 config-change announcements (marked
+/// cancelled, so the public record of what was announced is preserved). The
+/// new admin must re-queue anything it still wants, restarting the delay.
+/// Emits `adm_inval` with the per-queue counts.
+fn invalidate_pending_timelocked_actions(env: &Env, old_admin: &Address, new_admin: &Address) {
+    let queued = crate::balance::get_pending_actions(env);
+    let queued_count = queued.len();
+    if queued_count > 0 {
+        crate::balance::set_pending_actions(env, &Vec::new(env));
+    }
+    let timelocked_count = crate::vault::vault_extensions_502_505::clear_queued_admin_actions(env);
+    let announced_count = crate::time_locked_admin_proposal::cancel_open_proposals(env);
+
+    env.events().publish(
+        (symbol_short!("adm_inval"), old_admin.clone()),
+        (new_admin.clone(), queued_count, timelocked_count, announced_count),
+    );
 }
 
 pub fn get_admin(env: &Env) -> Result<Address, VaultError> {
@@ -41,6 +79,10 @@ pub fn set_emergency_admin(env: &Env, emergency_admin: &Address) -> Result<(), V
     // Enforce requirement 4: Only the primary admin can designate another emergency admin
     let primary_admin = get_admin(env)?;
     primary_admin.require_auth();
+
+    if emergency_admin == &env.current_contract_address() {
+        return Err(VaultError::InvalidAddress);
+    }
 
     env.storage().instance().set(&symbol_short!("emg_adm"), emergency_admin);
 
