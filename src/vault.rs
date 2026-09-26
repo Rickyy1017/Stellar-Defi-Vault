@@ -255,9 +255,9 @@ impl VaultContract {
         };
 
         let current_shares = balance::get_shares(&env, &user);
-        balance::set_shares(&env, &user, current_shares + shares_minted);
-        balance::set_total_shares(&env, total_shares + shares_minted);
-        balance::set_total_deposited(&env, total_deposited + amount);
+        balance::set_shares(&env, &user, current_shares.checked_add(shares_minted).ok_or(VaultError::ArithmeticError)?);
+        balance::set_total_shares(&env, total_shares.checked_add(shares_minted).ok_or(VaultError::ArithmeticError)?);
+        balance::set_total_deposited(&env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         if current_shares == 0 {
             balance::register_staker(&env, &user);
         }
@@ -287,11 +287,23 @@ impl VaultContract {
 
     /// Deposit tokens into the vault (alias for stake).
     pub fn deposit(env: Env, user: Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         Self::stake(env, user, amount, min_shares_out)
     }
 
     /// Admin: set the base reward APR in basis points. Every accepted update is
     /// appended to the on-chain changelog returned by `get_rate_history`.
+    
+    pub fn upgrade_wasm(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), VaultError> {
+        if admin != admin::get_admin(&env) {
+            return Err(VaultError::Unauthorized);
+        }
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgrade"),), (admin, new_wasm_hash, env.ledger().sequence()));
+        Ok(())
+    }
+
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::validate_rate_bps(rate_bps)?;
@@ -466,6 +478,7 @@ impl VaultContract {
     /// push the withdrawer's cumulative withdrawals over the admin-configured
     /// rolling 24h per-user cap (issue #554).
     pub fn withdraw(env: Env, withdrawer: Address, shares: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         crate::daily_withdrawal_limit::enforce_and_record(
             &env,
             &withdrawer,
@@ -584,7 +597,7 @@ impl VaultContract {
         let current_ledger = env.ledger().sequence();
 
         // Shrink the primary position.
-        let remaining = current_shares - split_amount;
+        let remaining = current_shares.checked_sub(split_amount).ok_or(VaultError::ArithmeticError)?;
         balance::set_shares(&env, &user, remaining);
         balance::set_last_claim_ledger(&env, &user, current_ledger);
 
@@ -641,6 +654,7 @@ impl VaultContract {
     /// Large claims are queued when MEV protection is enabled and the accrued
     /// reward meets or exceeds the configured threshold.
     pub fn claim(env: Env, staker: Address) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
         // Issue #201: rate limit applies to explicit claim() calls only ΓÇö
         // not to the internal do_claim() invoked by stake_and_claim() or
@@ -678,6 +692,7 @@ impl VaultContract {
     /// `claim` it is never routed through the MEV large-claim queue: a partial
     /// claim is a deliberate, bounded withdrawal rather than a large one.
     pub fn claim_partial(env: Env, staker: Address, amount: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
         Self::check_claim_rate_limit(&env, &staker);
         if amount <= 0 {
@@ -692,7 +707,7 @@ impl VaultContract {
             return Err(VaultError::InsufficientRewardPool);
         }
 
-        balance::set_accrued_reward(&env, &staker, pending - amount);
+        balance::set_accrued_reward(&env, &staker, pending.checked_sub(amount).ok_or(VaultError::ArithmeticError)?);
         let total_paid = balance::get_total_rewards_paid(&env);
         balance::set_total_rewards_paid(
             &env,
@@ -1808,7 +1823,7 @@ impl VaultContract {
         let amount =
             crate::transfer_safety::pull_tokens(&env, &token_addr, &admin_addr, amount)?;
         let total_deposited = balance::get_total_deposited(&env);
-        balance::set_total_deposited(&env, total_deposited + amount);
+        balance::set_total_deposited(&env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         let admin_actual = admin::get_admin(&env)?;
         events::yield_added(&env, &admin_actual, amount);
         events::admin_action_add_yield(&env, &admin_actual, amount);
@@ -2452,7 +2467,7 @@ impl VaultContract {
         let cur = balance::get_shares(env, user);
         balance::set_shares(env, user, cur + shares);
         balance::set_total_shares(env, total_shares + shares);
-        balance::set_total_deposited(env, total_deposited + amount);
+        balance::set_total_deposited(env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         if cur == 0 {
             balance::register_staker(env, user);
         }
@@ -2523,7 +2538,7 @@ impl VaultContract {
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &payout);
         balance::set_shares(env, staker, user_shares - shares);
-        balance::set_total_shares(env, total_shares - shares);
+        balance::set_total_shares(env, total_shares.checked_sub(shares).ok_or(VaultError::ArithmeticError)?);
         balance::set_total_deposited(env, total_deposited - amount);
         if fee > 0 {
             balance::add_protocol_fee_collected(env, fee);
@@ -3626,7 +3641,7 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         token_client.transfer(&env.current_contract_address(), &recipient, &payout);
 
         balance::set_shares(&env, &user, user_shares - shares);
-        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_shares(&env, total_shares.checked_sub(shares).ok_or(VaultError::ArithmeticError)?);
         balance::set_total_deposited(&env, total_deposited - amount);
 
         if fee > 0 {
