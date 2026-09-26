@@ -309,6 +309,18 @@ pub struct ChangelogEntry {
     pub new_value: i128,
 }
 
+/// One entry in the on-chain reward-rate changelog exposed by
+/// `get_rate_history` (issue #522).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RateChange {
+    pub old_rate_bps: u32,
+    pub new_rate_bps: u32,
+    /// Ledger sequence number of the update, matching the timestamp carried by
+    /// the `rate_changed` event.
+    pub changed_at: u32,
+}
+
 /// One entry in the rich reward-rate history exposed by `get_reward_rate_history` (issue #124).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]

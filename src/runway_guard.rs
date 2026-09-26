@@ -121,6 +121,7 @@ impl VaultContract {
 
         let old_rate = balance::get_reward_rate_bps(&env);
         balance::set_reward_rate_bps(&env, rate_bps);
+        balance::record_rate_change(&env, old_rate, rate_bps);
         events::rate_changed(&env, old_rate, rate_bps);
         Ok(())
     }
@@ -188,6 +189,7 @@ pub(crate) fn apply_reward_rate(env: &Env, rate_bps: u32) -> Result<(), VaultOps
 
     let old_rate = balance::get_reward_rate_bps(env);
     balance::set_reward_rate_bps(env, rate_bps);
+    balance::record_rate_change(env, old_rate, rate_bps);
     events::rate_changed(env, old_rate, rate_bps);
     Ok(())
 }

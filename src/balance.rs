@@ -3,8 +3,8 @@ use crate::storage::{
     ContractDelegate, DataKey, DayBucket, DynamicFeeConfig, FeeRecipient, FlashStakeReceipt,
     GovernanceProposal, InsurancePolicy, InsuranceProduct, Loan, LoanConfig, LotteryConfig,
     Milestone, MultisigConfig, OnboardingChecklist, PendingAction, PriceCondition,
-    PriorityBidRecord, Quiz, RateHistoryEntry, ReferralStats, RewardTier, RevenueShareMerkleRoot,
-    RevenueSharingConfig, Season, StakePosition, SunsetState, VestingEntry,
+    PriorityBidRecord, Quiz, RateChange, RateHistoryEntry, ReferralStats, RevenueShareMerkleRoot,
+    RevenueSharingConfig, RewardTier, Season, StakePosition, SunsetState, VestingEntry,
 };
 
 use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
@@ -172,15 +172,33 @@ pub fn set_quiz_count(env: &Env, count: u32) {
         .set(&Symbol::new(env, "quiz_count"), &count);
 }
 
-pub fn get_rate_history(env: &Env) -> Vec<(u32, u32)> {
+/// The rolling on-chain log of reward-rate changes written by `set_reward_rate_bps`
+/// and exposed by `get_rate_history` (issue #522), oldest entry first.
+pub fn get_rate_history(env: &Env) -> Vec<RateChange> {
     env.storage()
         .instance()
         .get(&DataKey::RateHistory)
         .unwrap_or(Vec::new(env))
 }
 
-pub fn set_rate_history(env: &Env, history: &Vec<(u32, u32)>) {
+pub fn set_rate_history(env: &Env, history: &Vec<RateChange>) {
     env.storage().instance().set(&DataKey::RateHistory, history);
+}
+
+/// Appends one reward-rate change to the rolling log, evicting the oldest
+/// entries first once `MAX_RATE_HISTORY_ENTRIES` is reached. Changes are logged
+/// even when the rate is unchanged, matching the `rate_changed` event.
+pub fn record_rate_change(env: &Env, old_rate_bps: u32, new_rate_bps: u32) {
+    let mut history = get_rate_history(env);
+    while history.len() >= MAX_RATE_HISTORY_ENTRIES {
+        history.remove(0);
+    }
+    history.push_back(RateChange {
+        old_rate_bps,
+        new_rate_bps,
+        changed_at: env.ledger().sequence(),
+    });
+    set_rate_history(env, &history);
 }
 
 pub const MAX_RATE_HISTORY_ENTRIES: u32 = 50;

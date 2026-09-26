@@ -18,7 +18,7 @@ use crate::{
         MigrationExport, Milestone, MilestoneCondition, MultisigConfig, OptimalClaimAdvice,
         PauseInfo, PauseReason, PendingAction, PoolComparison, PoolConfig, PoolHealthReport,
         PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam, Quiz,
-        RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
+        RateChange, RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
         RevenueShareMerkleRoot, RevenueSharingConfig, RewardMultiplierBreakdown, RewardTier,
         RoundingPolicy, Season, SmoothingSchedule, SmoothingStatus, StakeAction, StakeHistoryEntry,
         StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
@@ -268,18 +268,28 @@ impl VaultContract {
         Self::stake(env, user, amount)
     }
 
-    /// Admin: set the base reward APR in basis points.
+    /// Admin: set the base reward APR in basis points. Every accepted update is
+    /// appended to the on-chain changelog returned by `get_rate_history`.
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::validate_rate_bps(rate_bps)?;
         crate::vault_extensions_538_541::clear_rate_ramp(&env);
+        let old_rate = balance::get_reward_rate_bps(&env);
         balance::set_reward_rate_bps(&env, rate_bps);
+        balance::record_rate_change(&env, old_rate, rate_bps);
         Ok(())
     }
 
     /// Read-only reward rate APR in basis points (interpolated if a rate ramp is active).
     pub fn get_reward_rate_bps(env: Env) -> u32 {
         crate::vault_extensions_538_541::compute_current_rate(&env)
+    }
+
+    /// Read-only: the on-chain log of reward-rate changes, oldest entry first
+    /// (issue #522). At most `MAX_RATE_HISTORY_ENTRIES` entries are retained;
+    /// further changes evict the oldest entry. Empty before the first change.
+    pub fn get_rate_history(env: Env) -> Vec<RateChange> {
+        balance::get_rate_history(&env)
     }
 
     /// Sets or replaces the secondary emergency admin address.
@@ -666,8 +676,11 @@ impl VaultContract {
 
         if user_payout > 0 {
             let reward_token_addr = Self::reward_token_address(&env)?;
-            token::Client::new(&env, &reward_token_addr)
-                .transfer(&env.current_contract_address(), &staker, &user_payout);
+            token::Client::new(&env, &reward_token_addr).transfer(
+                &env.current_contract_address(),
+                &staker,
+                &user_payout,
+            );
         }
 
         crate::reward_token_audit_trail::log_reward_movement(
