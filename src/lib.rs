@@ -132,3 +132,6 @@ mod test_issues_502_505;
 pub mod vault_extensions_490_493;
 #[cfg(test)]
 mod test_issues_490_493;
+
+pub mod multisig_admin; // multi-sig signer management: set_admin_signers, propose_admin_action
+pub mod migration_path; // vault v2 migration: set_migration_target, migrate_position
