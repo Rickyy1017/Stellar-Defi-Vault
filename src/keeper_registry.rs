@@ -77,7 +77,7 @@ pub fn record_keeper_action(env: &Env, keeper: &Address, earned: i128) {
     }
 }
 
-#[cfg_attr(not(feature = "testutils"), contractimpl)]
+#[contractimpl]
 impl VaultContract {
     /// Approve a keeper address. Admin only. Re-registering a previously
     /// deregistered keeper reactivates it and preserves its accumulated

@@ -20,7 +20,7 @@ use soroban_sdk::{contractimpl, symbol_short, Env, Symbol};
 use crate::admin;
 use crate::balance;
 use crate::errors::VaultFeature4Error;
-use crate::vault::VaultContract;
+use crate::vault::{VaultContract, VaultContractClient};
 
 const MAX_RATE_KEY: Symbol = symbol_short!("max_rate");
 

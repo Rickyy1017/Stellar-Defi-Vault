@@ -27,7 +27,7 @@ use crate::admin;
 use crate::balance;
 use crate::errors::VaultFeature4Error;
 use crate::storage::DataKey;
-use crate::vault::{VaultContract, LEDGERS_PER_DAY};
+use crate::vault::{VaultContract, VaultContractClient, LEDGERS_PER_DAY};
 
 const MAX_PAUSE_KEY: Symbol = symbol_short!("max_pse");
 const REPAUSE_COOLDOWN_KEY: Symbol = symbol_short!("fpse_cd");
