@@ -20,7 +20,7 @@ use crate::{
         OperatorDashboard, PoolHealthReport, PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam,
         RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore, RewardTier,
         Quiz, RewardMultiplierBreakdown, RevenueShareMerkleRoot, RevenueSharingConfig, RoundingPolicy,
-        Season, SmoothingSchedule, SmoothingStatus,
+        Season, SharePriceSnapshot, SmoothingSchedule, SmoothingStatus,
         StakeAction, StakeHistoryEntry, StakePosition, StakeStreak, StakingCertificate,
         StakingEfficiencyScore, StorageUsageReport, SunsetState, SwapOffer, TaxReport, Tournament,
         TriggerDirection, UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary,
@@ -527,6 +527,50 @@ impl VaultContract {
     /// Query share balance of a user.
     pub fn shares_of(env: Env, user: Address) -> i128 {
         balance::get_shares(&env, &user)
+    }
+
+    /// Record the pool-wide share price once per day at most. Anyone may call
+    /// this method, making it suitable for keepers. Returns `true` when a
+    /// snapshot was recorded and `false` when the rate limit has not elapsed.
+    pub fn take_share_price_snapshot(env: Env) -> bool {
+        let key = symbol_short!("sh_pr_hist");
+        let mut history: Vec<SharePriceSnapshot> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env));
+        let ledger = env.ledger().sequence();
+
+        if let Some(last) = history.last() {
+            if ledger.saturating_sub(last.ledger) < LEDGERS_PER_DAY {
+                return false;
+            }
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let (price_numerator, price_denominator) = if total_shares > 0 {
+            (balance::get_total_deposited(&env), total_shares)
+        } else {
+            (0, 1)
+        };
+        if history.len() >= MAX_HISTORY_SNAPSHOTS {
+            history.remove(0);
+        }
+        history.push_back(SharePriceSnapshot {
+            price_numerator,
+            price_denominator,
+            ledger,
+        });
+        env.storage().instance().set(&key, &history);
+        true
+    }
+
+    /// Return retained pool-wide share price snapshots in chronological order.
+    pub fn get_share_price_history(env: Env) -> Vec<SharePriceSnapshot> {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("sh_pr_hist"))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Read-only query for the current admin address.

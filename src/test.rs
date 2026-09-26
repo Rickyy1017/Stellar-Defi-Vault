@@ -501,6 +501,41 @@ fn test_add_yield_increases_share_price() {
 }
 
 #[test]
+fn test_share_price_snapshot_records_pool_ratio_and_rate_limits() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &500_000);
+    f.token_admin.mint(&f.admin, &100_000);
+    f.vault.add_yield(&f.admin, &100_000);
+
+    assert!(f.vault.take_share_price_snapshot());
+    let history = f.vault.get_share_price_history();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history.get(0).unwrap().price_numerator, 600_000);
+    assert_eq!(history.get(0).unwrap().price_denominator, 500_000);
+    assert_eq!(history.get(0).unwrap().ledger, f.env.ledger().sequence());
+    assert!(!f.vault.take_share_price_snapshot());
+
+    set_ledger(&f.env, f.env.ledger().sequence() + LEDGERS_PER_DAY);
+    assert!(f.vault.take_share_price_snapshot());
+    assert_eq!(f.vault.get_share_price_history().len(), 2);
+}
+
+#[test]
+fn test_share_price_snapshot_history_rolls_over_at_one_hundred() {
+    let f = VaultFixture::new();
+    let first_ledger = f.env.ledger().sequence();
+    for i in 0..101_u32 {
+        set_ledger(&f.env, first_ledger + i * LEDGERS_PER_DAY);
+        assert!(f.vault.take_share_price_snapshot());
+    }
+
+    let history = f.vault.get_share_price_history();
+    assert_eq!(history.len(), 100);
+    assert_eq!(history.get(0).unwrap().ledger, first_ledger + LEDGERS_PER_DAY);
+    assert_eq!(history.get(99).unwrap().ledger, first_ledger + 100 * LEDGERS_PER_DAY);
+}
+
+#[test]
 fn test_add_yield_requires_admin_auth() {
     let f = VaultFixture::new();
     f.token_admin.mint(&f.admin, &10_000);
