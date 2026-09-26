@@ -7,6 +7,20 @@ pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128
         .publish(topics, (amount, shares_minted, ledger));
 }
 
+pub fn referral_bonus_paid(
+    env: &Env,
+    referrer: &Address,
+    referee: &Address,
+    referrer_bonus: i128,
+    referee_bonus: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("ref_bns"), referrer.clone(), referee.clone()),
+        (referrer_bonus, referee_bonus, ledger),
+    );
+}
+
 pub fn withdraw(
     env: &Env,
     withdrawer: &Address,
@@ -17,6 +31,34 @@ pub fn withdraw(
     let topics = (symbol_short!("withdraw"), withdrawer);
     env.events()
         .publish(topics, (shares_burned, amount_returned, ledger));
+}
+
+/// Emitted when a user exits through the paused-vault break-glass path.
+pub fn emergency_withdrawal(
+    env: &Env,
+    user: &Address,
+    amount_returned: i128,
+    rewards_forfeited: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("emg_wdraw"), user.clone()),
+        (amount_returned, rewards_forfeited, ledger),
+    );
+}
+
+pub fn position_locked(
+    env: &Env,
+    user: &Address,
+    lock_duration_ledgers: u32,
+    boost_bps: u32,
+    unlocks_at: u32,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("pos_lock"), user.clone()),
+        (lock_duration_ledgers, boost_bps, unlocks_at, ledger),
+    );
 }
 
 pub fn unpaused(env: &Env, admin: &Address, ledger: u32) {
