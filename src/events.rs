@@ -33,6 +33,20 @@ pub fn withdraw(
         .publish(topics, (shares_burned, amount_returned, ledger));
 }
 
+/// Emitted when a user exits through the paused-vault break-glass path.
+pub fn emergency_withdrawal(
+    env: &Env,
+    user: &Address,
+    amount_returned: i128,
+    rewards_forfeited: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("emg_wdraw"), user.clone()),
+        (amount_returned, rewards_forfeited, ledger),
+    );
+}
+
 pub fn position_locked(
     env: &Env,
     user: &Address,

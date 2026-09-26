@@ -529,6 +529,50 @@ impl VaultContract {
         Self::do_unstake(&env, &withdrawer, shares)
     }
 
+    /// Break-glass exit available only while the vault is paused.
+    ///
+    /// Returns principal only, burns the user's full share balance, and
+    /// permanently forfeits all accrued rewards. This intentionally bypasses
+    /// withdrawal fees, queues, reward claims, and routine exit accounting.
+    /// It is an emergency mechanism, not a routine withdrawal path.
+    pub fn emergency_withdraw(env: Env, user: Address) -> Result<i128, VaultError> {
+        user.require_auth();
+        balance::apply_scheduled_unpause_if_due(&env);
+        if !Self::paused(&env) {
+            return Err(VaultError::VaultPaused);
+        }
+
+        let shares = balance::get_shares(&env, &user);
+        if shares <= 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let amount_returned = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
+        let rewards_forfeited = balance::get_accrued_reward(&env, &user);
+        let token_addr = Self::token_address(&env)?;
+
+        token::Client::new(&env, &token_addr).transfer(
+            &env.current_contract_address(),
+            &user,
+            &amount_returned,
+        );
+        balance::set_shares(&env, &user, 0);
+        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_deposited(&env, total_deposited - amount_returned);
+        balance::set_accrued_reward(&env, &user, 0);
+        events::emergency_withdrawal(
+            &env,
+            &user,
+            amount_returned,
+            rewards_forfeited,
+            env.ledger().sequence(),
+        );
+        Ok(amount_returned)
+    }
+
     /// Unstake by burning `shares`. This is an alias for `withdraw`.
     ///
     /// Rejects the unstake with `BelowMinimumUnstake` when an admin-configured
