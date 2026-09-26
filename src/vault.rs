@@ -195,11 +195,13 @@ impl VaultContract {
         }
 
         // Persist token decimals so reward math can normalize across mismatched
-        // precisions. Unspecified values fall back to the Stellar standard of 7.
-        balance::set_stake_decimals(
-            &env,
-            stake_decimals.unwrap_or(balance::DEFAULT_TOKEN_DECIMALS),
-        );
+        // precisions. Issue #547: when no explicit value is given, query the
+        // live deposit token's own decimals rather than hardcoding the
+        // Stellar-standard fallback.
+        let resolved_stake_decimals =
+            crate::vault_extensions_546_549::resolve_token_decimals(&env, &token, stake_decimals);
+        balance::set_stake_decimals(&env, resolved_stake_decimals);
+        crate::vault_extensions_546_549::set_share_decimals(&env, resolved_stake_decimals);
         balance::set_reward_decimals(
             &env,
             reward_decimals.unwrap_or(balance::DEFAULT_TOKEN_DECIMALS),
@@ -256,6 +258,9 @@ impl VaultContract {
         if current_shares == 0 {
             balance::register_staker(&env, &user);
         }
+
+        // Issue #548: qualifying large deposits lock their minted shares.
+        crate::vault_extensions_546_549::maybe_lock_deposit(&env, &user, amount, shares_minted);
 
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
@@ -550,6 +555,16 @@ impl VaultContract {
         let current_shares = balance::get_shares(&env, &user);
         if split_amount <= 0 || split_amount >= current_shares {
             return Err(VaultExtError::InvalidSplitAmount);
+        }
+
+        // Issue #546: creating a split position counts against the per-user cap.
+        {
+            let cap = crate::vault_extensions_546_549::get_max_positions_inner(&env);
+            if cap > 0
+                && crate::vault_extensions_546_549::position_count_inner(&env, &user) >= cap
+            {
+                return Err(VaultExtError::TooManyPositions);
+            }
         }
 
         // Settle pending rewards on the existing (pre-split) position first.
@@ -2426,6 +2441,8 @@ impl VaultContract {
         if cur == 0 {
             balance::register_staker(env, user);
         }
+        // Issue #548: same large-deposit lock as `stake`.
+        crate::vault_extensions_546_549::maybe_lock_deposit(env, user, amount, shares);
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
         crate::activity_log::record(
             env,
@@ -2458,6 +2475,8 @@ impl VaultContract {
         if user_shares < shares {
             return Err(VaultError::InsufficientShares);
         }
+        // Issue #548: withdrawals only draw from unlocked share tranches.
+        crate::vault_extensions_546_549::enforce_unlocked(env, staker, shares)?;
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
@@ -3546,6 +3565,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             return Err(VaultError::InsufficientShares);
         }
 
+        // Issue #548: same unlocked-tranche gate as `do_unstake`.
+        crate::vault_extensions_546_549::enforce_unlocked(&env, &user, shares)?;
+
         // Apply daily withdrawal limit check
         let projected = Self::projected_unstake_amount(&env, shares)?;
         crate::daily_withdrawal_limit::enforce_and_record(&env, &user, projected)?;
@@ -3710,6 +3732,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             balance::set_shares(&env, &beneficiary, existing + shares);
             new_total_shares += shares;
             new_total_deposited += amount;
+
+            // Issue #548: large batch legs lock their minted shares.
+            crate::vault_extensions_546_549::maybe_lock_deposit(&env, &beneficiary, amount, shares);
 
             // Record interaction for inactivity decay
             crate::inactivity_decay::record_interaction(&env, &beneficiary);

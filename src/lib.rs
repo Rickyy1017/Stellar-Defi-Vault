@@ -42,6 +42,7 @@ pub mod batch_vote; // governance batch voting (issue #160)
 pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit
 pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
 pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
+pub mod vault_extensions_546_549; // issues #546-#549 — positions cap, precision, large-deposit lock, min funding
 
 // Issues #526-#529: scheduled exit, snapshot airdrop, external price oracle, co-sponsor.
 pub mod scheduled_exit; // issue #526 — scheduled self-withdrawal

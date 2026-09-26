@@ -205,6 +205,8 @@ pub(crate) fn credit_reward_pool_from(
     if amount <= 0 {
         return Err(VaultOpsError::ZeroAmount);
     }
+    // Issue #549: reject dust funding before moving any tokens.
+    crate::vault_extensions_546_549::enforce_min_reward_funding(env, amount)?;
 
     let token_addr: Address = match balance::get_reward_token(env) {
         Some(token) => token,
@@ -216,6 +218,8 @@ pub(crate) fn credit_reward_pool_from(
     };
     // Issue #512: credit what actually arrived, not the stated amount.
     let amount = crate::transfer_safety::pull_tokens(env, &token_addr, from, amount)?;
+    // Issue #549: fee-on-transfer tokens may deliver less than stated.
+    crate::vault_extensions_546_549::enforce_min_reward_funding(env, amount)?;
 
     let pool = balance::get_reward_pool_balance(env);
     let updated = pool
