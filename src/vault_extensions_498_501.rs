@@ -1,10 +1,10 @@
 //! Vault Extensions for Issues #498, #499, #500, #501
 
 use soroban_sdk::{contractimpl, contracttype, symbol_short, token, Address, Env, String, Symbol, Vec};
-use crate::vault::{VaultContract, DexRouterInterfaceClient};
+use crate::vault::{DexRouterClient, VaultContract};
 use crate::admin;
 use crate::balance;
-use crate::errors::{VaultError, VaultExtError};
+use crate::errors::{PublicApiError, VaultError, VaultExtError};
 
 // ----------------------------------------------------------------------------
 // Issue #498: Batch Withdraw
@@ -49,17 +49,20 @@ const TS_KEY: Symbol = symbol_short!("ts_split");
 
 #[contractimpl]
 impl VaultContract {
-    pub fn set_treasury_split(env: Env, admin: Address, recipients: Vec<Address>, bps_shares: Vec<u32>) {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn set_treasury_split(env: Env, admin: Address, recipients: Vec<Address>, bps_shares: Vec<u32>) -> Result<(), PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         if recipients.len() > 3 || recipients.len() != bps_shares.len() {
-            panic!("InvalidSplitRecipients");
+            return Err(PublicApiError::InvalidAllocation);
         }
         let mut sum: u32 = 0;
         for i in 0..bps_shares.len() {
-            sum += bps_shares.get(i).unwrap();
+            sum = sum
+                .checked_add(bps_shares.get(i).unwrap())
+                .ok_or(PublicApiError::InvalidAllocation)?;
         }
         if sum != 10000 {
-            panic!("InvalidSplitBpsSum");
+            return Err(PublicApiError::InvalidAllocation);
         }
         
         let split = TreasurySplit {
@@ -67,7 +70,8 @@ impl VaultContract {
             bps_shares,
         };
         env.storage().instance().set(&TS_KEY, &split);
-        env.events().publish((symbol_short!("ts_updated"),), (admin, recipients.len(), env.ledger().sequence()));
+        env.events().publish((symbol_short!("ts_upd"),), (admin, recipients.len(), env.ledger().sequence()));
+        Ok(())
     }
     
     pub fn get_treasury_split(env: Env) -> Option<TreasurySplit> {
@@ -77,7 +81,7 @@ impl VaultContract {
 
 pub fn apply_treasury_split(env: &Env, fee: i128, fallback: i128) -> Result<(), VaultError> {
     let split_opt: Option<TreasurySplit> = env.storage().instance().get(&TS_KEY);
-    let token_addr = VaultContract::token_address(env).unwrap();
+    let token_addr = VaultContract::token_address(env)?;
     let token = token::Client::new(env, &token_addr);
     
     if let Some(split) = split_opt {
@@ -139,21 +143,24 @@ const SWAP_ROUTE_KEY: Symbol = symbol_short!("swp_rte"); // Map<Address, Address
 
 #[contractimpl]
 impl VaultContract {
-    pub fn set_reward_token_swap_path(env: Env, admin: Address, source_token: Address, dex_router: Address) {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn set_reward_token_swap_path(env: Env, admin: Address, source_token: Address, dex_router: Address) -> Result<(), PublicApiError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         let mut map: soroban_sdk::Map<Address, Address> = env.storage().instance().get(&SWAP_ROUTE_KEY).unwrap_or(soroban_sdk::Map::new(&env));
         map.set(source_token, dex_router);
         env.storage().instance().set(&SWAP_ROUTE_KEY, &map);
+        Ok(())
     }
     
-    pub fn swap_secondary_reward(env: Env, admin: Address, source_token: Address, amount: i128, min_out: i128) -> Result<(), VaultError> {
-        admin::require_admin(&env, &admin).unwrap();
+    pub fn swap_secondary_reward(env: Env, admin: Address, source_token: Address, amount: i128, min_out: i128) -> Result<(), VaultExtError> {
+        admin.require_auth();
+        admin::require_admin(&env)?;
         let map: soroban_sdk::Map<Address, Address> = env.storage().instance().get(&SWAP_ROUTE_KEY).unwrap_or(soroban_sdk::Map::new(&env));
-        let dex_router = map.get(source_token.clone()).unwrap_or_else(|| panic!("UnregisteredToken"));
+        let dex_router = map.get(source_token.clone()).ok_or(VaultExtError::UnsupportedInputToken)?;
         
         // Execute swap
-        let router_client = DexRouterInterfaceClient::new(&env, &dex_router);
-        let to_token = VaultContract::token_address(&env).unwrap();
+        let router_client = DexRouterClient::new(&env, &dex_router);
+        let to_token = VaultContract::token_address(&env)?;
         
         // Transfer to router? Usually AMMs require pull, but router_client.swap signature handles it.
         // Wait, issue notes: "executes the swap via the registered router, deposits result into reward pool".
