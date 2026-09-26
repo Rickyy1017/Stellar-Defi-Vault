@@ -1489,3 +1489,29 @@ pub fn token_fee_override_set(
         .publish(topics, (deposit_fee_bps, unstake_fee_bps, ledger));
 }
 
+// ── Issues #542-545 ────────────────────────────────────────────────────────
+
+/// Emitted once per low episode when the reward pool drops below the
+/// admin-configured threshold relative to outstanding obligations (#544).
+/// The notified flag resets on recovery, so a new episode emits again —
+/// but repeated calls while continuously low never re-emit.
+pub fn reward_pool_low(
+    env: &Env,
+    pool_balance: i128,
+    outstanding_obligations: i128,
+    threshold_bps: u32,
+    ledger: u32,
+) {
+    let topics = (symbol_short!("rwpl_low"),);
+    env.events().publish(
+        topics,
+        (pool_balance, outstanding_obligations, threshold_bps, ledger),
+    );
+}
+
+/// Emitted when a keeper records an APY snapshot into the rolling history (#543).
+pub fn apy_snapshot_recorded(env: &Env, apy_bps: u32, ledger: u32) {
+    let topics = (symbol_short!("apy_snap"),);
+    env.events().publish(topics, (apy_bps, ledger));
+}
+

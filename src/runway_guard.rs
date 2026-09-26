@@ -222,5 +222,8 @@ pub(crate) fn credit_reward_pool_from(
         .checked_add(amount)
         .ok_or(VaultOpsError::ArithmeticError)?;
     balance::set_reward_pool_balance(env, updated);
+    // Issue #544: funding is a state-changing call — re-evaluate the
+    // low-balance alert (typically resets the notified flag on recovery).
+    crate::vault_extensions_542_545::check_and_emit_low_balance(env);
     Ok(())
 }
