@@ -16,6 +16,8 @@ use soroban_sdk::{contracttype, Address, String, Vec};
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
+    ReentrancyGuard,
+    WasmHash,
     Admin,
     Token,
     TotalShares,

@@ -42,6 +42,7 @@ pub mod batch_vote; // governance batch voting (issue #160)
 pub mod daily_withdrawal_limit; // issue #554 — per-user rolling 24h withdrawal limit
 pub mod position_multiplier; // issue #534 — per-position custom reward multiplier
 pub mod inactivity_decay; // issue #536 — configurable inactivity-based reward decay
+pub mod vault_extensions_546_549; // issues #546-#549 — positions cap, precision, large-deposit lock, min funding
 
 // Issues #526-#529: scheduled exit, snapshot airdrop, external price oracle, co-sponsor.
 pub mod scheduled_exit; // issue #526 — scheduled self-withdrawal
@@ -59,6 +60,8 @@ pub mod activity_log; // issue #530 — per-user deposit/withdrawal history
 pub mod pool_insights; // pool summary + rounding-policy transparency
 pub mod runway_guard; // set_reward_rate_bps runway safety rail
 pub mod admin_recovery; // long-delay admin key-loss recovery
+pub mod ttl_management; // issue #589 - storage TTL management
+pub mod foreign_token_sweep; // issue #590 - foreign token rescue
 
 // Pre-existing modules that `vault.rs` already calls into (e.g. `do_unstake`'s
 // `community_treasury::route_fee_revenue` / `position_mirroring::maybe_mirror_action`)
@@ -112,6 +115,9 @@ mod test_issue_525; // issue #525 — graceful pool sunset via initiate_sunset()
 #[cfg(test)]
 mod test_issue_497; // issue #497 — paused break-glass principal withdrawal
 
+#[cfg(test)]
+mod test_issues_589_590_592;
+
 // #[cfg(test)]
 // mod test_issues_463_466;
 // #[cfg(test)]
@@ -126,3 +132,11 @@ mod test_issue_497; // issue #497 — paused break-glass principal withdrawal
 mod test_issues_498_501;
 #[cfg(test)]
 mod test_issues_502_505;
+pub mod vault_extensions_490_493;
+#[cfg(test)]
+mod test_issues_490_493;
+
+pub mod multisig_admin; // multi-sig signer management: set_admin_signers, propose_admin_action
+pub mod migration_path; // vault v2 migration: set_migration_target, migrate_position
+pub mod circuit_breaker; // single-tx withdrawal circuit breaker: set_circuit_breaker_threshold_bps
+pub mod withdrawal_cooldown; // withdrawal cooldown: set_withdrawal_cooldown, request_withdrawal, execute_withdrawal

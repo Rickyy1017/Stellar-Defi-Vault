@@ -759,6 +759,9 @@ pub enum VaultOpsError {
     /// Returned by `set_reward_rate_bps` while the algorithmic reward rate
     /// is enabled (issue #510) — the rate is derived from utilization.
     DynamicRateActive = 12,
+    /// Returned by `fund_reward_pool` when `amount` is below the configured
+    /// minimum (issue #549). Disabled when the minimum is 0.
+    FundingBelowMinimum = 13,
 }
 
 impl From<VaultError> for VaultOpsError {

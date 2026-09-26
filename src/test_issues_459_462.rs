@@ -140,7 +140,7 @@ impl<'a> Fixture<'a> {
 #[test]
 fn test_health_below_threshold_triggers_recovery() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     // collateral 10_000 * 50% ltv = 5_000 borrowable; debt 4_000 -> health 12_500 bps.
     f.set_loan(&f.alice, 5_000, 4_000, 0);
     assert_eq!(f.vault.position_health_bps(&f.alice), Some(12_500));
@@ -164,7 +164,7 @@ fn test_health_below_threshold_triggers_recovery() {
 #[test]
 fn test_recovery_not_triggered_above_threshold() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_loan(&f.alice, 5_000, 4_000, 0); // health 12_500 bps
     f.set_accrued_reward(&f.alice, 2_000);
     f.vault
@@ -177,7 +177,7 @@ fn test_recovery_not_triggered_above_threshold() {
 #[test]
 fn test_recovery_not_triggered_without_loan() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_accrued_reward(&f.alice, 2_000);
     assert_eq!(f.vault.position_health_bps(&f.alice), None);
     f.vault
@@ -189,7 +189,7 @@ fn test_recovery_not_triggered_without_loan() {
 #[test]
 fn test_correct_action_executed_auto_repay_loan() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_loan(&f.alice, 5_000, 4_000, 0); // health 12_500 bps
     f.vault
         .set_recovery_config(&f.alice, &15_000, &RecoveryAction::AutoRepayLoan, &1_000);
@@ -206,7 +206,7 @@ fn test_correct_action_executed_auto_repay_loan() {
 #[test]
 fn test_correct_action_executed_auto_unstake_partial() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_loan(&f.alice, 5_000, 4_000, 0);
     f.vault.set_recovery_config(
         &f.alice,
@@ -227,7 +227,7 @@ fn test_correct_action_executed_auto_unstake_partial() {
 #[test]
 fn test_daily_cooldown_enforced() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_loan(&f.alice, 5_000, 4_000, 0);
     f.set_accrued_reward(&f.alice, 1_000);
     f.vault
@@ -248,7 +248,7 @@ fn test_daily_cooldown_enforced() {
 #[test]
 fn test_keeper_earns_incentive() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_loan(&f.alice, 5_000, 4_000, 0);
     f.set_accrued_reward(&f.alice, 10_000);
     f.vault
@@ -478,7 +478,7 @@ fn add_item(f: &Fixture, title: &str, category: &str) -> u32 {
 #[test]
 fn test_100_point_budget_enforced() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     let i1 = add_item(&f, "Feature A", "core");
     let i2 = add_item(&f, "Feature B", "ux");
 
@@ -492,7 +492,7 @@ fn test_100_point_budget_enforced() {
 #[test]
 fn test_exceeding_budget_reverts() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     let i1 = add_item(&f, "Feature A", "core");
     let i2 = add_item(&f, "Feature B", "ux");
 
@@ -506,7 +506,7 @@ fn test_exceeding_budget_reverts() {
 #[test]
 fn test_rankings_sorted_correctly() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     let i1 = add_item(&f, "Low", "a");
     let i2 = add_item(&f, "High", "b");
     let i3 = add_item(&f, "Mid", "c");
@@ -524,7 +524,7 @@ fn test_rankings_sorted_correctly() {
 #[test]
 fn test_monthly_reset_clears_allocations() {
     let f = Fixture::new();
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     let i1 = add_item(&f, "Feature A", "core");
 
     f.vault.vote_roadmap_item(&f.alice, &i1, &100);

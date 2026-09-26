@@ -119,12 +119,12 @@ fn test_deposit_with_memo_oversized_reverts() {
 fn test_deposit_without_memo_still_works() {
     let f = Fixture::new();
     // Standard deposit without memo still works via existing function
-    let shares = f.vault.deposit(&f.alice, &1_000, &None);
+    let shares = f.vault.deposit(&f.alice, &1_000, &0);
     assert_eq!(shares, 1_000);
     assert_eq!(f.vault.shares_of(&f.alice), 1_000);
 
     // Stake also works
-    let shares_bob = f.vault.stake(&f.bob, &2_000);
+    let shares_bob = f.vault.stake(&f.bob, &2_000, &0);
     assert_eq!(shares_bob, 2_000);
     assert_eq!(f.vault.shares_of(&f.bob), 2_000);
 }
@@ -271,7 +271,7 @@ fn test_token_fee_override_clearing_restores_default_behavior() {
 fn test_token_fee_override_applied_in_unstake() {
     let f = Fixture::new();
     // Stake 10_000
-    f.vault.stake(&f.alice, &10_000);
+    f.vault.stake(&f.alice, &10_000, &0);
 
     // Set global unstake fee to 100 bps (1%)
     f.vault.set_unstake_fee_bps(&f.admin, &100);

@@ -92,7 +92,7 @@ fn allowlist_disabled_preserves_open_access() {
     let user = f.funded_user(1_000_000_00);
 
     // By default allowlist is disabled — anyone can stake
-    let result = f.vault.stake(&user, &1_000_000_00);
+    let result = f.vault.stake(&user, &1_000_000_00, &0);
     assert!(result.is_ok());
 }
 

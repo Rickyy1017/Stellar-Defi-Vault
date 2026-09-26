@@ -455,7 +455,7 @@ mod test {
         f.vault.set_meta_reward_rate_bps(&f.admin, &META_RATE);
 
         // Alice opens a regular stake and also a meta stake.
-        f.vault.stake(&f.alice, &50_000i128);
+        f.vault.stake(&f.alice, &50_000i128, &0);
         f.vault.meta_stake(&f.alice, &30_000i128);
 
         // Regular position tallies only the regular stake.

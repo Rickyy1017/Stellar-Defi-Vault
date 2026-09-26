@@ -223,7 +223,7 @@ fn test_claim_deducts_contribution_and_accumulates_fund() {
     let f = Fixture::new();
 
     // Alice stakes
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
 
     // Alice opts in for 10% (1000 bps) bug bounty contribution
     f.vault.set_bug_bounty_contribution_bps(&f.alice, &1000);
@@ -251,7 +251,7 @@ fn test_pay_bug_bounty_payout_and_insufficient_revert() {
     let f = Fixture::new();
 
     // Build up bug bounty fund
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.vault.set_bug_bounty_contribution_bps(&f.alice, &1000);
     f.set_accrued_reward(&f.alice, 5000);
     f.vault.claim(&f.alice);
@@ -291,8 +291,8 @@ fn test_register_and_sync_cross_pool_identity() {
     sibling_vault.initialize(&f.admin, &token_addr, &500_u32, &None, &None);
 
     f.token_admin.mint(&f.alice, &50_000);
-    f.vault.deposit(&f.alice, &10_000, &None);
-    sibling_vault.deposit(&f.alice, &20_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
+    sibling_vault.deposit(&f.alice, &20_000, &0);
 
     let mut pools = Vec::new(&f.env);
     pools.push_back(f.vault_id.clone());
@@ -332,8 +332,8 @@ fn test_cross_pool_governance_weight_toggle() {
     let token_addr = f.vault.get_stake_token();
     sibling_vault.initialize(&f.admin, &token_addr, &500_u32, &None, &None);
 
-    f.vault.deposit(&f.alice, &5_000, &None);
-    sibling_vault.deposit(&f.alice, &15_000, &None);
+    f.vault.deposit(&f.alice, &5_000, &0);
+    sibling_vault.deposit(&f.alice, &15_000, &0);
 
     let mut pools = Vec::new(&f.env);
     pools.push_back(f.vault_id.clone());
@@ -361,7 +361,7 @@ fn test_cross_pool_governance_weight_toggle() {
 fn test_sync_cross_pool_handles_unreachable_pool_gracefully() {
     let f = Fixture::new();
 
-    f.vault.deposit(&f.alice, &7_000, &None);
+    f.vault.deposit(&f.alice, &7_000, &0);
 
     let dead_address = Address::generate(&f.env);
     let mut pools = Vec::new(&f.env);
@@ -381,7 +381,7 @@ fn test_sync_cross_pool_handles_unreachable_pool_gracefully() {
 fn test_position_value_appreciation_log_snapshots_and_growth() {
     let f = Fixture::new();
 
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_accrued_reward(&f.alice, 0);
 
     // First snapshot
@@ -410,7 +410,7 @@ fn test_position_value_appreciation_log_snapshots_and_growth() {
 fn test_appreciation_log_52_entry_rollover() {
     let f = Fixture::new();
 
-    f.vault.deposit(&f.alice, &1_000, &None);
+    f.vault.deposit(&f.alice, &1_000, &0);
 
     for i in 0..60 {
         f.set_accrued_reward(&f.alice, (i + 1) * 10);
@@ -428,7 +428,7 @@ fn test_appreciation_log_52_entry_rollover() {
 fn test_auto_snapshot_on_claim() {
     let f = Fixture::new();
 
-    f.vault.deposit(&f.alice, &10_000, &None);
+    f.vault.deposit(&f.alice, &10_000, &0);
     f.set_accrued_reward(&f.alice, 1_000);
 
     assert_eq!(f.vault.get_value_appreciation_log(&f.alice).len(), 0);

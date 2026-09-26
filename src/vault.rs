@@ -195,11 +195,13 @@ impl VaultContract {
         }
 
         // Persist token decimals so reward math can normalize across mismatched
-        // precisions. Unspecified values fall back to the Stellar standard of 7.
-        balance::set_stake_decimals(
-            &env,
-            stake_decimals.unwrap_or(balance::DEFAULT_TOKEN_DECIMALS),
-        );
+        // precisions. Issue #547: when no explicit value is given, query the
+        // live deposit token's own decimals rather than hardcoding the
+        // Stellar-standard fallback.
+        let resolved_stake_decimals =
+            crate::vault_extensions_546_549::resolve_token_decimals(&env, &token, stake_decimals);
+        balance::set_stake_decimals(&env, resolved_stake_decimals);
+        crate::vault_extensions_546_549::set_share_decimals(&env, resolved_stake_decimals);
         balance::set_reward_decimals(
             &env,
             reward_decimals.unwrap_or(balance::DEFAULT_TOKEN_DECIMALS),
@@ -212,7 +214,7 @@ impl VaultContract {
     /// Stakes `amount` of the pool's token on behalf of `user`, minting
     /// shares proportional to the current share price (1:1 for the pool's
     /// first deposit). Returns the number of shares minted.
-    pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
+    pub fn stake(env: Env, user: Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
         user.require_auth();
         // Issue #525: no new deposits once the pool is sunsetting. Checked
         // before any state is written so a rejected deposit leaves nothing.
@@ -238,6 +240,9 @@ impl VaultContract {
         // Issue #512: credit what actually arrived, not the stated amount.
         let amount = crate::transfer_safety::pull_tokens(&env, &token_addr, &user, amount)?;
 
+        // Issue #488: cap the user's total position, not just this deposit.
+        crate::max_deposit_cap::enforce(&env, &user, amount);
+
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
         let shares_minted = if total_shares == 0 || total_deposited == 0 {
@@ -250,12 +255,15 @@ impl VaultContract {
         };
 
         let current_shares = balance::get_shares(&env, &user);
-        balance::set_shares(&env, &user, current_shares + shares_minted);
-        balance::set_total_shares(&env, total_shares + shares_minted);
-        balance::set_total_deposited(&env, total_deposited + amount);
+        balance::set_shares(&env, &user, current_shares.checked_add(shares_minted).ok_or(VaultError::ArithmeticError)?);
+        balance::set_total_shares(&env, total_shares.checked_add(shares_minted).ok_or(VaultError::ArithmeticError)?);
+        balance::set_total_deposited(&env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         if current_shares == 0 {
             balance::register_staker(&env, &user);
         }
+
+        // Issue #548: qualifying large deposits lock their minted shares.
+        crate::vault_extensions_546_549::maybe_lock_deposit(&env, &user, amount, shares_minted);
 
         // Issue #453: trigger mirroring for followers
         crate::position_mirroring::maybe_mirror_action(&env, &user, symbol_short!("stake"), amount);
@@ -270,6 +278,9 @@ impl VaultContract {
 
         // Issue #544: single-shot low-balance alert on state-changing calls.
         crate::vault_extensions_542_545::check_and_emit_low_balance(&env);
+
+        // Issue #589: best-effort instance TTL bump on a high-traffic path.
+        crate::ttl_management::bump(&env);
 
         Ok(shares_minted)
     }
@@ -347,6 +358,17 @@ impl VaultContract {
 
     /// Admin: set the base reward APR in basis points. Every accepted update is
     /// appended to the on-chain changelog returned by `get_rate_history`.
+    
+    pub fn upgrade_wasm(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), VaultError> {
+        if admin != admin::get_admin(&env) {
+            return Err(VaultError::Unauthorized);
+        }
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgrade"),), (admin, new_wasm_hash, env.ledger().sequence()));
+        Ok(())
+    }
+
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::validate_rate_bps(rate_bps)?;
@@ -521,6 +543,7 @@ impl VaultContract {
     /// push the withdrawer's cumulative withdrawals over the admin-configured
     /// rolling 24h per-user cap (issue #554).
     pub fn withdraw(env: Env, withdrawer: Address, shares: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         crate::daily_withdrawal_limit::enforce_and_record(
             &env,
             &withdrawer,
@@ -662,6 +685,16 @@ impl VaultContract {
             return Err(VaultExtError::InvalidSplitAmount);
         }
 
+        // Issue #546: creating a split position counts against the per-user cap.
+        {
+            let cap = crate::vault_extensions_546_549::get_max_positions_inner(&env);
+            if cap > 0
+                && crate::vault_extensions_546_549::position_count_inner(&env, &user) >= cap
+            {
+                return Err(VaultExtError::TooManyPositions);
+            }
+        }
+
         // Settle pending rewards on the existing (pre-split) position first.
         Self::do_claim(&env, &user)?;
 
@@ -673,7 +706,7 @@ impl VaultContract {
         let current_ledger = env.ledger().sequence();
 
         // Shrink the primary position.
-        let remaining = current_shares - split_amount;
+        let remaining = current_shares.checked_sub(split_amount).ok_or(VaultError::ArithmeticError)?;
         balance::set_shares(&env, &user, remaining);
         balance::set_last_claim_ledger(&env, &user, current_ledger);
 
@@ -730,6 +763,7 @@ impl VaultContract {
     /// Large claims are queued when MEV protection is enabled and the accrued
     /// reward meets or exceeds the configured threshold.
     pub fn claim(env: Env, staker: Address) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
         // Issue #201: rate limit applies to explicit claim() calls only ΓÇö
         // not to the internal do_claim() invoked by stake_and_claim() or
@@ -767,6 +801,7 @@ impl VaultContract {
     /// `claim` it is never routed through the MEV large-claim queue: a partial
     /// claim is a deliberate, bounded withdrawal rather than a large one.
     pub fn claim_partial(env: Env, staker: Address, amount: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
         Self::check_claim_rate_limit(&env, &staker);
         if amount <= 0 {
@@ -781,7 +816,7 @@ impl VaultContract {
             return Err(VaultError::InsufficientRewardPool);
         }
 
-        balance::set_accrued_reward(&env, &staker, pending - amount);
+        balance::set_accrued_reward(&env, &staker, pending.checked_sub(amount).ok_or(VaultError::ArithmeticError)?);
         let total_paid = balance::get_total_rewards_paid(&env);
         balance::set_total_rewards_paid(
             &env,
@@ -836,7 +871,7 @@ impl VaultContract {
 
         // Stake the requested amount; do_stake_inner skips require_auth since
         // the single auth above already covers both actions.
-        Self::do_stake_inner(&env, &user, amount)?;
+        Self::do_stake_inner(&env, &user, amount, min_shares_out)?;
 
         Ok(claimed_amount)
     }
@@ -2068,7 +2103,7 @@ impl VaultContract {
         let amount =
             crate::transfer_safety::pull_tokens(&env, &token_addr, &admin_addr, amount)?;
         let total_deposited = balance::get_total_deposited(&env);
-        balance::set_total_deposited(&env, total_deposited + amount);
+        balance::set_total_deposited(&env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         let admin_actual = admin::get_admin(&env)?;
         events::yield_added(&env, &admin_actual, amount);
         events::admin_action_add_yield(&env, &admin_actual, amount);
@@ -2753,10 +2788,14 @@ impl VaultContract {
 
     fn check_claim_rate_limit(_env: &Env, _user: &Address) {}
 
-    fn do_stake_inner(env: &Env, user: &Address, amount: i128) -> Result<i128, VaultError> {
+    fn do_stake_inner(env: &Env, user: &Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
         // Issue #525: the `stake_and_claim` path must not slip past the sunset
         // gate that `stake` applies.
+
+        let (p_dep, _) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
+        if p_dep { return Err(VaultError::Paused); }
         Self::require_no_sunset(env)?;
+
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
@@ -2774,15 +2813,22 @@ impl VaultContract {
         let amount = crate::transfer_safety::pull_tokens(env, &token_addr, user, amount)?;
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
+
         let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
             .ok_or(VaultError::ArithmeticError)?;
+        if min_shares_out > 0 && shares < min_shares_out {
+            return Err(VaultError::SlippageExceeded);
+        }
+
         let cur = balance::get_shares(env, user);
         balance::set_shares(env, user, cur + shares);
         balance::set_total_shares(env, total_shares + shares);
-        balance::set_total_deposited(env, total_deposited + amount);
+        balance::set_total_deposited(env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         if cur == 0 {
             balance::register_staker(env, user);
         }
+        // Issue #548: same large-deposit lock as `stake`.
+        crate::vault_extensions_546_549::maybe_lock_deposit(env, user, amount, shares);
         crate::position_mirroring::maybe_mirror_action(env, user, symbol_short!("stake"), amount);
         crate::activity_log::record(
             env,
@@ -2811,6 +2857,7 @@ impl VaultContract {
             balance::set_shares(env, staker, user_shares - shares);
             return Ok(0); // Payout is deferred
         }
+<<<<<<< HEAD
 >>>>>>> d8e794f7e1e51dd68d97f5eedd05a998fc3d613a
         if shares <= 0 {
             return Err(VaultLockError::ZeroAmount);
@@ -2819,15 +2866,28 @@ impl VaultContract {
             if env.ledger().sequence() < unlocks_at {
                 return Err(VaultLockError::PositionLocked);
             }
+=======
+
+        let (_, p_with) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
+        if p_with { return Err(VaultError::Paused); }
+        if shares <= 0 {
+
+            return Err(VaultError::ZeroAmount);
+>>>>>>> 7f6a88e867e94d45c96aefeb76c28b0fddafd6ae
         }
         let user_shares = balance::get_shares(env, staker);
         if user_shares < shares {
             return Err(VaultLockError::InsufficientShares);
         }
+        // Issue #548: withdrawals only draw from unlocked share tranches.
+        crate::vault_extensions_546_549::enforce_unlocked(env, staker, shares)?;
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
+        // Circuit breaker: revert and auto-pause if this single withdrawal
+        // exceeds the configured fraction of total pool value (issue CB).
+        crate::circuit_breaker::check(env, amount)?;
         let token_addr = Self::token_address(env)?;
         // Issue #525: withdrawals are fee-free for the whole sunset window, so
         // a sunsetting user exits at full value. Everything below is already
@@ -2848,7 +2908,7 @@ impl VaultContract {
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &payout);
         balance::set_shares(env, staker, user_shares - shares);
-        balance::set_total_shares(env, total_shares - shares);
+        balance::set_total_shares(env, total_shares.checked_sub(shares).ok_or(VaultError::ArithmeticError)?);
         balance::set_total_deposited(env, total_deposited - amount);
         if fee > 0 {
             balance::add_protocol_fee_collected(env, fee);
@@ -2857,7 +2917,13 @@ impl VaultContract {
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
             
-            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
+            if let Some(single_recipient) = crate::vault_extensions_490_493::VaultContract::get_fee_recipient(env.clone()) {
+                let token_addr = Self::token_address(env)?;
+                let token_client = token::Client::new(env, &token_addr);
+                token_client.transfer(&env.current_contract_address(), &single_recipient, &remaining_fee);
+            } else if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
                 let token_addr = Self::token_address(env)?;
                 let token_client = token::Client::new(env, &token_addr);
                 for i in 0..split.recipients.len() {
@@ -2896,6 +2962,8 @@ impl VaultContract {
         );
         // Issue #544: single-shot low-balance alert on state-changing calls.
         crate::vault_extensions_542_545::check_and_emit_low_balance(env);
+        // Issue #589: best-effort instance TTL bump on a high-traffic path.
+        crate::ttl_management::bump(env);
         Ok(amount)
     }
 
@@ -3912,6 +3980,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             return Err(VaultError::InsufficientShares);
         }
 
+        // Issue #548: same unlocked-tranche gate as `do_unstake`.
+        crate::vault_extensions_546_549::enforce_unlocked(&env, &user, shares)?;
+
         // Apply daily withdrawal limit check
         let projected = Self::projected_unstake_amount(&env, shares)?;
         crate::daily_withdrawal_limit::enforce_and_record(&env, &user, projected)?;
@@ -3940,7 +4011,7 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         token_client.transfer(&env.current_contract_address(), &recipient, &payout);
 
         balance::set_shares(&env, &user, user_shares - shares);
-        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_shares(&env, total_shares.checked_sub(shares).ok_or(VaultError::ArithmeticError)?);
         balance::set_total_deposited(&env, total_deposited - amount);
 
         if fee > 0 {
@@ -3950,7 +4021,13 @@ pub fn get_reward_threshold(env: Env) -> i128 {
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
             
-            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
+            if let Some(single_recipient) = crate::vault_extensions_490_493::VaultContract::get_fee_recipient(env.clone()) {
+                let token_addr = Self::token_address(env)?;
+                let token_client = token::Client::new(env, &token_addr);
+                token_client.transfer(&env.current_contract_address(), &single_recipient, &remaining_fee);
+            } else if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
                 let token_addr = Self::token_address(&env)?;
                 let token_client = token::Client::new(env, &token_addr);
                 for i in 0..split.recipients.len() {
@@ -4076,6 +4153,9 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             balance::set_shares(&env, &beneficiary, existing + shares);
             new_total_shares += shares;
             new_total_deposited += amount;
+
+            // Issue #548: large batch legs lock their minted shares.
+            crate::vault_extensions_546_549::maybe_lock_deposit(&env, &beneficiary, amount, shares);
 
             // Record interaction for inactivity decay
             crate::inactivity_decay::record_interaction(&env, &beneficiary);

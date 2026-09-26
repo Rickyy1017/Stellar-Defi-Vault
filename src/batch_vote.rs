@@ -291,7 +291,7 @@ mod test {
     #[test]
     fn batch_votes_all_proposals_and_applies_weights() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &700_000);
+        f.vault.stake(&f.alice, &700_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
         seed_proposal(&f.env, &f.vault_id, 2, 200_000, false);
         seed_proposal(&f.env, &f.vault_id, 3, 200_000, false);
@@ -313,7 +313,7 @@ mod test {
     #[test]
     fn invalid_proposal_id_is_skipped_without_reverting_others() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
         seed_proposal(&f.env, &f.vault_id, 2, 200_000, false);
 
@@ -337,7 +337,7 @@ mod test {
     #[test]
     fn duplicate_proposal_in_batch_fails_on_second_occurrence() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
 
         let votes = batch(&f.env, &[(1, true), (1, false)]);
@@ -357,7 +357,7 @@ mod test {
     #[test]
     fn batch_larger_than_max_reverts() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         let mut votes = Vec::new(&f.env);
         // MAX + 1 entries, all otherwise valid.
         for id in 1..=(MAX_BATCH_VOTES + 1) {
@@ -378,7 +378,7 @@ mod test {
     #[test]
     fn exactly_max_batch_is_allowed() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         let mut votes = Vec::new(&f.env);
         for id in 1..=MAX_BATCH_VOTES {
             seed_proposal(&f.env, &f.vault_id, id, 200_000, false);
@@ -401,7 +401,7 @@ mod test {
     #[test]
     fn non_staker_cannot_batch_vote() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
 
         let votes = batch(&f.env, &[(1, true)]);
@@ -412,7 +412,7 @@ mod test {
     #[test]
     fn single_auth_required_for_entire_batch() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
         seed_proposal(&f.env, &f.vault_id, 2, 200_000, false);
 
@@ -428,7 +428,7 @@ mod test {
     #[test]
     fn last_vote_ledger_updated_on_successful_batch() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
 
         let before = last_vote_ledger(&f.env, &f.vault_id, &f.alice);
@@ -446,7 +446,7 @@ mod test {
     #[test]
     fn vote_cast_event_emitted_per_successful_vote() {
         let f = Fixture::new();
-        f.vault.stake(&f.alice, &500_000);
+        f.vault.stake(&f.alice, &500_000, &0);
         seed_proposal(&f.env, &f.vault_id, 1, 200_000, false);
         seed_proposal(&f.env, &f.vault_id, 2, 200_000, false);
 
