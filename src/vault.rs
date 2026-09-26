@@ -2500,6 +2500,9 @@ impl VaultContract {
         let total_deposited = balance::get_total_deposited(env);
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
+        // Circuit breaker: revert and auto-pause if this single withdrawal
+        // exceeds the configured fraction of total pool value (issue CB).
+        crate::circuit_breaker::check(env, amount)?;
         let token_addr = Self::token_address(env)?;
         // Issue #525: withdrawals are fee-free for the whole sunset window, so
         // a sunsetting user exits at full value. Everything below is already
