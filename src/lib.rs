@@ -136,3 +136,4 @@ mod test_issues_490_493;
 pub mod multisig_admin; // multi-sig signer management: set_admin_signers, propose_admin_action
 pub mod migration_path; // vault v2 migration: set_migration_target, migrate_position
 pub mod circuit_breaker; // single-tx withdrawal circuit breaker: set_circuit_breaker_threshold_bps
+pub mod withdrawal_cooldown; // withdrawal cooldown: set_withdrawal_cooldown, request_withdrawal, execute_withdrawal
