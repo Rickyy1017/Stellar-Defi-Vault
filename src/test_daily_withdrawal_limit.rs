@@ -48,8 +48,8 @@ fn setup<'a>() -> Fixture<'a> {
     token_admin.mint(&alice, &100_000);
     token_admin.mint(&bob, &100_000);
     token_admin.mint(&vault_id, &100_000);
-    vault.stake(&alice, &10_000);
-    vault.stake(&bob, &10_000);
+    vault.stake(&alice, &10_000, &0);
+    vault.stake(&bob, &10_000, &0);
 
     Fixture { env, vault, admin, alice, bob }
 }

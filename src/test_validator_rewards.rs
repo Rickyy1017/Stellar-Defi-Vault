@@ -162,8 +162,8 @@ fn distribution_proportional_to_stake() {
     f.vault.set_validator_node(&f.validator);
 
     // alice stakes 7_500, bob stakes 2_500 => 75%/25% split.
-    f.vault.stake(&f.alice, &7_500);
-    f.vault.stake(&f.bob, &2_500);
+    f.vault.stake(&f.alice, &7_500, &0);
+    f.vault.stake(&f.bob, &2_500, &0);
 
     f.vault.deposit_validator_rewards(&f.validator, &10_000);
     f.vault.distribute_validator_rewards();
@@ -181,8 +181,8 @@ fn distribution_with_equal_stakes() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &5_000);
-    f.vault.stake(&f.bob, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
+    f.vault.stake(&f.bob, &5_000, &0);
 
     f.vault.deposit_validator_rewards(&f.validator, &1_000);
     f.vault.distribute_validator_rewards();
@@ -207,7 +207,7 @@ fn distribution_with_empty_pool_reverts() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
 
     let result = f.vault.try_distribute_validator_rewards();
     assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
@@ -218,7 +218,7 @@ fn multiple_distributions_accumulate_balance() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &10_000);
+    f.vault.stake(&f.alice, &10_000, &0);
 
     f.vault.deposit_validator_rewards(&f.validator, &1_000);
     f.vault.distribute_validator_rewards();
@@ -237,8 +237,8 @@ fn user_claims_correct_share() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &5_000);
-    f.vault.stake(&f.bob, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
+    f.vault.stake(&f.bob, &5_000, &0);
 
     f.vault.deposit_validator_rewards(&f.validator, &1_000);
     f.vault.distribute_validator_rewards();
@@ -263,7 +263,7 @@ fn claim_transfers_tokens() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &10_000);
+    f.vault.stake(&f.alice, &10_000, &0);
 
     f.vault.deposit_validator_rewards(&f.validator, &1_000);
     f.vault.distribute_validator_rewards();
@@ -280,7 +280,7 @@ fn claim_twice_only_pays_once() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &10_000);
+    f.vault.stake(&f.alice, &10_000, &0);
 
     f.vault.deposit_validator_rewards(&f.validator, &1_000);
     f.vault.distribute_validator_rewards();
@@ -298,7 +298,7 @@ fn distribution_emits_event() {
     let f = Fixture::new();
     f.vault.set_validator_node(&f.validator);
 
-    f.vault.stake(&f.alice, &10_000);
+    f.vault.stake(&f.alice, &10_000, &0);
     f.vault.deposit_validator_rewards(&f.validator, &1_000);
     f.vault.distribute_validator_rewards();
 

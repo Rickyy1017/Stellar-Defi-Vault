@@ -214,7 +214,7 @@ impl VaultContract {
     /// Stakes `amount` of the pool's token on behalf of `user`, minting
     /// shares proportional to the current share price (1:1 for the pool's
     /// first deposit). Returns the number of shares minted.
-    pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
+    pub fn stake(env: Env, user: Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
         user.require_auth();
         // Issue #525: no new deposits once the pool is sunsetting. Checked
         // before any state is written so a rejected deposit leaves nothing.
@@ -286,8 +286,8 @@ impl VaultContract {
     }
 
     /// Deposit tokens into the vault (alias for stake).
-    pub fn deposit(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
-        Self::stake(env, user, amount)
+    pub fn deposit(env: Env, user: Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
+        Self::stake(env, user, amount, min_shares_out)
     }
 
     /// Admin: set the base reward APR in basis points. Every accepted update is
@@ -747,7 +747,7 @@ impl VaultContract {
 
         // Stake the requested amount; do_stake_inner skips require_auth since
         // the single auth above already covers both actions.
-        Self::do_stake_inner(&env, &user, amount)?;
+        Self::do_stake_inner(&env, &user, amount, min_shares_out)?;
 
         Ok(claimed_amount)
     }
@@ -2417,10 +2417,14 @@ impl VaultContract {
 
     fn check_claim_rate_limit(_env: &Env, _user: &Address) {}
 
-    fn do_stake_inner(env: &Env, user: &Address, amount: i128) -> Result<i128, VaultError> {
+    fn do_stake_inner(env: &Env, user: &Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
         // Issue #525: the `stake_and_claim` path must not slip past the sunset
         // gate that `stake` applies.
+
+        let (p_dep, _) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
+        if p_dep { return Err(VaultError::Paused); }
         Self::require_no_sunset(env)?;
+
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
         }
@@ -2438,8 +2442,13 @@ impl VaultContract {
         let amount = crate::transfer_safety::pull_tokens(env, &token_addr, user, amount)?;
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
+
         let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
             .ok_or(VaultError::ArithmeticError)?;
+        if min_shares_out > 0 && shares < min_shares_out {
+            return Err(VaultError::SlippageExceeded);
+        }
+
         let cur = balance::get_shares(env, user);
         balance::set_shares(env, user, cur + shares);
         balance::set_total_shares(env, total_shares + shares);
@@ -2474,7 +2483,11 @@ impl VaultContract {
             balance::set_shares(env, staker, user_shares - shares);
             return Ok(0); // Payout is deferred
         }
+
+        let (_, p_with) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
+        if p_with { return Err(VaultError::Paused); }
         if shares <= 0 {
+
             return Err(VaultError::ZeroAmount);
         }
         let user_shares = balance::get_shares(env, staker);
@@ -2516,7 +2529,13 @@ impl VaultContract {
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
             
-            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
+            if let Some(single_recipient) = crate::vault_extensions_490_493::VaultContract::get_fee_recipient(env.clone()) {
+                let token_addr = Self::token_address(env)?;
+                let token_client = token::Client::new(env, &token_addr);
+                token_client.transfer(&env.current_contract_address(), &single_recipient, &remaining_fee);
+            } else if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
                 let token_addr = Self::token_address(env)?;
                 let token_client = token::Client::new(env, &token_addr);
                 for i in 0..split.recipients.len() {
@@ -3614,7 +3633,13 @@ pub fn get_reward_threshold(env: Env) -> i128 {
                 .checked_sub(treasury_share)
                 .ok_or(VaultError::ArithmeticError)?;
             
-            if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
+            if let Some(single_recipient) = crate::vault_extensions_490_493::VaultContract::get_fee_recipient(env.clone()) {
+                let token_addr = Self::token_address(env)?;
+                let token_client = token::Client::new(env, &token_addr);
+                token_client.transfer(&env.current_contract_address(), &single_recipient, &remaining_fee);
+            } else if let Some(split) = crate::vault_extensions_498_501::VaultContract::get_treasury_split(env.clone()) {
+
                 let token_addr = Self::token_address(&env)?;
                 let token_client = token::Client::new(env, &token_addr);
                 for i in 0..split.recipients.len() {

@@ -140,7 +140,7 @@ impl VaultContract {
         );
 
         let target_client = VaultContractClient::new(&env, &target_pool);
-        target_client.stake(&user, &token_amount);
+        target_client.stake(&user, &token_amount, &0);
 
         env.events().publish(
             (symbol_short!("brdg_mv"), user),
