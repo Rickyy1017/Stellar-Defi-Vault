@@ -153,6 +153,7 @@ impl VaultContract {
             }
             None => Err(VaultFeature5Error::ActionNotFound),
         }
+        Ok(())
     }
 
     pub fn cancel_admin_action(env: Env, admin: Address, action_id: u32) -> Result<(), VaultFeature5Error> {
@@ -167,6 +168,7 @@ impl VaultContract {
         } else {
             Err(VaultFeature5Error::ActionNotFound)
         }
+        Ok(())
     }
 
     // ------------------------------------------------------------------------
@@ -194,7 +196,10 @@ impl VaultContract {
             let shares = if total_deposited == 0 {
                 pending
             } else {
-                (pending * total_shares) / total_deposited
+                pending
+                    .checked_mul(total_shares)
+                    .and_then(|value| value.checked_div(total_deposited))
+                    .ok_or(PublicApiError::ArithmeticError)?
             };
 
             balance::set_shares(&env, &user, balance::get_shares(&env, &user) + shares);

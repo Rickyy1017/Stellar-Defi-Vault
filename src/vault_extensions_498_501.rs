@@ -62,7 +62,9 @@ impl VaultContract {
         }
         let mut sum: u32 = 0;
         for i in 0..bps_shares.len() {
-            sum += bps_shares.get(i).unwrap();
+            sum = sum
+                .checked_add(bps_shares.get(i).unwrap())
+                .ok_or(PublicApiError::InvalidAllocation)?;
         }
         if sum != 10000 {
             return Err(VaultFeature5Error::InvalidSplitBpsSum);

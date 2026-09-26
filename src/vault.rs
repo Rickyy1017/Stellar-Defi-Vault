@@ -1,11 +1,11 @@
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, symbol_short, token, Address, Bytes,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Bytes,
     Env, String, Symbol, Vec,
 };
 
 use crate::{
     admin, balance,
-    errors::{VaultError, VaultExtError, VaultFeatureError, VaultQuizError},
+    errors::{VaultError, VaultExtError, VaultFeatureError, VaultLockError, VaultQuizError},
     events,
     nft::StakeReceiptNFTClient,
     storage::{
@@ -21,7 +21,7 @@ use crate::{
         RateChange, RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
         RevenueShareMerkleRoot, RevenueSharingConfig, RewardMultiplierBreakdown, RewardTier,
         RoundingPolicy, Season, SmoothingSchedule, SmoothingStatus, StakeAction, StakeHistoryEntry,
-        StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
+        SharePriceSnapshot, StakePosition, StakeStreak, StakingCertificate, StakingEfficiencyScore,
         StorageUsageReport, SunsetState, SwapOffer, TaxReport, Tournament, TriggerDirection,
         UnbondingPosition, UnstakeCheckResult, UserStats, UserSummary, VestingEntry,
         YieldComparison,
@@ -141,6 +141,26 @@ pub struct WaitlistEntry {
 #[contract]
 pub struct VaultContract;
 
+const REENTRANCY_KEY: Symbol = symbol_short!("re_entry");
+
+struct ReentrancyGuard { env: Env }
+
+impl ReentrancyGuard {
+    fn new(env: &Env) -> Result<Self, VaultError> {
+        if env.storage().instance().get(&REENTRANCY_KEY).unwrap_or(false) {
+            return Err(VaultError::Unauthorized);
+        }
+        env.storage().instance().set(&REENTRANCY_KEY, &true);
+        Ok(Self { env: env.clone() })
+    }
+}
+
+impl Drop for ReentrancyGuard {
+    fn drop(&mut self) {
+        self.env.storage().instance().remove(&REENTRANCY_KEY);
+    }
+}
+
 #[contractimpl]
 impl VaultContract {
     /// Initialize the vault with an admin and the token it accepts.
@@ -161,7 +181,7 @@ impl VaultContract {
         stake_decimals: Option<u32>,
         reward_decimals: Option<u32>,
     ) -> Result<(), VaultError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if env.storage().instance().has(&DataKey::Admin) || admin::is_renounced(&env) {
             return Err(VaultError::AlreadyInitialized);
         }
 
@@ -255,9 +275,9 @@ impl VaultContract {
         };
 
         let current_shares = balance::get_shares(&env, &user);
-        balance::set_shares(&env, &user, current_shares + shares_minted);
-        balance::set_total_shares(&env, total_shares + shares_minted);
-        balance::set_total_deposited(&env, total_deposited + amount);
+        balance::set_shares(&env, &user, current_shares.checked_add(shares_minted).ok_or(VaultError::ArithmeticError)?);
+        balance::set_total_shares(&env, total_shares.checked_add(shares_minted).ok_or(VaultError::ArithmeticError)?);
+        balance::set_total_deposited(&env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         if current_shares == 0 {
             balance::register_staker(&env, &user);
         }
@@ -285,13 +305,90 @@ impl VaultContract {
         Ok(shares_minted)
     }
 
-    /// Deposit tokens into the vault (alias for stake).
-    pub fn deposit(env: Env, user: Address, amount: i128, min_shares_out: i128) -> Result<i128, VaultError> {
-        Self::stake(env, user, amount, min_shares_out)
+    /// Deposit tokens into the vault, optionally crediting a referrer on the
+    /// depositor's first-ever deposit.
+    pub fn deposit(
+        env: Env,
+        user: Address,
+        amount: i128,
+        referrer: Option<Address>,
+    ) -> Result<i128, VaultError> {
+        if referrer.as_ref().is_some_and(|address| address == &user) {
+            return Err(VaultError::InvalidAddress);
+        }
+        let is_first_deposit = !balance::get_all_stakers(&env)
+            .iter()
+            .any(|staker| &staker == &user);
+        let total_before = balance::get_total_deposited(&env);
+        let shares_minted = Self::stake(env.clone(), user.clone(), amount)?;
+
+        if is_first_deposit {
+            if let Some(referrer) = referrer {
+                let deposit_amount = balance::get_total_deposited(&env)
+                    .checked_sub(total_before)
+                    .ok_or(VaultError::ArithmeticError)?;
+                Self::pay_referral_bonus(&env, &referrer, &user, deposit_amount)?;
+            }
+        }
+
+        Ok(shares_minted)
+    }
+
+    /// Enable an existing or former staker to refer new depositors.
+    pub fn register_referrer(env: Env, user: Address) -> Result<(), VaultError> {
+        user.require_auth();
+        let has_position_history = balance::get_shares(&env, &user) > 0
+            || balance::get_all_stakers(&env)
+                .iter()
+                .any(|staker| &staker == &user);
+        if !has_position_history {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let mut registry = balance::get_referral_registry(&env);
+        if !registry.iter().any(|referrer| referrer == user) {
+            registry.push_back(user);
+            balance::set_referral_registry(&env, &registry);
+        }
+        Ok(())
+    }
+
+    /// Admin: configure referral rewards in basis points of the first deposit.
+    pub fn set_referral_bonus_bps(
+        env: Env,
+        admin_addr: Address,
+        referrer_bps: u32,
+        referee_bps: u32,
+    ) -> Result<(), VaultError> {
+        admin_addr.require_auth();
+        if admin_addr != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if referrer_bps > 10_000 || referee_bps > 10_000 {
+            return Err(VaultError::InvalidRate);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("ref_rb"), &referrer_bps);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("ref_fb"), &referee_bps);
+        Ok(())
     }
 
     /// Admin: set the base reward APR in basis points. Every accepted update is
     /// appended to the on-chain changelog returned by `get_rate_history`.
+    
+    pub fn upgrade_wasm(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), VaultError> {
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgrade"),), (admin, new_wasm_hash, env.ledger().sequence()));
+        Ok(())
+    }
+
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::validate_rate_bps(rate_bps)?;
@@ -388,7 +485,7 @@ impl VaultContract {
         admin_addr: Address,
         export: MigrationExport,
     ) -> Result<(), VaultExtError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if env.storage().instance().has(&DataKey::Admin) || admin::is_renounced(&env) {
             return Err(VaultExtError::AlreadyInitialized);
         }
         admin_addr.require_auth();
@@ -466,12 +563,57 @@ impl VaultContract {
     /// push the withdrawer's cumulative withdrawals over the admin-configured
     /// rolling 24h per-user cap (issue #554).
     pub fn withdraw(env: Env, withdrawer: Address, shares: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         crate::daily_withdrawal_limit::enforce_and_record(
             &env,
             &withdrawer,
             Self::projected_unstake_amount(&env, shares)?,
         )?;
         Self::do_unstake(&env, &withdrawer, shares)
+    }
+
+    /// Break-glass exit available only while the vault is paused.
+    ///
+    /// Returns principal only, burns the user's full share balance, and
+    /// permanently forfeits all accrued rewards. This intentionally bypasses
+    /// withdrawal fees, queues, reward claims, and routine exit accounting.
+    /// It is an emergency mechanism, not a routine withdrawal path.
+    pub fn emergency_withdraw(env: Env, user: Address) -> Result<i128, VaultError> {
+        user.require_auth();
+        balance::apply_scheduled_unpause_if_due(&env);
+        if !Self::paused(&env) {
+            return Err(VaultError::VaultPaused);
+        }
+
+        let shares = balance::get_shares(&env, &user);
+        if shares <= 0 {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let amount_returned = balance::shares_to_amount(total_shares, total_deposited, shares)
+            .ok_or(VaultError::ArithmeticError)?;
+        let rewards_forfeited = balance::get_accrued_reward(&env, &user);
+        let token_addr = Self::token_address(&env)?;
+
+        token::Client::new(&env, &token_addr).transfer(
+            &env.current_contract_address(),
+            &user,
+            &amount_returned,
+        );
+        balance::set_shares(&env, &user, 0);
+        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_deposited(&env, total_deposited - amount_returned);
+        balance::set_accrued_reward(&env, &user, 0);
+        events::emergency_withdrawal(
+            &env,
+            &user,
+            amount_returned,
+            rewards_forfeited,
+            env.ledger().sequence(),
+        );
+        Ok(amount_returned)
     }
 
     /// Unstake by burning `shares`. This is an alias for `withdraw`.
@@ -504,7 +646,7 @@ impl VaultContract {
     pub fn unstake_all(env: Env, user: Address) -> Result<i128, VaultError> {
         let shares = balance::get_shares(&env, &user);
         if shares == 0 {
-            return Err(VaultError::PositionNotFound);
+            return Err(VaultLockError::PositionNotFound);
         }
         crate::daily_withdrawal_limit::enforce_and_record(
             &env,
@@ -584,7 +726,7 @@ impl VaultContract {
         let current_ledger = env.ledger().sequence();
 
         // Shrink the primary position.
-        let remaining = current_shares - split_amount;
+        let remaining = current_shares.checked_sub(split_amount).ok_or(VaultError::ArithmeticError)?;
         balance::set_shares(&env, &user, remaining);
         balance::set_last_claim_ledger(&env, &user, current_ledger);
 
@@ -641,6 +783,7 @@ impl VaultContract {
     /// Large claims are queued when MEV protection is enabled and the accrued
     /// reward meets or exceeds the configured threshold.
     pub fn claim(env: Env, staker: Address) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
         // Issue #201: rate limit applies to explicit claim() calls only ΓÇö
         // not to the internal do_claim() invoked by stake_and_claim() or
@@ -678,6 +821,7 @@ impl VaultContract {
     /// `claim` it is never routed through the MEV large-claim queue: a partial
     /// claim is a deliberate, bounded withdrawal rather than a large one.
     pub fn claim_partial(env: Env, staker: Address, amount: i128) -> Result<i128, VaultError> {
+        let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
         Self::check_claim_rate_limit(&env, &staker);
         if amount <= 0 {
@@ -692,7 +836,7 @@ impl VaultContract {
             return Err(VaultError::InsufficientRewardPool);
         }
 
-        balance::set_accrued_reward(&env, &staker, pending - amount);
+        balance::set_accrued_reward(&env, &staker, pending.checked_sub(amount).ok_or(VaultError::ArithmeticError)?);
         let total_paid = balance::get_total_rewards_paid(&env);
         balance::set_total_rewards_paid(
             &env,
@@ -747,7 +891,7 @@ impl VaultContract {
 
         // Stake the requested amount; do_stake_inner skips require_auth since
         // the single auth above already covers both actions.
-        Self::do_stake_inner(&env, &user, amount, min_shares_out)?;
+        Self::do_stake_inner(&env, &user, amount, 0)?;
 
         Ok(claimed_amount)
     }
@@ -755,6 +899,167 @@ impl VaultContract {
     /// Query share balance of a user.
     pub fn shares_of(env: Env, user: Address) -> i128 {
         balance::get_shares(&env, &user)
+    }
+
+    /// Record the pool-wide share price once per day at most. Anyone may call
+    /// this method, making it suitable for keepers. Returns `true` when a
+    /// snapshot was recorded and `false` when the rate limit has not elapsed.
+    pub fn take_share_price_snapshot(env: Env) -> bool {
+        let key = symbol_short!("sh_price");
+        let mut history: Vec<SharePriceSnapshot> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env));
+        let ledger = env.ledger().sequence();
+
+        if let Some(last) = history.last() {
+            if ledger.saturating_sub(last.ledger) < LEDGERS_PER_DAY {
+                return false;
+            }
+        }
+
+        let total_shares = balance::get_total_shares(&env);
+        let (price_numerator, price_denominator) = if total_shares > 0 {
+            (balance::get_total_deposited(&env), total_shares)
+        } else {
+            (0, 1)
+        };
+        if history.len() >= MAX_HISTORY_SNAPSHOTS {
+            history.remove(0);
+        }
+        history.push_back(SharePriceSnapshot {
+            price_numerator,
+            price_denominator,
+            ledger,
+        });
+        env.storage().instance().set(&key, &history);
+        true
+    }
+
+    /// Return retained pool-wide share price snapshots in chronological order.
+    pub fn get_share_price_history(env: Env) -> Vec<SharePriceSnapshot> {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("sh_price"))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Admin: set the maximum voluntary position lock duration in ledgers.
+    pub fn set_max_lock_duration(
+        env: Env,
+        admin_addr: Address,
+        max_duration_ledgers: u32,
+    ) -> Result<(), VaultLockError> {
+        admin_addr.require_auth();
+        let current_admin = admin::get_admin(&env).map_err(|_| VaultLockError::Unauthorized)?;
+        if current_admin != admin_addr {
+            return Err(VaultLockError::Unauthorized);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("max_lock"), &max_duration_ledgers);
+        Ok(())
+    }
+
+    /// Admin: configure duration thresholds and their additional reward boost
+    /// in basis points. Thresholds must be strictly increasing.
+    pub fn set_lock_boost_schedule(
+        env: Env,
+        admin_addr: Address,
+        tiers: Vec<(u32, u32)>,
+    ) -> Result<(), VaultLockError> {
+        admin_addr.require_auth();
+        let current_admin = admin::get_admin(&env).map_err(|_| VaultLockError::Unauthorized)?;
+        if current_admin != admin_addr {
+            return Err(VaultLockError::Unauthorized);
+        }
+        if tiers.len() > MAX_BOOST_TIERS {
+            return Err(VaultLockError::TooManyLockBoostTiers);
+        }
+        let mut previous_duration = 0;
+        for (duration, _) in tiers.iter() {
+            if duration == 0 || duration <= previous_duration {
+                return Err(VaultLockError::InvalidLockBoostSchedule);
+            }
+            previous_duration = duration;
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("l_boost"), &tiers);
+        Ok(())
+    }
+
+    /// Return the configured boost for a duration, using the highest tier
+    /// whose threshold does not exceed that duration.
+    pub fn get_lock_boost_bps(env: Env, lock_duration_ledgers: u32) -> u32 {
+        let tiers: Vec<(u32, u32)> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("l_boost"))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut boost = 0;
+        for (duration, tier_boost) in tiers.iter() {
+            if duration > lock_duration_ledgers {
+                break;
+            }
+            boost = tier_boost;
+        }
+        boost
+    }
+
+    /// Commit the caller's current position until the requested unlock ledger.
+    pub fn lock_position(
+        env: Env,
+        user: Address,
+        lock_duration_ledgers: u32,
+    ) -> Result<(), VaultLockError> {
+        user.require_auth();
+        if lock_duration_ledgers == 0 {
+            return Err(VaultLockError::ZeroAmount);
+        }
+        if balance::get_shares(&env, &user) == 0 {
+            return Err(VaultLockError::PositionNotFound);
+        }
+        if Self::get_lock_status(env.clone(), user.clone()).is_some() {
+            return Err(VaultLockError::LockAlreadyActive);
+        }
+        let max_duration: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("max_lock"))
+            .unwrap_or(0);
+        if lock_duration_ledgers > max_duration {
+            return Err(VaultLockError::LockDurationTooLong);
+        }
+        let boost_bps = Self::get_lock_boost_bps(env.clone(), lock_duration_ledgers);
+        let unlocks_at = env
+            .ledger()
+            .sequence()
+            .checked_add(lock_duration_ledgers)
+            .ok_or(VaultLockError::ArithmeticError)?;
+        env.storage().persistent().set(
+            &(symbol_short!("p_lock"), user.clone()),
+            &(unlocks_at, boost_bps),
+        );
+        events::position_locked(
+            &env,
+            &user,
+            lock_duration_ledgers,
+            boost_bps,
+            unlocks_at,
+            env.ledger().sequence(),
+        );
+        Ok(())
+    }
+
+    /// Return the active lock's unlock ledger and reward boost, if any.
+    pub fn get_lock_status(env: Env, user: Address) -> Option<(u32, u32)> {
+        let status: Option<(u32, u32)> = env
+            .storage()
+            .persistent()
+            .get(&(symbol_short!("p_lock"), user));
+        status.filter(|(unlocks_at, _)| crate::ledger_boundary::is_before(env.ledger().sequence(), *unlocks_at))
     }
 
     /// Query staked amount of a user (matches IStakingPool interface).
@@ -765,6 +1070,17 @@ impl VaultContract {
     /// Read-only query for the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, VaultError> {
         admin::get_admin(&env)
+    }
+
+    /// Permanently remove all admin authority. The address is repeated as an
+    /// explicit confirmation and must authorize the irreversible call.
+    pub fn renounce_admin(env: Env, admin: Address) -> Result<(), VaultError> {
+        admin::renounce(&env, &admin)?;
+        env.events().publish(
+            (Symbol::new(&env, "admin_renounced"),),
+            (admin, env.ledger().sequence()),
+        );
+        Ok(())
     }
 
     /// Read-only query for the original deployer address.
@@ -1139,7 +1455,19 @@ impl VaultContract {
         let gated = crate::vesting_cliff::apply_cliff(&env, &user, raw);
         crate::vesting_cliff::maybe_emit_cliff_unlocked(&env, &user, gated);
 
-        Self::normalize_to_reward_decimals(&env, gated)
+        let boosted = if let Some((unlocks_at, boost_bps)) = Self::get_lock_status(env.clone(), user) {
+            if env.ledger().sequence() < unlocks_at && boost_bps > 0 {
+                gated
+                    .checked_mul(10_000_i128 + boost_bps as i128)
+                    .and_then(|value| value.checked_div(10_000))
+                    .ok_or(VaultError::ArithmeticError)?
+            } else {
+                gated
+            }
+        } else {
+            gated
+        };
+        Self::normalize_to_reward_decimals(&env, boosted)
     }
 
     /// Gini coefficient of pending-reward distribution across all active
@@ -1808,7 +2136,7 @@ impl VaultContract {
         let amount =
             crate::transfer_safety::pull_tokens(&env, &token_addr, &admin_addr, amount)?;
         let total_deposited = balance::get_total_deposited(&env);
-        balance::set_total_deposited(&env, total_deposited + amount);
+        balance::set_total_deposited(&env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         let admin_actual = admin::get_admin(&env)?;
         events::yield_added(&env, &admin_actual, amount);
         events::admin_action_add_yield(&env, &admin_actual, amount);
@@ -1961,11 +2289,11 @@ impl VaultContract {
             .get(&symbol_short!("max_cap"))
             .unwrap_or(0);
         if max_capacity > 0 && current_staked < max_capacity {
-            panic_with_error!(&env, VaultError::InvalidRate);
+            return Err(VaultError::InvalidRate);
         }
         let mut queue: Vec<WaitlistEntry> = Self::get_waitlist(env.clone());
         if queue.len() >= MAX_WAITLIST_SIZE {
-            panic_with_error!(&env, VaultError::InvalidRate);
+            return Err(VaultError::InvalidRate);
         }
         let entry = WaitlistEntry {
             user: user.clone(),
@@ -2357,6 +2685,82 @@ impl VaultContract {
         Ok(accrued)
     }
 
+    fn pay_referral_bonus(
+        env: &Env,
+        referrer: &Address,
+        referee: &Address,
+        deposit_amount: i128,
+    ) -> Result<(), VaultError> {
+        if referrer == referee {
+            return Err(VaultError::InvalidAddress);
+        }
+        let registry = balance::get_referral_registry(env);
+        if !registry.iter().any(|registered| &registered == referrer) {
+            return Err(VaultError::PositionNotFound);
+        }
+
+        let referrer_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("ref_rb"))
+            .unwrap_or(0);
+        let referee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("ref_fb"))
+            .unwrap_or(0);
+        let bonus = |bps: u32| {
+            deposit_amount
+                .checked_mul(bps as i128)
+                .and_then(|value| value.checked_div(10_000))
+                .ok_or(VaultError::ArithmeticError)
+        };
+        let referrer_bonus = bonus(referrer_bps)?;
+        let referee_bonus = bonus(referee_bps)?;
+        let total_bonus = referrer_bonus
+            .checked_add(referee_bonus)
+            .ok_or(VaultError::ArithmeticError)?;
+        let reward_pool = balance::get_reward_pool_balance(env);
+        if total_bonus > reward_pool {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
+        if total_bonus > 0 {
+            let reward_token = Self::reward_token_address(env)?;
+            let client = token::Client::new(env, &reward_token);
+            let pool_address = env.current_contract_address();
+            if client.balance(&pool_address) < total_bonus {
+                return Err(VaultError::InsufficientRewardPool);
+            }
+            if referrer_bonus > 0 {
+                client.transfer(&pool_address, referrer, &referrer_bonus);
+            }
+            if referee_bonus > 0 {
+                client.transfer(&pool_address, referee, &referee_bonus);
+            }
+            balance::set_reward_pool_balance(env, reward_pool - total_bonus);
+        }
+
+        balance::set_referrer_of(env, referee, referrer);
+        balance::add_referee(env, referrer, referee);
+        let mut stats = balance::get_referral_stats(env, referrer);
+        stats.total_referred_stake = stats
+            .total_referred_stake
+            .checked_add(deposit_amount)
+            .ok_or(VaultError::ArithmeticError)?;
+        stats.referral_count = stats.referral_count.saturating_add(1);
+        balance::set_referral_stats(env, referrer, &stats);
+        events::referral_bonus_paid(
+            env,
+            referrer,
+            referee,
+            referrer_bonus,
+            referee_bonus,
+            env.ledger().sequence(),
+        );
+        Ok(())
+    }
+
     fn normalize_to_reward_decimals(env: &Env, amount: i128) -> Result<i128, VaultError> {
         Ok(amount)
     }
@@ -2422,7 +2826,7 @@ impl VaultContract {
         // gate that `stake` applies.
 
         let (p_dep, _) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
-        if p_dep { return Err(VaultError::Paused); }
+        if p_dep { return Err(VaultError::VaultPaused); }
         Self::require_no_sunset(env)?;
 
         if amount <= 0 {
@@ -2446,13 +2850,13 @@ impl VaultContract {
         let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
             .ok_or(VaultError::ArithmeticError)?;
         if min_shares_out > 0 && shares < min_shares_out {
-            return Err(VaultError::SlippageExceeded);
+            return Err(VaultError::InvalidRate);
         }
 
         let cur = balance::get_shares(env, user);
         balance::set_shares(env, user, cur + shares);
         balance::set_total_shares(env, total_shares + shares);
-        balance::set_total_deposited(env, total_deposited + amount);
+        balance::set_total_deposited(env, total_deposited.checked_add(amount).ok_or(VaultError::ArithmeticError)?);
         if cur == 0 {
             balance::register_staker(env, user);
         }
@@ -2471,24 +2875,26 @@ impl VaultContract {
         Ok(shares)
     }
 
-
     pub(crate) fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultError> {
+        if shares <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        let (_, withdrawals_paused) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
+        if withdrawals_paused {
+            return Err(VaultError::VaultPaused);
+        }
+        if Self::get_lock_status(env.clone(), staker.clone()).is_some() {
+            return Err(VaultError::UseCooldownFlow);
+        }
         if crate::vault_extensions_502_505::is_withdrawal_queue_enabled(env) {
-            crate::vault_extensions_502_505::enqueue_withdrawal(env, staker.clone(), shares);
             // Deduct shares so they can't queue the same shares twice, but don't pay out.
             let user_shares = balance::get_shares(env, staker);
             if user_shares < shares {
                 return Err(VaultError::InsufficientShares);
             }
+            crate::vault_extensions_502_505::enqueue_withdrawal(env, staker.clone(), shares);
             balance::set_shares(env, staker, user_shares - shares);
             return Ok(0); // Payout is deferred
-        }
-
-        let (_, p_with) = crate::vault_extensions_490_493::VaultContract::get_pause_state(env.clone());
-        if p_with { return Err(VaultError::Paused); }
-        if shares <= 0 {
-
-            return Err(VaultError::ZeroAmount);
         }
         let user_shares = balance::get_shares(env, staker);
         if user_shares < shares {
@@ -2519,11 +2925,11 @@ impl VaultContract {
             .ok_or(VaultError::ArithmeticError)?;
         let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
         // Issue #554: per-user rolling 24h cap on the gross amount withdrawn.
-        crate::daily_withdrawal_limit::enforce_and_record(env, staker, amount);
+        crate::daily_withdrawal_limit::enforce_and_record(env, staker, amount)?;
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &payout);
         balance::set_shares(env, staker, user_shares - shares);
-        balance::set_total_shares(env, total_shares - shares);
+        balance::set_total_shares(env, total_shares.checked_sub(shares).ok_or(VaultError::ArithmeticError)?);
         balance::set_total_deposited(env, total_deposited - amount);
         if fee > 0 {
             balance::add_protocol_fee_collected(env, fee);
@@ -3620,7 +4026,7 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         token_client.transfer(&env.current_contract_address(), &recipient, &payout);
 
         balance::set_shares(&env, &user, user_shares - shares);
-        balance::set_total_shares(&env, total_shares - shares);
+        balance::set_total_shares(&env, total_shares.checked_sub(shares).ok_or(VaultError::ArithmeticError)?);
         balance::set_total_deposited(&env, total_deposited - amount);
 
         if fee > 0 {

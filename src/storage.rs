@@ -79,6 +79,15 @@ pub enum DataKey {
     // Symbol::new(env, "prop")/"voted" tuple keys above).
 }
 
+/// Pool-wide share price at a particular ledger (issue #494).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharePriceSnapshot {
+    pub price_numerator: i128,
+    pub price_denominator: i128,
+    pub ledger: u32,
+}
+
 /// Storage key for an individual epoch snapshot.
 ///
 /// Soroban's enum contracttype support is stricter for tuple variants, so we
@@ -1483,5 +1492,4 @@ pub struct ProposalComment {
     pub stake_weight: i128,
     pub posted_at: u32,
 }
-
 

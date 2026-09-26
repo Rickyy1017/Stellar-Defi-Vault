@@ -4,6 +4,8 @@ mod admin;
 mod balance;
 mod errors;
 mod events;
+mod ledger_boundary;
+#[cfg(not(feature = "vault-wasm"))]
 pub mod example_consumer;
 pub mod interface;
 pub mod nft;
@@ -82,6 +84,7 @@ pub use vault::dynamic_reward_rate; // issue #510 — utilization-driven reward 
 pub use vault::keeper_registry; // admin-approved keeper registry // child of `vault` — see the note at the bottom of vault.rs
 pub mod transfer_safety; // issue #512 — fee-on-transfer token safety
 
+#[cfg(not(feature = "vault-wasm"))]
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
 
@@ -121,7 +124,13 @@ mod test_issue_522; // issue #522 — get_rate_history() rate-change changelog
 mod test_issue_525; // issue #525 — graceful pool sunset via initiate_sunset()
 
 #[cfg(test)]
+mod test_issue_497; // issue #497 — paused break-glass principal withdrawal
+
+#[cfg(test)]
 mod test_issues_589_590_592;
+
+#[cfg(test)]
+mod test_issues_605_608;
 
 // #[cfg(test)]
 // mod test_issues_463_466;

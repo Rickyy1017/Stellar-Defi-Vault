@@ -156,8 +156,61 @@ pub enum VaultError {
     InvalidRewardAmount = 48,
     /// Returned when a new stake is attempted after `start_graceful_shutdown` has been called.
     PoolShuttingDown = 49,
-    /// Reverts with NotInEpochMode error if pool is not configured for epoch mode.
-    NotInEpochMode = 50,
+    /// Returned by every admin-gated entrypoint after admin renouncement.
+    NoAdmin = 50,
+}
+
+/// Typed validation failures for public APIs that historically panicked.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum PublicApiError {
+    Unauthorized = 1,
+    NotInitialized = 2,
+    InvalidAllocation = 3,
+    UnsupportedToken = 4,
+    ActionNotYetExecutable = 5,
+    ActionNotFound = 6,
+    AutoCompoundDisabled = 7,
+    PositionNotFound = 8,
+    NotNftOwner = 9,
+    ArithmeticError = 10,
+    NoAdmin = 11,
+}
+
+impl From<VaultError> for PublicApiError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => Self::Unauthorized,
+            VaultError::NotInitialized => Self::NotInitialized,
+            VaultError::NoAdmin => Self::NoAdmin,
+            VaultError::PositionNotFound => Self::PositionNotFound,
+            VaultError::ArithmeticError => Self::ArithmeticError,
+            _ => Self::Unauthorized,
+        }
+    }
+}
+
+/// Errors for voluntarily locked positions. Kept separate because `VaultError`
+/// has reached Soroban's 50-variant contract error limit.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultLockError {
+    NotInitialized = 1,
+    Unauthorized = 3,
+    ZeroAmount = 4,
+    InsufficientShares = 5,
+    VaultPaused = 6,
+    ArithmeticError = 8,
+    WithdrawalLimitExceeded = 9,
+    PositionNotFound = 18,
+    UseCooldownFlow = 20,
+    PositionLocked = 51,
+    LockDurationTooLong = 52,
+    InvalidLockBoostSchedule = 53,
+    TooManyLockBoostTiers = 54,
+    LockAlreadyActive = 55,
 }
 
 /// Soroban caps every `#[contracterror]`/`#[contracttype]` enum at 50 variants

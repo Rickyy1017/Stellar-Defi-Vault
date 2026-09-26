@@ -110,7 +110,7 @@ fn depositor_cap_blocks_only_new_addresses() {
     assert_eq!(f.vault.get_depositor_count(), 2);
 
     // A brand-new address is rejected once the cap is met.
-    let res = f.vault.try_deposit(&carol, &100);
+    let res = f.vault.try_deposit(&carol, &100, &None);
     assert_eq!(res, Err(Ok(VaultError::DepositorCapReached)));
     assert_eq!(f.vault.get_depositor_count(), 2);
 

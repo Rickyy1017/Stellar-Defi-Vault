@@ -58,7 +58,7 @@ pub fn compute_current_rate(env: &Env) -> u32 {
         }
         let elapsed = current_ledger.saturating_sub(ramp.start_ledger) as u64;
         let duration = ramp.duration_ledgers as u64;
-        if elapsed >= duration {
+        if crate::ledger_boundary::duration_elapsed(current_ledger, ramp.start_ledger, ramp.duration_ledgers) {
             return ramp.target_rate_bps;
         }
         if ramp.target_rate_bps >= ramp.start_rate_bps {
@@ -221,8 +221,7 @@ impl VaultContract {
     pub fn complete_rate_ramp(env: Env) -> Result<u32, VaultError> {
         let ramp = get_rate_ramp(&env).ok_or(VaultError::NoCampaignActive)?;
         let current_ledger = env.ledger().sequence();
-        let elapsed = current_ledger.saturating_sub(ramp.start_ledger);
-        if elapsed < ramp.duration_ledgers {
+        if !crate::ledger_boundary::duration_elapsed(current_ledger, ramp.start_ledger, ramp.duration_ledgers) {
             return Err(VaultError::InvalidRate);
         }
         let target = ramp.target_rate_bps;

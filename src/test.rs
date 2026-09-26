@@ -9,7 +9,7 @@ use soroban_sdk::{
 };
 
 use crate::{
-    errors::{VaultError, VaultExtError, VaultFeatureError},
+    errors::{VaultError, VaultExtError, VaultFeatureError, VaultLockError},
     nft::{StakeReceiptNFT, StakeReceiptNFTClient},
     storage::{
         AdminAction, ChangelogEntry, DebtNFT, FeeRecipient, HalvingConfig, MilestoneCondition, PauseReason,
@@ -291,6 +291,54 @@ fn test_contract_balance_equals_staked_amount() {
 }
 
 #[test]
+fn test_first_deposit_with_referrer_pays_both_bonuses_from_reward_pool() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.register_referrer(&f.alice);
+    f.vault.set_referral_bonus_bps(&f.admin, &500, &250);
+    f.token_admin.mint(&f.admin, &100_000);
+    f.vault.fund_reward_pool(&f.admin, &100_000);
+
+    let alice_before = f.token.balance(&f.alice);
+    let bob_before = f.token.balance(&f.bob);
+    f.vault.deposit(&f.bob, &20_000, &Some(f.alice.clone()));
+
+    assert_eq!(f.token.balance(&f.alice), alice_before + 1_000);
+    assert_eq!(f.token.balance(&f.bob), bob_before - 20_000 + 500);
+    assert_eq!(f.vault.get_reward_pool_balance(), 98_500);
+}
+
+#[test]
+fn test_subsequent_deposit_does_not_pay_referral_bonus_again() {
+    let f = VaultFixture::new();
+    f.vault.stake(&f.alice, &100_000);
+    f.vault.register_referrer(&f.alice);
+    f.vault.set_referral_bonus_bps(&f.admin, &500, &500);
+    f.token_admin.mint(&f.admin, &20_000);
+    f.vault.fund_reward_pool(&f.admin, &20_000);
+
+    f.vault.deposit(&f.bob, &10_000, &Some(f.alice.clone()));
+    let reward_pool_after_first_deposit = f.vault.get_reward_pool_balance();
+    let alice_after_first_deposit = f.token.balance(&f.alice);
+    let bob_after_first_deposit = f.token.balance(&f.bob);
+
+    f.vault.deposit(&f.bob, &10_000, &Some(f.alice.clone()));
+    assert_eq!(f.vault.get_reward_pool_balance(), reward_pool_after_first_deposit);
+    assert_eq!(f.token.balance(&f.alice), alice_after_first_deposit);
+    assert_eq!(f.token.balance(&f.bob), bob_after_first_deposit - 10_000);
+}
+
+#[test]
+fn test_referral_rejects_self_referral() {
+    let f = VaultFixture::new();
+    let result = f
+        .vault
+        .try_deposit(&f.alice, &10_000, &Some(f.alice.clone()));
+    assert_eq!(result, Err(Ok(VaultError::InvalidAddress)));
+    assert_eq!(f.vault.shares_of(&f.alice), 0);
+}
+
+#[test]
 fn test_has_position_returns_false_for_no_position() {
     let f = VaultFixture::new();
     assert_eq!(f.vault.has_position(&f.bob), false);
@@ -306,14 +354,14 @@ fn test_has_position_returns_true_after_stake() {
 #[test]
 fn test_deposit_zero_fails() {
     let f = VaultFixture::new();
-    let result = f.vault.try_deposit(&f.alice, &0);
+    let result = f.vault.try_deposit(&f.alice, &0, &None);
     assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
 }
 
 #[test]
 fn test_deposit_negative_fails() {
     let f = VaultFixture::new();
-    let result = f.vault.try_deposit(&f.alice, &-100);
+    let result = f.vault.try_deposit(&f.alice, &-100, &None);
     assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
 }
 
@@ -352,7 +400,7 @@ fn test_withdraw_more_than_owned_fails() {
     f.vault.deposit(&f.alice, &100_000, &0);
 
     let result = f.vault.try_withdraw(&f.alice, &200_000);
-    assert_eq!(result, Err(Ok(VaultError::InsufficientShares)));
+    assert_eq!(result, Err(Ok(VaultLockError::InsufficientShares)));
 }
 
 #[test]
@@ -361,7 +409,7 @@ fn test_withdraw_zero_fails() {
     f.vault.deposit(&f.alice, &100_000, &0);
 
     let result = f.vault.try_withdraw(&f.alice, &0);
-    assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
+    assert_eq!(result, Err(Ok(VaultLockError::ZeroAmount)));
 }
 
 #[test]
@@ -386,7 +434,7 @@ fn test_preview_redeem_matches_actual_withdraw() {
     let preview = f.vault.preview_redeem(&250_000);
     let actual = f.vault.withdraw(&f.alice, &250_000);
 
-    assert_eq!(preview, actual);
+    assert_eq!(preview.unwrap(), actual.unwrap());
 }
 
 // â”€â”€ pause / unpause â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -399,7 +447,7 @@ fn test_pause_blocks_deposit() {
         &soroban_sdk::String::from_str(&f.env, "test"),
     );
 
-    let result = f.vault.try_deposit(&f.alice, &100_000);
+    let result = f.vault.try_deposit(&f.alice, &100_000, &None);
     assert_eq!(result, Err(Ok(VaultError::VaultPaused)));
 }
 
@@ -413,7 +461,7 @@ fn test_pause_blocks_withdraw() {
     );
 
     let result = f.vault.try_withdraw(&f.alice, &100_000);
-    assert_eq!(result, Err(Ok(VaultError::VaultPaused)));
+    assert_eq!(result, Err(Ok(VaultLockError::VaultPaused)));
 }
 
 #[test]
@@ -501,6 +549,41 @@ fn test_add_yield_increases_share_price() {
 }
 
 #[test]
+fn test_share_price_snapshot_records_pool_ratio_and_rate_limits() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &500_000, &None);
+    f.token_admin.mint(&f.admin, &100_000);
+    f.vault.add_yield(&f.admin, &100_000);
+
+    assert!(f.vault.take_share_price_snapshot());
+    let history = f.vault.get_share_price_history();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history.get(0).unwrap().price_numerator, 600_000);
+    assert_eq!(history.get(0).unwrap().price_denominator, 500_000);
+    assert_eq!(history.get(0).unwrap().ledger, f.env.ledger().sequence());
+    assert!(!f.vault.take_share_price_snapshot());
+
+    set_ledger(&f.env, f.env.ledger().sequence() + LEDGERS_PER_DAY);
+    assert!(f.vault.take_share_price_snapshot());
+    assert_eq!(f.vault.get_share_price_history().len(), 2);
+}
+
+#[test]
+fn test_share_price_snapshot_history_rolls_over_at_one_hundred() {
+    let f = VaultFixture::new();
+    let first_ledger = f.env.ledger().sequence();
+    for i in 0..101_u32 {
+        set_ledger(&f.env, first_ledger + i * LEDGERS_PER_DAY);
+        assert!(f.vault.take_share_price_snapshot());
+    }
+
+    let history = f.vault.get_share_price_history();
+    assert_eq!(history.len(), 100);
+    assert_eq!(history.get(0).unwrap().ledger, first_ledger + LEDGERS_PER_DAY);
+    assert_eq!(history.get(99).unwrap().ledger, first_ledger + 100 * LEDGERS_PER_DAY);
+}
+
+#[test]
 fn test_add_yield_requires_admin_auth() {
     let f = VaultFixture::new();
     f.token_admin.mint(&f.admin, &10_000);
@@ -547,7 +630,7 @@ fn test_withdrawal_limit_blocks_large_withdrawal() {
     f.vault.set_withdrawal_limit(&100_000);
 
     let result = f.vault.try_withdraw(&f.alice, &200_000);
-    assert_eq!(result, Err(Ok(VaultError::WithdrawalLimitExceeded)));
+    assert_eq!(result, Err(Ok(VaultLockError::WithdrawalLimitExceeded)));
 }
 
 #[test]
@@ -580,7 +663,7 @@ fn test_withdrawal_limit_one_over_fails() {
 
     // One over limit should fail
     let result = f.vault.try_withdraw(&f.alice, &100_001);
-    assert_eq!(result, Err(Ok(VaultError::WithdrawalLimitExceeded)));
+    assert_eq!(result, Err(Ok(VaultLockError::WithdrawalLimitExceeded)));
 }
 
 #[test]
@@ -594,7 +677,7 @@ fn test_admin_updates_withdrawal_limit() {
 
     // 60k fails with old limit
     let result = f.vault.try_withdraw(&f.alice, &60_000);
-    assert_eq!(result, Err(Ok(VaultError::WithdrawalLimitExceeded)));
+    assert_eq!(result, Err(Ok(VaultLockError::WithdrawalLimitExceeded)));
 
     // Admin raises limit
     f.vault.set_withdrawal_limit(&100_000);
@@ -801,7 +884,7 @@ fn test_yield_added_emits_event() {
 #[test]
 fn test_deposit_negative_amount_fails() {
     let f = VaultFixture::new();
-    let result = f.vault.try_deposit(&f.alice, &-500);
+    let result = f.vault.try_deposit(&f.alice, &-500, &None);
     assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
 }
 
@@ -811,7 +894,7 @@ fn test_withdraw_negative_shares_fails() {
     f.vault.deposit(&f.alice, &100_000, &0);
 
     let result = f.vault.try_withdraw(&f.alice, &-500);
-    assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
+    assert_eq!(result, Err(Ok(VaultLockError::ZeroAmount)));
 }
 
 #[test]
@@ -934,6 +1017,58 @@ fn test_lock_config_query() {
     let (lock_period, penalty_bps) = f.vault.get_lock_config();
     assert_eq!(lock_period, 100);
     assert_eq!(penalty_bps, 1500);
+}
+
+#[test]
+fn test_voluntary_position_lock_blocks_withdrawal_and_expires() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000, &None);
+    f.vault.set_max_lock_duration(&f.admin, &100);
+    let mut tiers = Vec::new(&f.env);
+    tiers.push_back((50, 500));
+    tiers.push_back((100, 1_000));
+    f.vault.set_lock_boost_schedule(&f.admin, &tiers);
+
+    f.vault.lock_position(&f.alice, &100);
+    assert_eq!(f.vault.get_lock_status(&f.alice), Some((100, 1_000)));
+    assert_eq!(
+        f.vault.try_withdraw(&f.alice, &100_000),
+        Err(Ok(VaultLockError::PositionLocked))
+    );
+
+    set_ledger(&f.env, 100);
+    assert_eq!(f.vault.get_lock_status(&f.alice), None);
+    assert_eq!(f.vault.withdraw(&f.alice, &100_000), 100_000);
+}
+
+#[test]
+fn test_lock_boost_applies_to_pending_reward_and_unlocked_position_has_none() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000, &None);
+    f.vault.set_max_lock_duration(&f.admin, &500);
+    let mut tiers = Vec::new(&f.env);
+    tiers.push_back((100, 500));
+    tiers.push_back((500, 2_000));
+    f.vault.set_lock_boost_schedule(&f.admin, &tiers);
+    assert_eq!(f.vault.get_lock_boost_bps(&300), 500);
+    crate::balance::set_accrued_reward(&f.env, &f.alice, 100);
+    assert_eq!(f.vault.calc_pending_reward(&f.alice), 100);
+
+    f.vault.lock_position(&f.alice, &300);
+    assert_eq!(f.vault.calc_pending_reward(&f.alice), 105);
+    set_ledger(&f.env, 300);
+    assert_eq!(f.vault.calc_pending_reward(&f.alice), 100);
+}
+
+#[test]
+fn test_lock_position_rejects_duration_above_admin_limit() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000, &None);
+    f.vault.set_max_lock_duration(&f.admin, &99);
+    assert_eq!(
+        f.vault.try_lock_position(&f.alice, &100),
+        Err(Ok(VaultLockError::LockDurationTooLong))
+    );
 }
 
 // â”€â”€ unstake fee (separate from withdrawal fee) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2065,7 +2200,7 @@ fn test_unstake_all_removes_position() {
 fn test_unstake_all_no_position_reverts() {
     let f = VaultFixture::new();
     let result = f.vault.try_unstake_all(&f.alice);
-    assert_eq!(result, Err(Ok(VaultError::PositionNotFound)));
+    assert_eq!(result, Err(Ok(VaultLockError::PositionNotFound)));
 }
 
 // â”€â”€ reward_token_balance (#80) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -37,13 +37,8 @@ jobs:
       - name: Run tests
         run: cargo test --features testutils
 
-      # TODO: WASM build disabled due to dual-contract architecture issue.
-      # Both VaultContract and StakeReceiptNFT define initialize(), causing
-      # "symbol `initialize` is already defined" error in wasm32-unknown-unknown.
-      # This is a Soroban limitation: only ONE contract per WASM binary.
-      # Proper fix: split into separate crates or use conditional compilation.
-      # - name: Build WASM release
-      #   run: cargo build --target wasm32-unknown-unknown --release
+      - name: Build optimized vault WASM
+        run: cargo build --target wasm32-unknown-unknown --release --features vault-wasm
 
   fmt:
     name: Rustfmt
