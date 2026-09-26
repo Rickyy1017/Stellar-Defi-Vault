@@ -617,6 +617,73 @@ impl VaultContract {
         result
     }
 
+    /// Claim `amount` of the pending reward instead of the whole balance,
+    /// paid in the configured reward token (issue #524) and leaving the rest
+    /// of the position's reward pending for a later claim.
+    ///
+    /// `amount` is the *gross* amount taken off the pending balance: the same
+    /// stake-funded bug-bounty contribution and claim fee that `claim`
+    /// deducts are applied to it, and the net remainder is what reaches the
+    /// staker (and is what this call returns), exactly as in `do_claim`.
+    ///
+    /// Reverts with `ZeroAmount` for a non-positive amount, and with
+    /// `InsufficientRewardPool` when `amount` exceeds what has accrued.
+    /// (`VaultError` sits at Soroban's 50-variant cap, so the over-claim case
+    /// reuses that existing slot rather than adding a new variant.)
+    ///
+    /// Returns 0 without touching state while peg protection halts emissions,
+    /// and applies the same standalone-claim rate limit as `claim`. Unlike
+    /// `claim` it is never routed through the MEV large-claim queue: a partial
+    /// claim is a deliberate, bounded withdrawal rather than a large one.
+    pub fn claim_partial(env: Env, staker: Address, amount: i128) -> Result<i128, VaultError> {
+        staker.require_auth();
+        Self::check_claim_rate_limit(&env, &staker);
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        if crate::peg_stabilization::emissions_halted(&env) {
+            return Ok(0);
+        }
+
+        let pending = balance::get_accrued_reward(&env, &staker);
+        if amount > pending {
+            return Err(VaultError::InsufficientRewardPool);
+        }
+
+        balance::set_accrued_reward(&env, &staker, pending - amount);
+        let total_paid = balance::get_total_rewards_paid(&env);
+        balance::set_total_rewards_paid(
+            &env,
+            total_paid
+                .checked_add(amount)
+                .ok_or(VaultError::ArithmeticError)?,
+        );
+
+        let bounty_contribution =
+            crate::stake_funded_bug_bounty::deduct_bounty_contribution(&env, &staker, amount);
+        let reward_after_bounty = amount.saturating_sub(bounty_contribution);
+        let user_payout = crate::claim_fee::apply_claim_fee(&env, &staker, reward_after_bounty)?;
+
+        if user_payout > 0 {
+            let reward_token_addr = Self::reward_token_address(&env)?;
+            token::Client::new(&env, &reward_token_addr)
+                .transfer(&env.current_contract_address(), &staker, &user_payout);
+        }
+
+        crate::reward_token_audit_trail::log_reward_movement(
+            &env,
+            crate::reward_token_audit_trail::MovementType::RewardPaid,
+            env.current_contract_address(),
+            staker.clone(),
+            user_payout,
+            String::from_str(&env, "claim_partial"),
+        );
+
+        events::claimed(&env, &staker, user_payout, env.ledger().sequence());
+        balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
+        Ok(user_payout)
+    }
+
     /// Convenience function that claims pending rewards and adds a new stake
     /// position in a single transaction, requiring only one user authorisation.
     ///
@@ -786,6 +853,19 @@ impl VaultContract {
             .ok_or(VaultError::NotInitialized)
     }
 
+    /// The token rewards are paid in (issue #524): the admin-configured reward
+    /// token, or the deposit token when `set_reward_token` was never called.
+    ///
+    /// Single source of truth for the reward payout asset, so `get_reward_token`,
+    /// `claim` and `claim_partial` cannot disagree about which token a staker is
+    /// paid in. `NotInitialized` only when the pool has no deposit token at all.
+    fn reward_token_address(env: &Env) -> Result<Address, VaultError> {
+        match balance::get_reward_token(env) {
+            Some(reward_token) => Ok(reward_token),
+            None => Self::token_address(env),
+        }
+    }
+
     /// Shared accessor for the paused flag to keep pause/unpause reads uniform.
     fn paused(env: &Env) -> bool {
         env.storage()
@@ -804,9 +884,48 @@ impl VaultContract {
         Self::token_address(&env)
     }
 
-    /// Read-only query for the reward token address.
+    /// Read-only query for the reward token address (issue #524).
+    ///
+    /// Returns the admin-configured reward token, or the deposit token when
+    /// `set_reward_token` has never been called, so a pool that never decoupled
+    /// its two assets reports (and pays) the deposit token exactly as before.
+    /// Reverts with `NotInitialized` only when the pool has no deposit token.
     pub fn get_reward_token(env: Env) -> Result<Address, VaultError> {
-        balance::get_reward_token(&env).ok_or(VaultError::NotInitialized)
+        Self::reward_token_address(&env)
+    }
+
+    /// Admin: set the token staking rewards are paid in, decoupling the reward
+    /// asset from the deposit asset (issue #524).
+    ///
+    /// Once set, `claim` and `claim_partial` pay out in `token` rather than the
+    /// deposit token, and `fund_reward_pool` pulls `token` from the funder — the
+    /// vault must therefore hold a balance of this token to pay rewards. Passing
+    /// the deposit token restores the original single-token behaviour.
+    ///
+    /// Reverts with `Unauthorized` when `admin` is not the stored admin, and with
+    /// `InvalidAddress` when `token` is this contract's own address.
+    ///
+    /// Scope note: reward amounts are moved as raw units — this contract applies
+    /// no decimal re-scaling between the two assets — so a reward token with
+    /// different precision from the deposit token pays out in raw reward-token
+    /// units. The precision-aware normalisation the pool documents
+    /// (`reward_decimals`) is not yet implemented in the accrual path.
+    pub fn set_reward_token(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+        if admin != admin::get_admin(&env)? {
+            return Err(VaultError::Unauthorized);
+        }
+        if token == env.current_contract_address() {
+            return Err(VaultError::InvalidAddress);
+        }
+        balance::set_reward_token(&env, &token);
+        events::admin_action_set_reward_token(&env, &admin, &token);
+        balance::increment_admin_action_count(&env);
+        Ok(())
     }
 
     /// Read-only: ledger sequence of the last state-changing operation (issue #69).
@@ -2307,6 +2426,12 @@ impl VaultContract {
         if crate::peg_stabilization::emissions_halted(env) {
             return Ok(0);
         }
+        // Issue #524: the reward itself is paid in the configured reward token,
+        // which falls back to the deposit token when none is configured. The gas
+        // rebate below stays on the deposit token, because that is the token
+        // `fund_gas_rebate_pool` takes the rebate funds in.
+        let reward_token_addr = Self::reward_token_address(env)?;
+        let reward_token_client = token::Client::new(env, &reward_token_addr);
         let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
         // Ensure contract has enough balance (mock in tests will handle)
@@ -2320,7 +2445,7 @@ impl VaultContract {
         let user_payout = crate::claim_fee::apply_claim_fee(env, staker, reward_after_bounty)?;
 
         if user_payout > 0 {
-            token_client.transfer(&env.current_contract_address(), staker, &user_payout);
+            reward_token_client.transfer(&env.current_contract_address(), staker, &user_payout);
         }
 
         // Issue #569: pay the configured gas rebate out of its dedicated pool,
