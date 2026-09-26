@@ -9,7 +9,7 @@ use soroban_sdk::{
 };
 
 use crate::{
-    errors::{VaultError, VaultExtError, VaultFeatureError},
+    errors::{VaultError, VaultExtError, VaultFeatureError, VaultLockError},
     nft::{StakeReceiptNFT, StakeReceiptNFTClient},
     storage::{
         AdminAction, ChangelogEntry, DebtNFT, FeeRecipient, HalvingConfig, MilestoneCondition, PauseReason,
@@ -352,7 +352,7 @@ fn test_withdraw_more_than_owned_fails() {
     f.vault.deposit(&f.alice, &100_000);
 
     let result = f.vault.try_withdraw(&f.alice, &200_000);
-    assert_eq!(result, Err(Ok(VaultError::InsufficientShares)));
+    assert_eq!(result, Err(Ok(VaultLockError::InsufficientShares)));
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn test_withdraw_zero_fails() {
     f.vault.deposit(&f.alice, &100_000);
 
     let result = f.vault.try_withdraw(&f.alice, &0);
-    assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
+    assert_eq!(result, Err(Ok(VaultLockError::ZeroAmount)));
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn test_preview_redeem_matches_actual_withdraw() {
     let preview = f.vault.preview_redeem(&250_000);
     let actual = f.vault.withdraw(&f.alice, &250_000);
 
-    assert_eq!(preview, actual);
+    assert_eq!(preview.unwrap(), actual.unwrap());
 }
 
 // â”€â”€ pause / unpause â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -413,7 +413,7 @@ fn test_pause_blocks_withdraw() {
     );
 
     let result = f.vault.try_withdraw(&f.alice, &100_000);
-    assert_eq!(result, Err(Ok(VaultError::VaultPaused)));
+    assert_eq!(result, Err(Ok(VaultLockError::VaultPaused)));
 }
 
 #[test]
@@ -582,7 +582,7 @@ fn test_withdrawal_limit_blocks_large_withdrawal() {
     f.vault.set_withdrawal_limit(&100_000);
 
     let result = f.vault.try_withdraw(&f.alice, &200_000);
-    assert_eq!(result, Err(Ok(VaultError::WithdrawalLimitExceeded)));
+    assert_eq!(result, Err(Ok(VaultLockError::WithdrawalLimitExceeded)));
 }
 
 #[test]
@@ -615,7 +615,7 @@ fn test_withdrawal_limit_one_over_fails() {
 
     // One over limit should fail
     let result = f.vault.try_withdraw(&f.alice, &100_001);
-    assert_eq!(result, Err(Ok(VaultError::WithdrawalLimitExceeded)));
+    assert_eq!(result, Err(Ok(VaultLockError::WithdrawalLimitExceeded)));
 }
 
 #[test]
@@ -629,7 +629,7 @@ fn test_admin_updates_withdrawal_limit() {
 
     // 60k fails with old limit
     let result = f.vault.try_withdraw(&f.alice, &60_000);
-    assert_eq!(result, Err(Ok(VaultError::WithdrawalLimitExceeded)));
+    assert_eq!(result, Err(Ok(VaultLockError::WithdrawalLimitExceeded)));
 
     // Admin raises limit
     f.vault.set_withdrawal_limit(&100_000);
@@ -846,7 +846,7 @@ fn test_withdraw_negative_shares_fails() {
     f.vault.deposit(&f.alice, &100_000);
 
     let result = f.vault.try_withdraw(&f.alice, &-500);
-    assert_eq!(result, Err(Ok(VaultError::ZeroAmount)));
+    assert_eq!(result, Err(Ok(VaultLockError::ZeroAmount)));
 }
 
 #[test]
@@ -969,6 +969,58 @@ fn test_lock_config_query() {
     let (lock_period, penalty_bps) = f.vault.get_lock_config();
     assert_eq!(lock_period, 100);
     assert_eq!(penalty_bps, 1500);
+}
+
+#[test]
+fn test_voluntary_position_lock_blocks_withdrawal_and_expires() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    f.vault.set_max_lock_duration(&f.admin, &100);
+    let mut tiers = Vec::new(&f.env);
+    tiers.push_back((50, 500));
+    tiers.push_back((100, 1_000));
+    f.vault.set_lock_boost_schedule(&f.admin, &tiers);
+
+    f.vault.lock_position(&f.alice, &100);
+    assert_eq!(f.vault.get_lock_status(&f.alice), Some((100, 1_000)));
+    assert_eq!(
+        f.vault.try_withdraw(&f.alice, &100_000),
+        Err(Ok(VaultLockError::PositionLocked))
+    );
+
+    set_ledger(&f.env, 100);
+    assert_eq!(f.vault.get_lock_status(&f.alice), None);
+    assert_eq!(f.vault.withdraw(&f.alice, &100_000), 100_000);
+}
+
+#[test]
+fn test_lock_boost_applies_to_pending_reward_and_unlocked_position_has_none() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    f.vault.set_max_lock_duration(&f.admin, &500);
+    let mut tiers = Vec::new(&f.env);
+    tiers.push_back((100, 500));
+    tiers.push_back((500, 2_000));
+    f.vault.set_lock_boost_schedule(&f.admin, &tiers);
+    assert_eq!(f.vault.get_lock_boost_bps(&300), 500);
+    crate::balance::set_accrued_reward(&f.env, &f.alice, 100);
+    assert_eq!(f.vault.calc_pending_reward(&f.alice), 100);
+
+    f.vault.lock_position(&f.alice, &300);
+    assert_eq!(f.vault.calc_pending_reward(&f.alice), 105);
+    set_ledger(&f.env, 300);
+    assert_eq!(f.vault.calc_pending_reward(&f.alice), 100);
+}
+
+#[test]
+fn test_lock_position_rejects_duration_above_admin_limit() {
+    let f = VaultFixture::new();
+    f.vault.deposit(&f.alice, &100_000);
+    f.vault.set_max_lock_duration(&f.admin, &99);
+    assert_eq!(
+        f.vault.try_lock_position(&f.alice, &100),
+        Err(Ok(VaultLockError::LockDurationTooLong))
+    );
 }
 
 // â”€â”€ unstake fee (separate from withdrawal fee) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2100,7 +2152,7 @@ fn test_unstake_all_removes_position() {
 fn test_unstake_all_no_position_reverts() {
     let f = VaultFixture::new();
     let result = f.vault.try_unstake_all(&f.alice);
-    assert_eq!(result, Err(Ok(VaultError::PositionNotFound)));
+    assert_eq!(result, Err(Ok(VaultLockError::PositionNotFound)));
 }
 
 // â”€â”€ reward_token_balance (#80) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

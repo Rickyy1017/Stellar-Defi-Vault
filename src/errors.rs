@@ -160,6 +160,28 @@ pub enum VaultError {
     NotInEpochMode = 50,
 }
 
+/// Errors for voluntarily locked positions. Kept separate because `VaultError`
+/// has reached Soroban's 50-variant contract error limit.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultLockError {
+    NotInitialized = 1,
+    Unauthorized = 3,
+    ZeroAmount = 4,
+    InsufficientShares = 5,
+    VaultPaused = 6,
+    ArithmeticError = 8,
+    WithdrawalLimitExceeded = 9,
+    PositionNotFound = 18,
+    UseCooldownFlow = 20,
+    PositionLocked = 51,
+    LockDurationTooLong = 52,
+    InvalidLockBoostSchedule = 53,
+    TooManyLockBoostTiers = 54,
+    LockAlreadyActive = 55,
+}
+
 /// Soroban caps every `#[contracterror]`/`#[contracttype]` enum at 50 variants
 /// (`ScSpecUdtUnionV0::cases` is a `VecM<_, 50>` in stellar-xdr) ΓÇö `VaultError`
 /// above is already at exactly that cap, so new error cases for issues #205,

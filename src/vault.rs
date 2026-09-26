@@ -5,7 +5,7 @@ use soroban_sdk::{
 
 use crate::{
     admin, balance,
-    errors::{VaultError, VaultExtError, VaultFeatureError, VaultQuizError},
+    errors::{VaultError, VaultExtError, VaultFeatureError, VaultLockError, VaultQuizError},
     events,
     nft::StakeReceiptNFTClient,
     storage::{
@@ -382,12 +382,12 @@ impl VaultContract {
     }
 
     /// Withdraw by burning `shares`. Returns underlying token amount returned.
-    pub fn withdraw(env: Env, withdrawer: Address, shares: i128) -> Result<i128, VaultError> {
+    pub fn withdraw(env: Env, withdrawer: Address, shares: i128) -> Result<i128, VaultLockError> {
         Self::do_unstake(&env, &withdrawer, shares)
     }
 
     /// Unstake by burning `shares`. This is an alias for `withdraw`.
-    pub fn unstake(env: Env, staker: Address, shares: i128) -> Result<i128, VaultError> {
+    pub fn unstake(env: Env, staker: Address, shares: i128) -> Result<i128, VaultLockError> {
         Self::do_unstake(&env, &staker, shares)
     }
 
@@ -397,10 +397,10 @@ impl VaultContract {
     /// any pending rewards first (same behaviour as `unstake`).
     /// Returns the total token amount returned to the user.
     /// Reverts with `PositionNotFound` when the user has no active position.
-    pub fn unstake_all(env: Env, user: Address) -> Result<i128, VaultError> {
+    pub fn unstake_all(env: Env, user: Address) -> Result<i128, VaultLockError> {
         let shares = balance::get_shares(&env, &user);
         if shares == 0 {
-            return Err(VaultError::PositionNotFound);
+            return Err(VaultLockError::PositionNotFound);
         }
         Self::do_unstake(&env, &user, shares)
     }
@@ -571,6 +571,123 @@ impl VaultContract {
             .instance()
             .get(&symbol_short!("sh_pr_hist"))
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Admin: set the maximum voluntary position lock duration in ledgers.
+    pub fn set_max_lock_duration(
+        env: Env,
+        admin_addr: Address,
+        max_duration_ledgers: u32,
+    ) -> Result<(), VaultLockError> {
+        admin_addr.require_auth();
+        let current_admin = admin::get_admin(&env).map_err(|_| VaultLockError::Unauthorized)?;
+        if current_admin != admin_addr {
+            return Err(VaultLockError::Unauthorized);
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("max_lock"), &max_duration_ledgers);
+        Ok(())
+    }
+
+    /// Admin: configure duration thresholds and their additional reward boost
+    /// in basis points. Thresholds must be strictly increasing.
+    pub fn set_lock_boost_schedule(
+        env: Env,
+        admin_addr: Address,
+        tiers: Vec<(u32, u32)>,
+    ) -> Result<(), VaultLockError> {
+        admin_addr.require_auth();
+        let current_admin = admin::get_admin(&env).map_err(|_| VaultLockError::Unauthorized)?;
+        if current_admin != admin_addr {
+            return Err(VaultLockError::Unauthorized);
+        }
+        if tiers.len() > MAX_BOOST_TIERS {
+            return Err(VaultLockError::TooManyLockBoostTiers);
+        }
+        let mut previous_duration = 0;
+        for (duration, _) in tiers.iter() {
+            if duration == 0 || duration <= previous_duration {
+                return Err(VaultLockError::InvalidLockBoostSchedule);
+            }
+            previous_duration = duration;
+        }
+        env.storage()
+            .instance()
+            .set(&symbol_short!("l_boost"), &tiers);
+        Ok(())
+    }
+
+    /// Return the configured boost for a duration, using the highest tier
+    /// whose threshold does not exceed that duration.
+    pub fn get_lock_boost_bps(env: Env, lock_duration_ledgers: u32) -> u32 {
+        let tiers: Vec<(u32, u32)> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("l_boost"))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut boost = 0;
+        for (duration, tier_boost) in tiers.iter() {
+            if duration > lock_duration_ledgers {
+                break;
+            }
+            boost = tier_boost;
+        }
+        boost
+    }
+
+    /// Commit the caller's current position until the requested unlock ledger.
+    pub fn lock_position(
+        env: Env,
+        user: Address,
+        lock_duration_ledgers: u32,
+    ) -> Result<(), VaultLockError> {
+        user.require_auth();
+        if lock_duration_ledgers == 0 {
+            return Err(VaultLockError::ZeroAmount);
+        }
+        if balance::get_shares(&env, &user) == 0 {
+            return Err(VaultLockError::PositionNotFound);
+        }
+        if Self::get_lock_status(env.clone(), user.clone()).is_some() {
+            return Err(VaultLockError::LockAlreadyActive);
+        }
+        let max_duration: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("max_lock"))
+            .unwrap_or(0);
+        if lock_duration_ledgers > max_duration {
+            return Err(VaultLockError::LockDurationTooLong);
+        }
+        let boost_bps = Self::get_lock_boost_bps(env.clone(), lock_duration_ledgers);
+        let unlocks_at = env
+            .ledger()
+            .sequence()
+            .checked_add(lock_duration_ledgers)
+            .ok_or(VaultLockError::ArithmeticError)?;
+        env.storage().persistent().set(
+            &(symbol_short!("p_lock"), user.clone()),
+            &(unlocks_at, boost_bps),
+        );
+        events::position_locked(
+            &env,
+            &user,
+            lock_duration_ledgers,
+            boost_bps,
+            unlocks_at,
+            env.ledger().sequence(),
+        );
+        Ok(())
+    }
+
+    /// Return the active lock's unlock ledger and reward boost, if any.
+    pub fn get_lock_status(env: Env, user: Address) -> Option<(u32, u32)> {
+        let status: Option<(u32, u32)> = env
+            .storage()
+            .persistent()
+            .get(&(symbol_short!("p_lock"), user));
+        status.filter(|(unlocks_at, _)| env.ledger().sequence() < *unlocks_at)
     }
 
     /// Read-only query for the current admin address.
@@ -848,7 +965,19 @@ impl VaultContract {
         let gated = crate::vesting_cliff::apply_cliff(&env, &user, raw);
         crate::vesting_cliff::maybe_emit_cliff_unlocked(&env, &user, gated);
 
-        Self::normalize_to_reward_decimals(&env, gated)
+        let boosted = if let Some((unlocks_at, boost_bps)) = Self::get_lock_status(env.clone(), user) {
+            if env.ledger().sequence() < unlocks_at && boost_bps > 0 {
+                gated
+                    .checked_mul(10_000_i128 + boost_bps as i128)
+                    .and_then(|value| value.checked_div(10_000))
+                    .ok_or(VaultError::ArithmeticError)?
+            } else {
+                gated
+            }
+        } else {
+            gated
+        };
+        Self::normalize_to_reward_decimals(&env, boosted)
     }
 
     /// Gini coefficient of pending-reward distribution across all active
@@ -1698,19 +1827,24 @@ impl VaultContract {
         Ok(shares)
     }
 
-    fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultError> {
+    fn do_unstake(env: &Env, staker: &Address, shares: i128) -> Result<i128, VaultLockError> {
         if shares <= 0 {
-            return Err(VaultError::ZeroAmount);
+            return Err(VaultLockError::ZeroAmount);
+        }
+        if let Some((unlocks_at, _)) = Self::get_lock_status(env.clone(), staker.clone()) {
+            if env.ledger().sequence() < unlocks_at {
+                return Err(VaultLockError::PositionLocked);
+            }
         }
         let user_shares = balance::get_shares(env, staker);
         if user_shares < shares {
-            return Err(VaultError::InsufficientShares);
+            return Err(VaultLockError::InsufficientShares);
         }
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
         let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
-            .ok_or(VaultError::ArithmeticError)?;
-        let token_addr = Self::token_address(env)?;
+            .ok_or(VaultLockError::ArithmeticError)?;
+        let token_addr = Self::token_address(env).map_err(|_| VaultLockError::NotInitialized)?;
         let token_client = token::Client::new(env, &token_addr);
         token_client.transfer(&env.current_contract_address(), staker, &amount);
         balance::set_shares(env, staker, user_shares - shares);

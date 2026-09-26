@@ -19,6 +19,20 @@ pub fn withdraw(
         .publish(topics, (shares_burned, amount_returned, ledger));
 }
 
+pub fn position_locked(
+    env: &Env,
+    user: &Address,
+    lock_duration_ledgers: u32,
+    boost_bps: u32,
+    unlocks_at: u32,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("pos_lock"), user.clone()),
+        (lock_duration_ledgers, boost_bps, unlocks_at, ledger),
+    );
+}
+
 pub fn unpaused(env: &Env, admin: &Address, ledger: u32) {
     let topics = (symbol_short!("unpaused"), admin);
     env.events().publish(topics, (ledger,));
