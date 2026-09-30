@@ -4,7 +4,7 @@ use crate::storage::{
     ContractDelegate, DataKey, DayBucket, DynamicFeeConfig, FeeRecipient, FlashStakeReceipt,
     GovernanceProposal, InsurancePolicy, InsuranceProduct, Loan, LoanConfig, LotteryConfig,
     Milestone, MultisigConfig, OnboardingChecklist, PendingAction, PriceCondition,
-    PriorityBidRecord, Quiz, RateChange, RateHistoryEntry, ReferralStats, RevenueShareMerkleRoot,
+    PriorityBidRecord, Quiz, RateHistoryEntry, ReferralStats, RevenueShareMerkleRoot,
     RevenueSharingConfig, RewardTier, Season, StakePosition, SunsetState, VestingEntry,
 };
 
@@ -97,7 +97,9 @@ pub fn get_reward_tiers(env: &Env) -> Vec<RewardTier> {
 }
 
 pub fn set_reward_tiers(env: &Env, tiers: &Vec<RewardTier>) {
-    env.storage().instance().set(&symbol_short!("rwtiers"), tiers);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("rwtiers"), tiers);
 }
 
 /// Get the maximum number of quizzes allowed.
@@ -120,10 +122,7 @@ pub fn set_quiz(env: &Env, quiz: &Quiz) {
 /// Get the number of remaining attempts for a user on a specific quiz.
 pub fn get_quiz_attempts_remaining(env: &Env, user: &Address, quiz_id: u32) -> u32 {
     let key = (Symbol::new(env, "quiz_attempts"), user.clone(), quiz_id);
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(0)
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Returns `None` if the user has never had attempts initialized for this quiz
@@ -137,9 +136,7 @@ pub fn get_quiz_attempts_remaining_opt(env: &Env, user: &Address, quiz_id: u32) 
 /// Set the number of remaining attempts for a user on a specific quiz.
 pub fn set_quiz_attempts_remaining(env: &Env, user: &Address, quiz_id: u32, attempts: u32) {
     let key = (Symbol::new(env, "quiz_attempts"), user.clone(), quiz_id);
-    env.storage()
-        .persistent()
-        .set(&key, &attempts);
+    env.storage().persistent().set(&key, &attempts);
 }
 
 /// Get the list of completed quiz IDs for a user.
@@ -154,26 +151,19 @@ pub fn get_completed_quizzes(env: &Env, user: &Address) -> Vec<u32> {
 /// Set the list of completed quiz IDs for a user.
 pub fn set_completed_quizzes(env: &Env, user: &Address, completed_quizzes: &Vec<u32>) {
     let key = (Symbol::new(env, "completed_quizzes"), user.clone());
-    env.storage()
-        .persistent()
-        .set(&key, completed_quizzes);
+    env.storage().persistent().set(&key, completed_quizzes);
 }
 
 /// Get the highest reward tier unlocked by a user via quiz completion.
 pub fn get_user_quiz_tier(env: &Env, user: &Address) -> u32 {
     let key = (Symbol::new(env, "user_quiz_tier"), user.clone());
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(0)
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Set the highest reward tier unlocked by a user via quiz completion.
 pub fn set_user_quiz_tier(env: &Env, user: &Address, tier: u32) {
     let key = (Symbol::new(env, "user_quiz_tier"), user.clone());
-    env.storage()
-        .persistent()
-        .set(&key, &tier);
+    env.storage().persistent().set(&key, &tier);
 }
 
 /// Get the total number of quizzes that have been created.
@@ -579,10 +569,23 @@ pub fn register_staker(env: &Env, user: &Address) {
 // ── Share math ────────────────────────────────────────────────────────────────
 
 /// Convert a deposit amount to shares using current vault ratio.
-/// First deposit: 1:1. Subsequent: proportional to existing pool.
+/// First deposit: scale the token amount into the vault's fixed share
+/// precision. Subsequent deposits are proportional to the existing pool.
 pub fn amount_to_shares(total_shares: i128, total_deposited: i128, amount: i128) -> Option<i128> {
+    amount_to_shares_with_decimals(total_shares, total_deposited, amount, DEFAULT_TOKEN_DECIMALS)
+}
+
+/// Convert token base units to shares. Shares intentionally use seven decimal
+/// places, while the underlying token may use a different precision. The
+/// decimal argument is the precision queried from the configured token.
+pub fn amount_to_shares_with_decimals(
+    total_shares: i128,
+    total_deposited: i128,
+    amount: i128,
+    token_decimals: u32,
+) -> Option<i128> {
     if total_shares == 0 || total_deposited == 0 {
-        Some(amount)
+        scale_amount(amount, token_decimals, DEFAULT_TOKEN_DECIMALS)
     } else {
         amount
             .checked_mul(total_shares)?
@@ -592,12 +595,35 @@ pub fn amount_to_shares(total_shares: i128, total_deposited: i128, amount: i128)
 
 /// Convert shares to the underlying token amount.
 pub fn shares_to_amount(total_shares: i128, total_deposited: i128, shares: i128) -> Option<i128> {
+    shares_to_amount_with_decimals(total_shares, total_deposited, shares, DEFAULT_TOKEN_DECIMALS)
+}
+
+/// Convert shares in the fixed seven-decimal share precision to underlying
+/// token base units. The ratio already includes the initial decimal scaling.
+pub fn shares_to_amount_with_decimals(
+    total_shares: i128,
+    total_deposited: i128,
+    shares: i128,
+    _token_decimals: u32,
+) -> Option<i128> {
     if total_shares == 0 {
         Some(0)
     } else {
         shares
             .checked_mul(total_deposited)?
             .checked_div(total_shares)
+    }
+}
+
+fn scale_amount(amount: i128, from_decimals: u32, to_decimals: u32) -> Option<i128> {
+    if from_decimals == to_decimals {
+        return Some(amount);
+    }
+
+    if from_decimals < to_decimals {
+        amount.checked_mul(10_i128.checked_pow(to_decimals - from_decimals)?)
+    } else {
+        amount.checked_div(10_i128.checked_pow(from_decimals - to_decimals)?)
     }
 }
 
@@ -1622,7 +1648,11 @@ pub fn add_tokens_burned(env: &Env, amount: i128) {
                 for _ in 0..thresholds.len() {
                     new_reached.push_back(false);
                 }
-                let min_len = if reached.len() < thresholds.len() { reached.len() } else { thresholds.len() };
+                let min_len = if reached.len() < thresholds.len() {
+                    reached.len()
+                } else {
+                    thresholds.len()
+                };
                 for i in 0..min_len {
                     new_reached.set(i, reached.get(i).unwrap());
                 }
@@ -1643,7 +1673,9 @@ pub fn add_tokens_burned(env: &Env, amount: i128) {
                 }
             }
             if changed {
-                env.storage().instance().set(&symbol_short!("burn_hit"), &reached);
+                env.storage()
+                    .instance()
+                    .set(&symbol_short!("burn_hit"), &reached);
             }
         }
     }
@@ -1979,10 +2011,7 @@ pub fn set_user_milestones(env: &Env, user: &Address, ids: &Vec<u32>) {
 
 pub fn get_latest_achievement_ledger(env: &Env, user: &Address) -> u32 {
     let key = (Symbol::new(env, "lat_mstn"), user.clone());
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(0)
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 pub fn set_latest_achievement_ledger(env: &Env, user: &Address, ledger: u32) {
@@ -2258,7 +2287,9 @@ pub fn get_seasons(env: &Env) -> Vec<Season> {
 }
 
 pub fn set_seasons(env: &Env, seasons: &Vec<Season>) {
-    env.storage().instance().set(&symbol_short!("seasons"), seasons);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("seasons"), seasons);
 }
 
 /// `starts_at` of the season `maybe_emit_season_transition()` last observed
@@ -2306,7 +2337,9 @@ pub fn get_sunset_state(env: &Env) -> SunsetState {
 }
 
 pub fn set_sunset_state(env: &Env, state: SunsetState) {
-    env.storage().instance().set(&symbol_short!("snst_st"), &state);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("snst_st"), &state);
 }
 
 pub fn get_grace_period_end(env: &Env) -> Option<u32> {
@@ -2342,7 +2375,9 @@ pub fn get_revenue_sharing_config(env: &Env) -> Option<RevenueSharingConfig> {
 }
 
 pub fn set_revenue_sharing_config(env: &Env, config: &RevenueSharingConfig) {
-    env.storage().instance().set(&symbol_short!("rev_cfg"), config);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("rev_cfg"), config);
 }
 
 pub fn get_revenue_share_pool(env: &Env) -> i128 {
@@ -2367,7 +2402,9 @@ pub fn get_revenue_share_epoch(env: &Env) -> u32 {
 }
 
 pub fn set_revenue_share_epoch(env: &Env, epoch: u32) {
-    env.storage().instance().set(&symbol_short!("rev_ep"), &epoch);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("rev_ep"), &epoch);
 }
 
 pub fn get_revenue_share_merkle_root(env: &Env) -> Option<RevenueShareMerkleRoot> {
@@ -2375,7 +2412,9 @@ pub fn get_revenue_share_merkle_root(env: &Env) -> Option<RevenueShareMerkleRoot
 }
 
 pub fn set_revenue_share_merkle_root(env: &Env, root: &RevenueShareMerkleRoot) {
-    env.storage().instance().set(&symbol_short!("rev_mrk"), root);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("rev_mrk"), root);
 }
 
 pub fn is_revenue_share_claimed(env: &Env, user: &Address, epoch: u32) -> bool {
@@ -2507,7 +2546,10 @@ pub fn set_withdrawal_receipt_counter(env: &Env, counter: u64) {
         .set(&Symbol::new(env, "wd_rcpt_n"), &counter);
 }
 
-pub fn get_withdrawal_receipt(env: &Env, receipt_id: u64) -> Option<crate::storage::WithdrawalReceipt> {
+pub fn get_withdrawal_receipt(
+    env: &Env,
+    receipt_id: u64,
+) -> Option<crate::storage::WithdrawalReceipt> {
     let key = (Symbol::new(env, "wd_rcpt"), receipt_id);
     env.storage().persistent().get(&key)
 }
@@ -2617,7 +2659,11 @@ pub fn add_fees_burned(env: &Env, amount: i128) {
                 for _ in 0..thresholds.len() {
                     new_reached.push_back(false);
                 }
-                let min_len = if reached.len() < thresholds.len() { reached.len() } else { thresholds.len() };
+                let min_len = if reached.len() < thresholds.len() {
+                    reached.len()
+                } else {
+                    thresholds.len()
+                };
                 for i in 0..min_len {
                     new_reached.set(i, reached.get(i).unwrap());
                 }
@@ -2638,7 +2684,9 @@ pub fn add_fees_burned(env: &Env, amount: i128) {
                 }
             }
             if changed {
-                env.storage().instance().set(&symbol_short!("burn_hit"), &reached);
+                env.storage()
+                    .instance()
+                    .set(&symbol_short!("burn_hit"), &reached);
             }
         }
     }
@@ -2686,11 +2734,9 @@ pub fn get_contract_delegate(
     user: &Address,
     contract: &Address,
 ) -> Option<ContractDelegate> {
-    env.storage().persistent().get(&(
-        Symbol::new(env, "ctrdeleg"),
-        user.clone(),
-        contract.clone(),
-    ))
+    env.storage()
+        .persistent()
+        .get(&(Symbol::new(env, "ctrdeleg"), user.clone(), contract.clone()))
 }
 
 pub fn set_contract_delegate(
@@ -2700,11 +2746,7 @@ pub fn set_contract_delegate(
     delegate: &ContractDelegate,
 ) {
     env.storage().persistent().set(
-        &(
-            Symbol::new(env, "ctrdeleg"),
-            user.clone(),
-            contract.clone(),
-        ),
+        &(Symbol::new(env, "ctrdeleg"), user.clone(), contract.clone()),
         delegate,
     );
 }
@@ -2769,9 +2811,7 @@ pub fn clear_position_insured(env: &Env, user: &Address) {
 // ── Matching program (issue #242) ──────────────────────────────────────────
 
 pub fn get_matching_program(env: &Env) -> Option<crate::storage::MatchingProgram> {
-    env.storage()
-        .instance()
-        .get(&symbol_short!("match_pg"))
+    env.storage().instance().get(&symbol_short!("match_pg"))
 }
 
 pub fn set_matching_program(env: &Env, program: &crate::storage::MatchingProgram) {
@@ -2787,7 +2827,11 @@ pub fn get_user_matching_stats(env: &Env, user: &Address) -> crate::storage::Use
         .unwrap_or(crate::storage::UserMatchingStats { total_matched: 0 })
 }
 
-pub fn set_user_matching_stats(env: &Env, user: &Address, stats: &crate::storage::UserMatchingStats) {
+pub fn set_user_matching_stats(
+    env: &Env,
+    user: &Address,
+    stats: &crate::storage::UserMatchingStats,
+) {
     env.storage()
         .persistent()
         .set(&(symbol_short!("match_st"), user.clone()), stats);
@@ -2845,9 +2889,7 @@ pub fn get_cohort_ids(env: &Env) -> Vec<u32> {
 }
 
 pub fn set_cohort_ids(env: &Env, ids: &Vec<u32>) {
-    env.storage()
-        .instance()
-        .set(&symbol_short!("crt_ids"), ids);
+    env.storage().instance().set(&symbol_short!("crt_ids"), ids);
 }
 
 pub fn get_cohort_stats(env: &Env, cohort_id: u32) -> Option<crate::storage::CohortStats> {
@@ -2865,8 +2907,8 @@ pub fn set_cohort_stats(env: &Env, cohort_id: u32, stats: &crate::storage::Cohor
 // ── Staked at ledger (direct access) ───────────────────────────────────────
 
 pub fn set_staked_at_ledger(env: &Env, user: &Address, ledger: u32) {
-    env.storage()
-        .instance()
-        .set(&crate::storage::DataKey::StakedAtLedger(user.clone()), &ledger);
+    env.storage().instance().set(
+        &crate::storage::DataKey::StakedAtLedger(user.clone()),
+        &ledger,
+    );
 }
-

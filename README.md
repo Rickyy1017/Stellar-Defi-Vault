@@ -10,7 +10,7 @@ A non-custodial, share-based DeFi yield vault built on **Stellar** using **Sorob
 
 ```
 VaultContract
-├── initialize(admin, token, stake_decimals?, reward_decimals?) — one-time setup (decimals default to 7)
+├── initialize(admin, token, stake_decimals?, reward_decimals?) — one-time setup (stake precision is queried from token)
 ├── deposit(depositor, amount) — mint shares proportional to pool
 ├── stake(staker, amount)      — staking-friendly alias for deposit
 ├── withdraw(user, shares)     — burn shares, return tokens
@@ -32,12 +32,17 @@ VaultContract
 
 ```
 shares_minted = amount × (total_shares / total_deposited)   # existing pool
-shares_minted = amount                                       # first deposit (1:1)
+shares_minted = amount scaled from token_decimals to 7     # first deposit
 
 amount_returned = shares × (total_deposited / total_shares)
 ```
 
 This is the same ratio model used by ERC-4626 vaults, adapted for Soroban.
+Token amounts are stored in the underlying token's base units. Shares always
+use seven decimal places internally, so the vault queries the token's actual
+`decimals()` value during initialization rather than assuming every token uses
+Stellar's common seven-decimal precision. The legacy `stake_decimals` argument
+is retained for ABI compatibility but does not override the token query.
 
 ## Getting Started
 
@@ -108,7 +113,7 @@ To deploy the staking vault to Stellar Testnet and initialize it:
 
 | Function | Auth Required | Description |
 |---|---|---|
-| `initialize(admin, token, stake_decimals?, reward_decimals?)` | — | One-time init; decimals default to 7 |
+| `initialize(admin, token, stake_decimals?, reward_decimals?)` | — | One-time init; stake decimals are queried from the token |
 | `deposit(depositor, amount)` | depositor | Deposit tokens, receive shares |
 | `stake(staker, amount)` | staker | Alias for `deposit` |
 | `withdraw(user, shares)` | user | Burn shares, receive tokens |
