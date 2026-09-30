@@ -139,17 +139,17 @@ impl VaultContract {
     /// `reward_rate_bps` sets the initial APR in basis points (max `MAX_RATE_BPS`).
     /// Pass `0` to start with no reward rate and configure it later via `set_reward_rate_bps`.
     ///
-    /// `stake_decimals` and `reward_decimals` declare the decimal precision of
-    /// the stake and reward tokens so reward amounts can be normalized when the
-    /// two tokens differ. Both are optional and default to 7 (the Stellar
-    /// standard) when `None` is passed, keeping pools initialized without
-    /// explicit decimals backward compatible.
+    /// `reward_decimals` declares the reward-token precision. The stake-token
+    /// precision is queried from the token contract and is used when converting
+    /// between token base units and the vault's fixed seven-decimal shares.
+    /// The legacy `stake_decimals` argument is retained for interface
+    /// compatibility; it is not used as a substitute for the token query.
     pub fn initialize(
         env: Env,
         admin: Address,
         token: Address,
         reward_rate_bps: u32,
-        stake_decimals: Option<u32>,
+        _stake_decimals: Option<u32>,
         reward_decimals: Option<u32>,
     ) -> Result<(), VaultError> {
         if env.storage().instance().has(&DataKey::Admin) {
@@ -185,12 +185,11 @@ impl VaultContract {
             balance::set_reward_rate_bps(&env, reward_rate_bps);
         }
 
-        // Persist token decimals so reward math can normalize across mismatched
-        // precisions. Unspecified values fall back to the Stellar standard of 7.
-        balance::set_stake_decimals(
-            &env,
-            stake_decimals.unwrap_or(balance::DEFAULT_TOKEN_DECIMALS),
-        );
+        // Query the actual underlying precision. Seven decimals is only the
+        // fixed internal precision used by shares, not an assumption about the
+        // token's base units.
+        let queried_stake_decimals = token::Client::new(&env, &token).decimals();
+        balance::set_stake_decimals(&env, queried_stake_decimals);
         balance::set_reward_decimals(
             &env,
             reward_decimals.unwrap_or(balance::DEFAULT_TOKEN_DECIMALS),
@@ -201,8 +200,9 @@ impl VaultContract {
     }
 
     /// Stakes `amount` of the pool's token on behalf of `user`, minting
-    /// shares proportional to the current share price (1:1 for the pool's
-    /// first deposit). Returns the number of shares minted.
+    /// shares proportional to the current share price. The first deposit is
+    /// scaled from the token's queried precision into the vault's fixed
+    /// seven-decimal share precision. Returns the number of shares minted.
     pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         user.require_auth();
         if amount <= 0 {
@@ -222,14 +222,13 @@ impl VaultContract {
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let shares_minted = if total_shares == 0 || total_deposited == 0 {
-            amount
-        } else {
-            amount
-                .checked_mul(total_shares)
-                .and_then(|v| v.checked_div(total_deposited))
-                .ok_or(VaultError::ArithmeticError)?
-        };
+        let shares_minted = balance::amount_to_shares_with_decimals(
+            total_shares,
+            total_deposited,
+            amount,
+            balance::get_stake_decimals(&env),
+        )
+        .ok_or(VaultError::ArithmeticError)?;
 
         let current_shares = balance::get_shares(&env, &user);
         balance::set_shares(&env, &user, current_shares + shares_minted);
@@ -846,7 +845,12 @@ impl VaultContract {
     pub fn preview_redeem(env: Env, shares: i128) -> Result<i128, VaultError> {
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        balance::shares_to_amount(total_shares, total_deposited, shares)
+        balance::shares_to_amount_with_decimals(
+            total_shares,
+            total_deposited,
+            shares,
+            balance::get_stake_decimals(&env),
+        )
             .ok_or(VaultError::ArithmeticError)
     }
 
@@ -1904,7 +1908,12 @@ impl VaultContract {
         }
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
-        let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+        let amount = balance::shares_to_amount_with_decimals(
+            total_shares,
+            total_deposited,
+            shares,
+            balance::get_stake_decimals(env),
+        )
             .ok_or(VaultError::ArithmeticError)?;
         let staked_at_ledger = env
             .storage()
@@ -1992,7 +2001,12 @@ impl VaultContract {
         );
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
-        let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
+        let shares = balance::amount_to_shares_with_decimals(
+            total_shares,
+            total_deposited,
+            amount,
+            balance::get_stake_decimals(env),
+        )
             .ok_or(VaultError::ArithmeticError)?;
         let cur = balance::get_shares(env, user);
         balance::set_shares(env, user, cur + shares);
@@ -2012,7 +2026,12 @@ impl VaultContract {
         }
         let total_shares = balance::get_total_shares(env);
         let total_deposited = balance::get_total_deposited(env);
-        let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
+        let amount = balance::shares_to_amount_with_decimals(
+            total_shares,
+            total_deposited,
+            shares,
+            balance::get_stake_decimals(env),
+        )
             .ok_or(VaultError::ArithmeticError)?;
         let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
@@ -2422,7 +2441,12 @@ pub fn percentage_of_pool(env: Env, user: Address) -> i128 {
         return 0;
     }
 
-    let user_amount = match balance::shares_to_amount(total_shares, total_deposited, user_shares) {
+    let user_amount = match balance::shares_to_amount_with_decimals(
+        total_shares,
+        total_deposited,
+        user_shares,
+        balance::get_stake_decimals(&env),
+    ) {
         Some(a) => a,
         None => return 0,
     };

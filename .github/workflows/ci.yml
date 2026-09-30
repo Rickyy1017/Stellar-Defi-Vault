@@ -64,4 +64,4 @@ jobs:
         with:
           components: clippy
           targets: wasm32-unknown-unknown
-      - run: cargo clippy --features testutils -- -D warnings
+      - run: cargo clippy --all-targets -- -D warnings

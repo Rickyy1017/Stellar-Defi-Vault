@@ -56,7 +56,9 @@ The compiled `.wasm` file will be at `target/wasm32-unknown-unknown/release/stel
 ## Code Style
 
 - Run `cargo fmt` before committing.
-- Ensure `cargo clippy --features testutils` passes with no warnings.
+- Ensure `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass.
+- Pull requests must keep the formatting and clippy CI checks green; these checks
+  run automatically on every pull request.
 - All new functionality must include unit tests.
 - Public functions must have doc comments (`///`).
 - Keep `CONTRACT_VERSION` in sync with `Cargo.toml` when updating the contract version.
@@ -65,7 +67,7 @@ The compiled `.wasm` file will be at `target/wasm32-unknown-unknown/release/stel
 
 - [ ] Tests pass (`cargo test --features testutils`)
 - [ ] `cargo fmt --check` passes
-- [ ] `cargo clippy` passes with no warnings
+- [ ] `cargo clippy --all-targets -- -D warnings` passes with no warnings
 - [ ] New logic is covered by tests
 - [ ] PR description references the issue (`Closes #N`)
 

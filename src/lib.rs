@@ -49,6 +49,9 @@ pub use vault::VaultContract;
 mod test;
 
 #[cfg(test)]
+mod test_share_decimals;
+
+#[cfg(test)]
 mod test_content_curation;
 
 #[cfg(test)]
