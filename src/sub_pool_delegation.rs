@@ -76,7 +76,7 @@ fn find_sub_pool_index(env: &Env, pools: &Vec<SubPool>, id: u32) -> Option<u32> 
     None
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Admin creates a named sub-pool with delegated sub-admin.
     pub fn create_sub_pool(

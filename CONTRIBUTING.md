@@ -61,6 +61,8 @@ The compiled `.wasm` file will be at `target/wasm32-unknown-unknown/release/stel
   run automatically on every pull request.
 - All new functionality must include unit tests.
 - Public functions must have doc comments (`///`).
+- When introducing or altering public contract functions, add the signature to `VaultTrait` (`src/interface.rs`) first before implementing it on `VaultContract`.
+- Update `COSTS.md` with benchmarked CPU instructions and memory consumption for any new public functions.
 - Keep `CONTRACT_VERSION` in sync with `Cargo.toml` when updating the contract version.
 
 ## PR Checklist

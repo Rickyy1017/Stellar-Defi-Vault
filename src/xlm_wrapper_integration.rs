@@ -101,7 +101,7 @@ fn require_token_is_wxlm(env: &Env, expected_sac: &Address) -> Result<Address, V
     Ok(token_addr)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure the native XLM Stellar Asset Contract address. Admin only.
     ///
@@ -171,7 +171,11 @@ impl VaultContract {
             return Err(VaultError::ZeroAmount);
         }
 
-        // Ensure the pool isn't paused or stopped.
+        // Ensure the pool isn't paused or stopped. Applies any due
+        // `pause_until` schedule first (issue #556) so this entrypoint
+        // doesn't stay incorrectly paused if it's the first call after the
+        // target ledger.
+        crate::balance::apply_scheduled_unpause_if_due(&env);
         let is_paused: bool = env
             .storage()
             .instance()

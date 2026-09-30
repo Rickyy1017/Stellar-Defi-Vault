@@ -183,13 +183,12 @@ Boost multiplier: 11000 bps
 
 ## Events
 
-| Event | Fields |
-|---|---|
-| `deposit` | `(depositor, amount, shares_minted)` |
-| `withdraw` | `(withdrawer, shares_burned, amount_returned)` |
-| `paused` | `(admin)` |
-| `unpaused` | `(admin)` |
-| `yield_add` | `(admin, amount)` |
+Every emitted event indexes an event-type symbol in topic 0 and its primary
+affected address in topic 1. Pool-wide events use the vault contract address;
+admin audit events additionally index the action type in topic 2.
+
+See [docs/EVENTS.md](./docs/EVENTS.md) for the topic conventions and event
+reference used by off-chain indexers.
 
 ## Roadmap / Open Issues
 
@@ -208,6 +207,13 @@ See [Issues](../../issues) for the full list, including those tagged **`Stellar 
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup instructions and the Wave contribution workflow.
 
+## Storage
+
+See [docs/STORAGE.md](./docs/STORAGE.md) for the full audit of which Soroban
+storage type (instance, persistent, or temporary) each piece of contract
+state uses and why, including known scaling risks around the depositor
+registry.
+
 ## Security
 
 See [docs/SECURITY.md](./docs/SECURITY.md) for the full security model, including:
@@ -224,10 +230,48 @@ This contract is unaudited. Do not use in production without an independent secu
 ### Reward Rounding Dust Loss
 In fixed-point math, calculating reward using standard division leads to rounding loss where small stakes over short periods truncate to 0. Specifically:
 - **Without Remainder Tracking**: The reward dust is permanently lost on every checkpoint update (e.g., on stake, unstake, slash, or claim), as the division remainder is discarded. These tokens remain in the contract's general `RewardPoolBalance` but are unallocated and unrecoverable for the users.
-- **With Remainder Tracking**: The sub-unit reward remainder is persisted per-user and carried forward across checkpoints. It accumulates over time until it becomes a whole token unit, which is then claimable. If a user completely unstakes and closes their position permanently, any remaining sub-unit fraction (< 1 token unit) remains unclaimable in the contract, which is a standard limitation since the underlying token only supports integer transfers.
+
 
 ## License
 
 [MIT](./LICENSE)
 # Stellar-Defi-Vault
 
+
+## Gas & Resource Costs
+
+Approximate CPU instruction and RAM byte costs for each public function are tracked in **[COSTS.md](./COSTS.md)** based on Soroban's test environment budget reporter. Integrators can consult this table when calculating transaction fee buffers.
+
+## Deterministic Build & Bytecode Verification
+
+To support trust minimization and independent verification, the contract Wasm binary is byte-reproducible across different host machines:
+
+- **Path Normalization**: Host file system paths are remapped using `--remap-path-prefix` in `.cargo/config.toml`.
+- **Deterministic Codegen**: Codegen units are pinned to `codegen-units = 1` with LTO enabled.
+
+### Independent Verification Procedure
+
+Any third party can verify that an on-chain deployed contract bytecode matches this source tree:
+
+1. Clone the repository and checkout the target release commit or tag:
+   ```bash
+   git clone https://github.com/Rickyy1017/Stellar-Defi-Vault.git
+   cd Stellar-Defi-Vault
+   git checkout <release-tag-or-commit>
+   ```
+2. Verify with the pinned Rust toolchain (1.81.0) and WASM target:
+   ```bash
+   ./scripts/verify-build-reproducibility.sh
+   ```
+3. Generate the SHA-256 digest:
+   ```bash
+   sha256sum target/wasm32-unknown-unknown/release/stellar_defi_vault.wasm
+   ```
+4. Compare this digest with the contract code hash published on the Stellar ledger explorer.
+
+## Testnet Integration Tests
+You can run the integration test suite against the Stellar Testnet by executing:
+```bash
+./scripts/integration-test.sh
+```
+Note: Ensure you have the Stellar CLI configured with testnet credentials before running this script.

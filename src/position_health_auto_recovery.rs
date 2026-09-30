@@ -139,7 +139,7 @@ fn apply_loan_repayment(env: &Env, user: &Address, loan: &mut crate::storage::Lo
     }
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #459: arm an auto-recovery config for `user`.
     pub fn set_recovery_config(

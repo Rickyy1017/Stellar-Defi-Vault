@@ -125,7 +125,7 @@ pub(crate) fn award_points_for_action(env: &Env, user: &Address, action: PointsA
 // Contract entrypoints
 // ---------------------------------------------------------------------------
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure points earning rules. Admin only.
     pub fn set_points_rules(

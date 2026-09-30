@@ -83,7 +83,7 @@ impl<'a> Fixture<'a> {
 #[test]
 fn submit_content_succeeds_for_staker() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
 
     f.vault.submit_content(&f.alice, &f.hash("abc123"));
 
@@ -108,7 +108,7 @@ fn submit_content_rejects_non_staker() {
 #[test]
 fn submit_content_emits_event() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
 
     f.vault.submit_content(&f.alice, &f.hash("abc123"));
 
@@ -120,7 +120,7 @@ fn submit_content_emits_event() {
 #[test]
 fn submit_content_max_items_enforced() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
 
     for i in 0..100 {
         let hash = soroban_sdk::String::from_str(
@@ -165,8 +165,8 @@ fn submit_content_max_items_enforced() {
 #[test]
 fn vote_weight_reflects_stake() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
-    f.vault.stake(&f.bob, &3_000);
+    f.vault.stake(&f.alice, &5_000, &0);
+    f.vault.stake(&f.bob, &3_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.vote_on_content(&f.alice, &f.hash("item1"), &true);
@@ -180,7 +180,7 @@ fn vote_weight_reflects_stake() {
 #[test]
 fn vote_against_weight_reflects_stake() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
+    f.vault.stake(&f.alice, &5_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.vote_on_content(&f.alice, &f.hash("item1"), &false);
@@ -193,7 +193,7 @@ fn vote_against_weight_reflects_stake() {
 #[test]
 fn double_vote_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.vote_on_content(&f.alice, &f.hash("item1"), &true);
@@ -205,7 +205,7 @@ fn double_vote_rejected() {
 #[test]
 fn double_vote_does_not_overwrite() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.vote_on_content(&f.alice, &f.hash("item1"), &true);
@@ -223,7 +223,7 @@ fn double_vote_does_not_overwrite() {
 #[test]
 fn vote_on_nonexistent_content_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
 
     let result = f.vault.try_vote_on_content(&f.alice, &f.hash("nope"), &true);
     assert_eq!(result, Err(Ok(VaultError::PositionNotFound)));
@@ -232,7 +232,7 @@ fn vote_on_nonexistent_content_rejected() {
 #[test]
 fn vote_on_closed_content_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.close_content_vote(&f.hash("item1"));
@@ -244,7 +244,7 @@ fn vote_on_closed_content_rejected() {
 #[test]
 fn vote_by_non_staker_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     // bob has no stake
@@ -255,7 +255,7 @@ fn vote_by_non_staker_rejected() {
 #[test]
 fn vote_emits_event() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &2_000);
+    f.vault.stake(&f.alice, &2_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.vote_on_content(&f.alice, &f.hash("item1"), &true);
@@ -270,7 +270,7 @@ fn vote_emits_event() {
 #[test]
 fn close_content_vote_admin_only() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     // non-admin cannot close
@@ -290,7 +290,7 @@ fn close_content_vote_admin_only() {
 #[test]
 fn close_already_closed_rejected() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.close_content_vote(&f.hash("item1"));
@@ -310,8 +310,8 @@ fn close_nonexistent_content_rejected() {
 #[test]
 fn close_emits_content_approved_when_for_wins() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &5_000);
-    f.vault.stake(&f.bob, &2_000);
+    f.vault.stake(&f.alice, &5_000, &0);
+    f.vault.stake(&f.bob, &2_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     // alice votes for (weight 5_000), bob votes against (weight 2_000)
@@ -331,8 +331,8 @@ fn close_emits_content_approved_when_for_wins() {
 #[test]
 fn close_does_not_emit_approved_when_against_wins() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &2_000);
-    f.vault.stake(&f.bob, &5_000);
+    f.vault.stake(&f.alice, &2_000, &0);
+    f.vault.stake(&f.bob, &5_000, &0);
     f.vault.submit_content(&f.alice, &f.hash("item1"));
 
     f.vault.vote_on_content(&f.alice, &f.hash("item1"), &true);
@@ -361,7 +361,7 @@ fn get_content_item_returns_none_for_missing() {
 #[test]
 fn get_all_content_items_returns_submitted() {
     let f = Fixture::new();
-    f.vault.stake(&f.alice, &1_000);
+    f.vault.stake(&f.alice, &1_000, &0);
 
     f.vault.submit_content(&f.alice, &f.hash("a"));
     f.vault.submit_content(&f.alice, &f.hash("b"));

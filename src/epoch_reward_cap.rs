@@ -103,7 +103,7 @@ fn current_tracker(env: &Env, config: &EpochRewardCapConfig) -> EpochRewardTrack
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure the per-epoch reward outflow cap. Admin only. Starts a fresh
     /// tracking window from the current ledger.

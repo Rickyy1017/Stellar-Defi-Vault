@@ -1,3 +1,4 @@
+use crate::errors::VaultInvariantError;
 use crate::storage::{
     AccessTier, AdminProposal, AutoConvertConfig, BrandingConfig, ChangelogEntry, ClaimWindow,
     ContractDelegate, DataKey, DayBucket, DynamicFeeConfig, FeeRecipient, FlashStakeReceipt,
@@ -7,7 +8,22 @@ use crate::storage::{
     RevenueSharingConfig, RewardTier, Season, StakePosition, SunsetState, VestingEntry,
 };
 
-use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{panic_with_error, symbol_short, Address, Env, String, Symbol, Vec};
+
+/// Issue #621: last-line-of-defense invariant for every accounting field
+/// this module persists. `i128` is signed, so nothing at the type level stops
+/// a caller from writing a negative share/reward/pool balance — this makes
+/// that impossible in practice by rejecting the write instead. See the
+/// `VaultInvariantError` doc comment in `errors.rs` for why this panics
+/// rather than returning a `Result` (these setters have no `Result` in their
+/// signature, and giving them one would mean updating every one of their
+/// call sites across the crate for a condition that should never occur if
+/// upstream business logic is correct).
+fn assert_non_negative(env: &Env, value: i128) {
+    if value < 0 {
+        panic_with_error!(env, VaultInvariantError::NegativeBalance);
+    }
+}
 
 pub fn get_shares(env: &Env, user: &Address) -> i128 {
     env.storage()
@@ -17,6 +33,7 @@ pub fn get_shares(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_shares(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .persistent()
         .set(&DataKey::ShareBalance(user.clone()), &amount);
@@ -30,6 +47,7 @@ pub fn get_total_shares(env: &Env) -> i128 {
 }
 
 pub fn set_total_shares(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     env.storage().instance().set(&DataKey::TotalShares, &total);
 }
 
@@ -41,6 +59,7 @@ pub fn get_total_deposited(env: &Env) -> i128 {
 }
 
 pub fn set_total_deposited(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     env.storage()
         .instance()
         .set(&DataKey::TotalDeposited, &total);
@@ -162,15 +181,33 @@ pub fn set_quiz_count(env: &Env, count: u32) {
         .set(&Symbol::new(env, "quiz_count"), &count);
 }
 
-pub fn get_rate_history(env: &Env) -> Vec<(u32, u32)> {
+/// The rolling on-chain log of reward-rate changes written by `set_reward_rate_bps`
+/// and exposed by `get_rate_history` (issue #522), oldest entry first.
+pub fn get_rate_history(env: &Env) -> Vec<RateChange> {
     env.storage()
         .instance()
         .get(&DataKey::RateHistory)
         .unwrap_or(Vec::new(env))
 }
 
-pub fn set_rate_history(env: &Env, history: &Vec<(u32, u32)>) {
+pub fn set_rate_history(env: &Env, history: &Vec<RateChange>) {
     env.storage().instance().set(&DataKey::RateHistory, history);
+}
+
+/// Appends one reward-rate change to the rolling log, evicting the oldest
+/// entries first once `MAX_RATE_HISTORY_ENTRIES` is reached. Changes are logged
+/// even when the rate is unchanged, matching the `rate_changed` event.
+pub fn record_rate_change(env: &Env, old_rate_bps: u32, new_rate_bps: u32) {
+    let mut history = get_rate_history(env);
+    while history.len() >= MAX_RATE_HISTORY_ENTRIES {
+        history.remove(0);
+    }
+    history.push_back(RateChange {
+        old_rate_bps,
+        new_rate_bps,
+        changed_at: env.ledger().sequence(),
+    });
+    set_rate_history(env, &history);
 }
 
 pub const MAX_RATE_HISTORY_ENTRIES: u32 = 50;
@@ -187,6 +224,7 @@ pub fn get_reward_pool_balance(env: &Env) -> i128 {
 }
 
 pub fn set_reward_pool_balance(env: &Env, balance: i128) {
+    assert_non_negative(env, balance);
     env.storage()
         .instance()
         .set(&DataKey::RewardPoolBalance, &balance);
@@ -252,6 +290,7 @@ pub fn get_accrued_reward(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_accrued_reward(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .persistent()
         .set(&DataKey::AccruedReward(user.clone()), &amount);
@@ -296,6 +335,7 @@ pub fn get_total_rewards_paid(env: &Env) -> i128 {
 }
 
 pub fn set_total_rewards_paid(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&DataKey::TotalRewardsPaid, &amount);
@@ -508,6 +548,24 @@ pub fn set_all_stakers(env: &Env, stakers: &Vec<Address>) {
     env.storage().instance().set(&DataKey::AllStakers, stakers);
 }
 
+/// Records `user` in the staker registry if they are not already present and
+/// refreshes the `total_stakers` count. Idempotent, so callers can invoke it on
+/// every stake without worrying about duplicates. Keeps the registry (and thus
+/// `get_pool_summary().depositor_count`) in sync with real depositors.
+pub fn register_staker(env: &Env, user: &Address) {
+    let mut stakers = get_all_stakers(env);
+    let already_present = stakers.iter().any(|a| &a == user);
+    if !already_present {
+        stakers.push_back(user.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllStakers, &stakers);
+    }
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalStakers, &stakers.len());
+}
+
 // ── Share math ────────────────────────────────────────────────────────────────
 
 /// Convert a deposit amount to shares using current vault ratio.
@@ -577,6 +635,7 @@ pub fn get_reward_remainder(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_reward_remainder(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .persistent()
         .set(&DataKey::RewardRemainder(user.clone()), &amount);
@@ -886,6 +945,7 @@ pub fn get_total_rewards_added(env: &Env) -> i128 {
 }
 
 pub fn set_total_rewards_added(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     let key = (Symbol::new(env, "tot_rwds"),);
     env.storage().instance().set(&key, &total);
 }
@@ -969,6 +1029,47 @@ pub fn clear_pause_info(env: &Env) {
     env.storage().instance().remove(&symbol_short!("ps_info"));
 }
 
+// ── Issue #556: scheduled auto-unpause ───────────────────────────────────────
+
+/// Ledger sequence at which a `pause_until`-scheduled pause should be lifted,
+/// if any. Lazily evaluated on the next call that checks pause state —
+/// Soroban has no native scheduled execution, so nothing runs in the
+/// background; this is just the target the next call compares against.
+pub fn get_scheduled_unpause(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("sch_unp"))
+}
+
+pub fn set_scheduled_unpause(env: &Env, target_ledger: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("sch_unp"), &target_ledger);
+}
+
+pub fn clear_scheduled_unpause(env: &Env) {
+    env.storage().instance().remove(&symbol_short!("sch_unp"));
+}
+
+/// Lazily lifts a `pause_until`-scheduled pause once `target_ledger` is
+/// reached (issue #556). Soroban has no native scheduled execution, so this
+/// only ever runs as a side effect of some other call arriving — if no one
+/// calls the contract after the target ledger, the pause stays in storage
+/// (still correctly reported as paused) until the next call clears it.
+/// `pub(crate)` free function rather than a `VaultContract` method so every
+/// mutating entrypoint that gates on pause state can call it, including
+/// ones outside `vault.rs` (e.g. `xlm_wrapper_integration.rs`).
+pub(crate) fn apply_scheduled_unpause_if_due(env: &Env) {
+    if let Some(target_ledger) = get_scheduled_unpause(env) {
+        if env.ledger().sequence() >= target_ledger {
+            env.storage().instance().set(&DataKey::Paused, &false);
+            clear_pause_info(env);
+            clear_scheduled_unpause(env);
+            let current_ledger = env.ledger().sequence();
+            crate::events::auto_unpaused(env, current_ledger);
+            set_last_updated_ledger(env, current_ledger);
+        }
+    }
+}
+
 // ── Issue #218: migration target ─────────────────────────────────────────────
 
 pub fn get_migration_target(env: &Env) -> Option<Address> {
@@ -1016,6 +1117,7 @@ pub fn get_yield_deployed(env: &Env) -> i128 {
 }
 
 pub fn set_yield_deployed(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("yld_dep"), &amount);
@@ -1154,6 +1256,7 @@ pub fn get_total_ever_staked(env: &Env) -> i128 {
 }
 
 pub fn set_total_ever_staked(env: &Env, total: i128) {
+    assert_non_negative(env, total);
     env.storage()
         .instance()
         .set(&symbol_short!("everstk"), &total);
@@ -1340,6 +1443,7 @@ pub fn get_insurance_fund_balance(env: &Env) -> i128 {
 }
 
 pub fn set_insurance_fund_balance(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("ins_fund"), &amount);
@@ -2248,6 +2352,22 @@ pub fn set_grace_period_end(env: &Env, ledger: u32) {
         .set(&symbol_short!("snst_gpe"), &ledger);
 }
 
+/// The ledger by which existing users are asked to have exited a sunsetting
+/// pool, set once by `initiate_sunset` (issue #525). `None` until then, and
+/// never cleared afterwards: the sunset is a one-way action.
+///
+/// Symbol-keyed because `DataKey` is at Soroban's 50-variant cap, the same
+/// reason the #298 sunset accessors above avoid a new variant.
+pub fn get_sunset_exit_deadline(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&symbol_short!("snst_dl"))
+}
+
+pub fn set_sunset_exit_deadline(env: &Env, deadline: u32) {
+    env.storage()
+        .instance()
+        .set(&symbol_short!("snst_dl"), &deadline);
+}
+
 // ── Issue #281: Fee Revenue Sharing ──────────────────────────────────────────
 
 pub fn get_revenue_sharing_config(env: &Env) -> Option<RevenueSharingConfig> {
@@ -2268,6 +2388,7 @@ pub fn get_revenue_share_pool(env: &Env) -> i128 {
 }
 
 pub fn set_revenue_share_pool(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("rev_pool"), &amount);
@@ -2327,6 +2448,7 @@ pub fn get_escrow_balance(env: &Env, user: &Address) -> i128 {
 }
 
 pub fn set_escrow_balance(env: &Env, user: &Address, amount: i128) {
+    assert_non_negative(env, amount);
     let key = (Symbol::new(env, "esc_bal"), user.clone());
     env.storage().persistent().set(&key, &amount);
 }
@@ -2495,6 +2617,7 @@ pub fn add_unstake_fee_reserve(env: &Env, amount: i128) {
 }
 
 pub fn set_unstake_fee_reserve(env: &Env, amount: i128) {
+    assert_non_negative(env, amount);
     env.storage()
         .instance()
         .set(&symbol_short!("fbb_rsv"), &amount);

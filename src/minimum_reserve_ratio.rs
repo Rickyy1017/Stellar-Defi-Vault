@@ -79,7 +79,7 @@ fn compute_available_for_claim(env: &Env) -> i128 {
     (pool_balance - floor).max(0)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the minimum reserve ratio, in basis points (e.g. `2000` = keep at
     /// least 20% of outstanding reward obligations in reserve at all times).

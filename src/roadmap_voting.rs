@@ -96,7 +96,7 @@ fn find_index(items: &Vec<RoadmapItem>, id: u32) -> Option<u32> {
     None
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #462: admin adds a roadmap item. Max 20 items; title max 80 chars.
     /// Returns the new item id.

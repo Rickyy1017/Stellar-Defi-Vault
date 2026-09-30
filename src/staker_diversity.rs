@@ -49,7 +49,7 @@ fn top_n_share_bps(sorted_desc: &Vec<i128>, n: u32, total_staked: i128) -> u32 {
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Read-only report on how evenly staked principal is distributed
     /// across all active stakers (issue #407). Admin only, since sorting up

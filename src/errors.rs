@@ -87,9 +87,13 @@ pub enum VaultError {
     /// Returned by `end_boost_campaign()` when there is no active boost campaign
     /// to cancel.
     NoCampaignActive = 26,
-    /// Returned by `set_leaderboard_size()` when the requested leaderboard cap
-    /// exceeds 20.
-    LeaderboardSizeTooLarge = 27,
+    /// Returned by `deposit()`, `stake()`, and `stake_and_claim()` when the
+    /// admin-configured unique-depositor cap (issue #568) has already been
+    /// reached and the caller has never deposited before. Reuses the numeric
+    /// slot of the never-implemented `LeaderboardSizeTooLarge` case because
+    /// Soroban caps `#[contracterror]` enums at 50 variants and all other slots
+    /// are live.
+    DepositorCapReached = 27,
     /// Returned by `view_all_positions()` when `page_size` is 0 or greater than 20.
     PageSizeTooLarge = 28,
     /// Returned by staking entrypoints when KYC enforcement is enabled and the
@@ -152,8 +156,61 @@ pub enum VaultError {
     InvalidRewardAmount = 48,
     /// Returned when a new stake is attempted after `start_graceful_shutdown` has been called.
     PoolShuttingDown = 49,
-    /// Reverts with NotInEpochMode error if pool is not configured for epoch mode.
-    NotInEpochMode = 50,
+    /// Returned by every admin-gated entrypoint after admin renouncement.
+    NoAdmin = 50,
+}
+
+/// Typed validation failures for public APIs that historically panicked.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum PublicApiError {
+    Unauthorized = 1,
+    NotInitialized = 2,
+    InvalidAllocation = 3,
+    UnsupportedToken = 4,
+    ActionNotYetExecutable = 5,
+    ActionNotFound = 6,
+    AutoCompoundDisabled = 7,
+    PositionNotFound = 8,
+    NotNftOwner = 9,
+    ArithmeticError = 10,
+    NoAdmin = 11,
+}
+
+impl From<VaultError> for PublicApiError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => Self::Unauthorized,
+            VaultError::NotInitialized => Self::NotInitialized,
+            VaultError::NoAdmin => Self::NoAdmin,
+            VaultError::PositionNotFound => Self::PositionNotFound,
+            VaultError::ArithmeticError => Self::ArithmeticError,
+            _ => Self::Unauthorized,
+        }
+    }
+}
+
+/// Errors for voluntarily locked positions. Kept separate because `VaultError`
+/// has reached Soroban's 50-variant contract error limit.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultLockError {
+    NotInitialized = 1,
+    Unauthorized = 3,
+    ZeroAmount = 4,
+    InsufficientShares = 5,
+    VaultPaused = 6,
+    ArithmeticError = 8,
+    WithdrawalLimitExceeded = 9,
+    PositionNotFound = 18,
+    UseCooldownFlow = 20,
+    PositionLocked = 51,
+    LockDurationTooLong = 52,
+    InvalidLockBoostSchedule = 53,
+    TooManyLockBoostTiers = 54,
+    LockAlreadyActive = 55,
 }
 
 /// Soroban caps every `#[contracterror]`/`#[contracttype]` enum at 50 variants
@@ -664,6 +721,16 @@ pub enum VaultCampaignError {
     VoteBudgetExceeded = 31,
     /// Returned by `vote_roadmap_item()` when `weight` alone exceeds 100.
     InvalidVoteWeight = 32,
+
+    // ── Issue #430: staker region tags ───────────────────────────────────
+    /// Returned by `set_region_tag()` when the code exceeds 10 characters.
+    RegionCodeTooLong = 33,
+    /// Returned by `set_region_tag()` when the code is empty or contains a
+    /// non-alphanumeric character.
+    InvalidRegionCode = 34,
+    /// Returned by `set_region_tag()` when a new tag would exceed
+    /// `MAX_REGION_TAGGED_STAKERS`.
+    TooManyRegionTags = 35,
 }
 
 impl From<VaultError> for VaultCampaignError {
@@ -679,4 +746,355 @@ impl From<VaultError> for VaultCampaignError {
             _ => VaultCampaignError::Unauthorized,
         }
     }
+}
+
+/// Seventh error enum, added for the same 50-variant reason the earlier
+/// `Vault*Error` enums exist: every prior `#[contracterror]` enum is at
+/// Soroban's cap. Holds the cases for the pool-insights / runway-guard /
+/// admin-recovery issue batch, plus mirrors of the `VaultError` cases those
+/// functions can hit (via the `From` impl below, so `?` still works).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultOpsError {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::RateTooHigh` — a reward rate above
+    /// `balance::MAX_RATE_BPS` was supplied.
+    RateTooHigh = 5,
+    /// Returned by `set_reward_rate_bps` when the new rate would exhaust the
+    /// reward pool before the configured minimum runway
+    /// (`set_min_runway_ledgers`).
+    InsufficientRunway = 6,
+    /// Returned by `set_min_runway_ledgers` when `ledgers` is non-zero but
+    /// below the supported floor.
+    InvalidRunway = 7,
+    /// Returned by `propose_admin_recovery` when a recovery proposal is
+    /// already active.
+    RecoveryAlreadyPending = 8,
+    /// Returned by `execute_admin_recovery` / `cancel_admin_recovery` when no
+    /// recovery proposal is active.
+    RecoveryNotPending = 9,
+    /// Returned by `execute_admin_recovery` before the recovery delay has
+    /// elapsed.
+    RecoveryDelayNotElapsed = 10,
+    /// Returned by `propose_admin_recovery` when `new_admin` equals the
+    /// current admin.
+    InvalidRecoveryConfig = 11,
+    /// Returned by `set_reward_rate_bps` while the algorithmic reward rate
+    /// is enabled (issue #510) — the rate is derived from utilization.
+    DynamicRateActive = 12,
+    /// Returned by `fund_reward_pool` when `amount` is below the configured
+    /// minimum (issue #549). Disabled when the minimum is 0.
+    FundingBelowMinimum = 13,
+}
+
+impl From<VaultError> for VaultOpsError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultOpsError::Unauthorized,
+            VaultError::NotInitialized => VaultOpsError::NotInitialized,
+            VaultError::ZeroAmount => VaultOpsError::ZeroAmount,
+            VaultError::ArithmeticError => VaultOpsError::ArithmeticError,
+            VaultError::RateTooHigh => VaultOpsError::RateTooHigh,
+            // Any other VaultError reaching here maps to the closest generic case.
+            _ => VaultOpsError::Unauthorized,
+        }
+    }
+}
+
+/// Eighth error enum for issues #526-#529 (scheduled exit, snapshot airdrop,
+/// external price oracle, co-sponsor). All prior `#[contracterror]` enums
+/// are at Soroban's 50-variant cap.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature2Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 5,
+    /// Mirrors `VaultError::VaultPaused`.
+    VaultPaused = 6,
+    /// Mirrors `VaultError::InsufficientRewardPool`.
+    InsufficientRewardPool = 7,
+    /// Returned by `create_airdrop()` / `execute_scheduled_exit()` when the
+    /// supplied ledger or config is invalid.
+    InvalidRecoveryConfig = 8,
+    /// Returned by `register_co_sponsor()` when the sponsor is already
+    /// registered and active.
+    AlreadyRegistered = 9,
+    /// Returned by `fund_co_sponsor_rewards()` when the sponsor's
+    /// registration has expired.
+    SponsorExpired = 10,
+    /// Returned by `claim_airdrop()` when the user already claimed.
+    AlreadyClaimed = 11,
+    /// Returned by `get_position_value_usd()` when no oracle is configured.
+    NoOracleConfigured = 12,
+    /// Returned by `claim_airdrop()` when the user has no weight at the
+    /// snapshot ledger.
+    InsufficientStake = 13,
+}
+
+/// Ninth error enum, for issues #519 (vote-weight delegation) and #520
+/// (tiered fee discounts). All eight prior `#[contracterror]` enums are at
+/// Soroban's 50-variant cap. Issues #518 (`transfer_position`) and #521
+/// (guardian pause) don't need new cases here — every error they can return
+/// already exists on `VaultError` itself (`PositionNotFound`,
+/// `RecipientAlreadyStaking`, `Unauthorized`, `ContractStopped`, etc.), so
+/// those two entrypoints just return `VaultError` directly.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature3Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Mirrors `VaultError::ZeroAmount`.
+    ZeroAmount = 3,
+    /// Mirrors `VaultError::ArithmeticError`.
+    ArithmeticError = 4,
+    /// Mirrors `VaultError::PositionNotFound`.
+    PositionNotFound = 5,
+    /// Mirrors `VaultError::InsufficientShares`.
+    InsufficientShares = 6,
+    /// Returned by `set_fee_tiers()` (issue #520) when more than
+    /// `MAX_FEE_TIERS` tiers are supplied.
+    TooManyFeeTiers = 7,
+    /// Returned by `set_fee_tiers()` (issue #520) when a tier's
+    /// `discount_bps` exceeds 10 000 (100%) or `min_position_amount` is
+    /// negative.
+    InvalidFeeTierConfig = 8,
+    /// Returned by `delegate_vote_weight()` (issue #519) when a user tries
+    /// to delegate to themselves.
+    SelfDelegationNotAllowed = 9,
+    /// Returned by `delegate_vote_weight()` (issue #519) when the target
+    /// delegate already has `MAX_DELEGATORS_PER_DELEGATE` delegators.
+    TooManyDelegators = 10,
+    /// Returned by `revoke_vote_delegation()` (issue #519) when the caller
+    /// has no active delegation to revoke.
+    NoDelegationSet = 11,
+}
+
+impl From<VaultError> for VaultFeature3Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature3Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature3Error::NotInitialized,
+            VaultError::ZeroAmount => VaultFeature3Error::ZeroAmount,
+            VaultError::ArithmeticError => VaultFeature3Error::ArithmeticError,
+            VaultError::PositionNotFound => VaultFeature3Error::PositionNotFound,
+            VaultError::InsufficientShares => VaultFeature3Error::InsufficientShares,
+            _ => VaultFeature3Error::Unauthorized,
+        }
+    }
+}
+
+impl From<VaultError> for VaultFeature2Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature2Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature2Error::NotInitialized,
+            VaultError::ZeroAmount => VaultFeature2Error::ZeroAmount,
+            VaultError::ArithmeticError => VaultFeature2Error::ArithmeticError,
+            VaultError::PositionNotFound => VaultFeature2Error::PositionNotFound,
+            VaultError::VaultPaused => VaultFeature2Error::VaultPaused,
+            VaultError::InsufficientRewardPool => VaultFeature2Error::InsufficientRewardPool,
+            _ => VaultFeature2Error::Unauthorized,
+        }
+    }
+}
+
+/// Tenth error enum for issues #530-#533 (activity log, invariant checker,
+/// reward-rate ceiling, pause grace period).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature4Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Returned by `force_unpause()` when the vault is not paused.
+    NotPaused = 3,
+    /// Returned by `force_unpause()` before the maximum pause duration has
+    /// elapsed.
+    GracePeriodNotElapsed = 4,
+    /// Returned by `set_max_pause_duration()` while the vault is paused, or
+    /// when the supplied duration is below `MIN_MAX_PAUSE_LEDGERS`.
+    InvalidPauseDuration = 5,
+    /// Returned by `set_max_reward_rate()` when the new ceiling is zero,
+    /// higher than the current ceiling, or below the current reward rate.
+    InvalidRateCeiling = 6,
+    /// Returned by `assert_invariants()` when a core accounting total
+    /// (shares, deposits, reward pool) is negative.
+    NegativeAccounting = 7,
+    /// Returned by `assert_invariants()` when the sum of all stakers' share
+    /// balances differs from total shares outstanding.
+    SharesMismatch = 8,
+    /// Returned by `assert_invariants()` when the vault's actual token
+    /// balance is below what its accounting says it holds.
+    Undercollateralized = 9,
+}
+
+impl From<VaultError> for VaultFeature4Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature4Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature4Error::NotInitialized,
+            _ => VaultFeature4Error::Unauthorized,
+        }
+    }
+}
+
+/// Error enum for issue #513 (role-based access control) and issue #510
+/// (utilization-driven dynamic reward rate). All ten prior `#[contracterror]`
+/// enums are either at Soroban's 50-variant cap or scoped to another feature
+/// batch, so the access-control cases live here.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultAccessError {
+    /// Mirrors `VaultError::Unauthorized` — the caller is not the admin and
+    /// does not hold the required role.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Returned by `require_role()` when the caller is neither the admin nor
+    /// an explicit grantee of the required `Role` (issue #513).
+    MissingRole = 3,
+    /// Mirrors `VaultError::UnstakeFeeTooHigh` — returned by
+    /// `role_set_unstake_fee_bps()` when the fee exceeds 500 bps.
+    UnstakeFeeTooHigh = 4,
+    /// Mirrors `VaultError::RateTooHigh`.
+    RateTooHigh = 5,
+    /// Returned by `set_dynamic_rate_config()` when the curve is invalid:
+    /// `target_tvl <= 0`, or `min_rate_bps > target_rate_bps`, or
+    /// `target_rate_bps > max_rate_bps` (issue #510).
+    InvalidDynamicRateConfig = 6,
+    /// Mirrors `VaultOpsError::InsufficientRunway`, surfaced through the
+    /// role-gated rate setter.
+    InsufficientRunway = 7,
+    /// Mirrors `VaultOpsError::DynamicRateActive`, surfaced through the
+    /// role-gated rate setter.
+    DynamicRateActive = 8,
+}
+
+impl From<VaultError> for VaultAccessError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultAccessError::Unauthorized,
+            VaultError::NotInitialized => VaultAccessError::NotInitialized,
+            VaultError::RateTooHigh => VaultAccessError::RateTooHigh,
+            VaultError::UnstakeFeeTooHigh => VaultAccessError::UnstakeFeeTooHigh,
+            _ => VaultAccessError::Unauthorized,
+        }
+    }
+}
+
+impl From<VaultOpsError> for VaultAccessError {
+    fn from(err: VaultOpsError) -> Self {
+        match err {
+            VaultOpsError::Unauthorized => VaultAccessError::Unauthorized,
+            VaultOpsError::NotInitialized => VaultAccessError::NotInitialized,
+            VaultOpsError::RateTooHigh => VaultAccessError::RateTooHigh,
+            VaultOpsError::InsufficientRunway => VaultAccessError::InsufficientRunway,
+            VaultOpsError::DynamicRateActive => VaultAccessError::DynamicRateActive,
+            _ => VaultAccessError::Unauthorized,
+        }
+    }
+}
+
+/// Twelfth error enum, added for issue #593: replaces the last ad-hoc string
+/// `panic!`s in the issue #498–#505 extension modules with typed, matchable
+/// error codes. Every prior `#[contracterror]` enum is either at Soroban's
+/// 50-variant cap or scoped to another feature batch. The variant names keep
+/// the exact wording of the string panics they replace so integrators can map
+/// old revert messages to stable numeric codes one-to-one.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultFeature5Error {
+    /// Mirrors `VaultError::Unauthorized`.
+    Unauthorized = 1,
+    /// Mirrors `VaultError::NotInitialized`.
+    NotInitialized = 2,
+    /// Replaces `panic!("InvalidSplitRecipients")` — returned by
+    /// `set_treasury_split()` when more than 3 recipients are supplied or the
+    /// `recipients` / `bps_shares` lengths differ (issue #499).
+    InvalidSplitRecipients = 3,
+    /// Replaces `panic!("InvalidSplitBpsSum")` — returned by
+    /// `set_treasury_split()` when the `bps_shares` values do not sum to
+    /// exactly 10 000 (issue #499).
+    InvalidSplitBpsSum = 4,
+    /// Replaces `panic!("UnregisteredToken")` — returned by
+    /// `swap_secondary_reward()` when no DEX router is registered for the
+    /// supplied source token (issue #501).
+    UnregisteredToken = 5,
+    /// Replaces `panic!("TimelockNotExpired")` — returned by
+    /// `execute_admin_action()` when the queued action's `executable_at`
+    /// ledger has not been reached yet (issue #503).
+    TimelockNotExpired = 6,
+    /// Replaces `panic!("ActionNotFound")` — returned by
+    /// `execute_admin_action()` / `cancel_admin_action()` when the given
+    /// action id does not exist (issue #503).
+    ActionNotFound = 7,
+    /// Replaces `panic!("AutoCompoundNotEnabled")` — returned by `compound()`
+    /// when the user has not opted into auto-compounding (issue #504).
+    AutoCompoundNotEnabled = 8,
+    /// Replaces `panic!("NoSharesToTokenize")` — returned by
+    /// `tokenize_position()` when the caller holds no shares (issue #505).
+    NoSharesToTokenize = 9,
+    /// Replaces `panic!("NotNFTOwner")` — returned by `redeem_position_nft()`
+    /// when the caller is not the recorded owner of the token id (issue #505).
+    NotNftOwner = 10,
+}
+
+impl From<VaultError> for VaultFeature5Error {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => VaultFeature5Error::Unauthorized,
+            VaultError::NotInitialized => VaultFeature5Error::NotInitialized,
+            _ => VaultFeature5Error::Unauthorized,
+        }
+    }
+}
+
+/// Issue #621: negative-balance impossibility backstop.
+///
+/// `VaultError`, `VaultExtError`, and `VaultFeatureError` are all already at
+/// Soroban's 50-variant cap for `#[contracterror]` enums (see the note on
+/// `DataKey` in `storage.rs`), so this gets its own enum rather than adding a
+/// variant to one of those, matching the established pattern for handling an
+/// exhausted error enum (e.g. `VaultFeature2Error`..`VaultFeature5Error`).
+///
+/// Every balance-decrementing call site (withdraw, fee deduction, penalty,
+/// slash, etc.) is expected to validate the requested amount against the
+/// caller's current balance up front and return its own typed error (e.g.
+/// `VaultError::InsufficientShares`) before ever reaching a `balance::set_*`
+/// helper with a value that would go negative. `balance::assert_non_negative`
+/// (see `balance.rs`) is the last line of defense in those setters: it fires
+/// only if that upstream check was missing or wrong, aborting the transaction
+/// and reverting all state changes so no negative balance is ever committed
+/// to storage.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum VaultInvariantError {
+    /// A `balance::set_*` accounting field would have been written as
+    /// negative; the write was rejected and the call reverted instead.
+    NegativeBalance = 1,
 }

@@ -28,7 +28,7 @@ fn approved_targets(env: &Env) -> Vec<Address> {
         .unwrap_or(Vec::new(env))
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Whitelists `target_pool` as a valid destination for
     /// `cross_pool_liquidity_bridge()`. Admin only.
@@ -140,7 +140,7 @@ impl VaultContract {
         );
 
         let target_client = VaultContractClient::new(&env, &target_pool);
-        target_client.stake(&user, &token_amount);
+        target_client.stake(&user, &token_amount, &0);
 
         env.events().publish(
             (symbol_short!("brdg_mv"), user),

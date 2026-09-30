@@ -24,7 +24,7 @@ const ALERT_WINDOW_LEDGERS: u32 = LEDGERS_PER_DAY * 3;
 /// Loan health factor (in bps, 10000 = 100%) below which a loan is flagged at risk.
 const LOAN_HEALTH_WARNING_BPS: u32 = 12_000;
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Check every attention-worthy condition for `user`'s position and
     /// return a structured report (issue #377). Emits `position_health_alert`

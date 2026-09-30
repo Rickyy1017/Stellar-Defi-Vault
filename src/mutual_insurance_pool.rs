@@ -110,7 +110,7 @@ fn position_amount(env: &Env, user: &Address) -> Option<i128> {
     balance::shares_to_amount(total_shares, total_deposited, shares)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Enable (or reconfigure) the mutual insurance pool. Admin only. Does
     /// not touch the accumulated fund balance.

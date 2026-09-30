@@ -112,7 +112,7 @@ pub fn compute_decayed_score(
     (decayed, score.total_score, epochs_elapsed)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Minimal base reputation score computed from a user's current position,
     /// before decay is applied. Reduced to `total_score` only â€” no per-sub-score
@@ -179,8 +179,9 @@ impl VaultContract {
         };
         set_decay_config(&env, &config);
 
+        let admin = admin::get_admin(&env)?;
         env.events().publish(
-            (symbol_short!("rd_set"),),
+            (symbol_short!("rd_set"), admin),
             (decay_bps_per_epoch, epoch_ledgers, env.ledger().sequence()),
         );
         Ok(())
@@ -193,12 +194,14 @@ impl VaultContract {
     }
 
     /// Recalculate and return the user's reputation score with time decay
+    /// applied. The affected user must authorize the checkpoint update.
     /// applied. Public â€” no auth required.
     ///
     /// If the user has no active position, returns all zeros. Otherwise computes
     /// the base score, applies decay based on elapsed epochs since last activity,
     /// and emits a `reputation_decayed` event if the score decreased.
     pub fn apply_reputation_decay(env: Env, user: Address) -> ReputationScore {
+        user.require_auth();
         let base = Self::get_reputation_score_raw(&env, &user);
         let (decayed, old_score, epochs_elapsed) =
             compute_decayed_score(&env, &user, &base);

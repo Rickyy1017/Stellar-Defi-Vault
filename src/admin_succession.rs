@@ -45,7 +45,7 @@ pub fn touch_admin_activity(env: &Env) {
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Designates `heir` as the address that may claim admin rights if the
     /// current admin performs no admin action for

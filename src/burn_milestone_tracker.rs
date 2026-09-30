@@ -80,7 +80,7 @@ pub fn check_burn_milestones(env: &Env, burn_that_triggered: i128) {
     }
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Admin sets burn milestones. Max 10, ascending order required.
     pub fn set_burn_milestones(

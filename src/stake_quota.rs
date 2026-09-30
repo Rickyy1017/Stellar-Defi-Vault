@@ -143,7 +143,7 @@ pub fn consume_quota(env: &Env, user: &Address, operations: u32) -> Result<(), V
     Ok(())
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure the per-epoch operation allowance and epoch length. Admin
     /// only. Setting a new config does not reset any user's current usage ΓÇö

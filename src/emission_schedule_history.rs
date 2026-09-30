@@ -101,7 +101,7 @@ fn compute_daily_emission(total_staked: i128, effective_rate_bps: i128) -> i128 
         .saturating_div(denominator)
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Record the current effective emission rate as a history sample.
     /// Admin only. History is capped at 100 samples (oldest dropped).

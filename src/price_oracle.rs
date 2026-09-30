@@ -103,7 +103,7 @@ fn record(env: &Env, price: &PositionPrice) {
     );
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Publish a fair-value snapshot for one position. Admin only.
     pub fn publish_position_price(env: Env, user: Address) -> Result<PositionPrice, VaultError> {

@@ -133,7 +133,7 @@ fn get_pool_average_rating_bps(env: &Env) -> u32 {
     env.storage().instance().get(&RATING_KEY).unwrap_or(0)
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Record a stake inflow or outflow event for the sentiment tracker.
     /// `is_inflow` true for stake, false for unstake.

@@ -19,7 +19,7 @@ use crate::balance;
 use crate::storage::HalvingCountdown;
 use crate::vault::{VaultContract, VaultContractClient, LEDGERS_PER_DAY};
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Exact ledger and estimated real-world days remaining until the next
     /// reward halving (issue #376). Returns an all-zero `HalvingCountdown` if

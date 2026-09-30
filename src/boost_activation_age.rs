@@ -37,7 +37,7 @@ fn staked_at_ledger(env: &Env, user: &Address) -> u32 {
         .unwrap_or(0)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set the minimum position age (in ledgers) before any boost
     /// multiplier applies. Admin only. `0` disables the gate (default).

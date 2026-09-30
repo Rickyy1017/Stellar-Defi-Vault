@@ -36,7 +36,7 @@ use crate::storage::DataKey;
 use crate::VaultContract;
 use crate::vault::VaultContractClient;
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Register the stake-receipt NFT contract address. Admin only.
     ///

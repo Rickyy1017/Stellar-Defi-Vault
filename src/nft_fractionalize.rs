@@ -126,7 +126,7 @@ pub struct FractionalizedNFT {
     pub total_fractions: u32,
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Fractionalize an NFT receipt into `num_fractions` fungible tokens.
     ///

@@ -47,7 +47,7 @@ fn is_whitelisted(env: &Env, supplier: &Address) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Process up to `MAX_BULK_SUPPLY_ENTRIES` reward top-ups in one
     /// transaction. Each `supplier` must already be whitelisted and must have

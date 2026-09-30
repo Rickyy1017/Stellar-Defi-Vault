@@ -34,7 +34,7 @@ pub struct ArbitrageOpportunity {
     pub worth_switching: bool,
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl crate::VaultContract {
     /// Admin-only: configure arbitrage alert parameters
     pub fn set_arbitrage_alert_config(

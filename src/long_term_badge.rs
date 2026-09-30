@@ -11,7 +11,7 @@ pub struct LongTermBadge {
     pub years_held: u32,
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     // --- Public Read-Only Query ---
     pub fn get_long_term_badge(env: Env, user: Address) -> Option<LongTermBadge> {
@@ -95,7 +95,7 @@ impl VaultContract {
 }
 
 // Additional automated hook triggers to maintain position continuity
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     pub fn claim(env: Env, user: Address) {
         // Automatically check and update badge stats during claim events

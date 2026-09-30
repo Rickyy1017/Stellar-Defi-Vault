@@ -74,7 +74,7 @@ fn staked_at_ledger(env: &Env, user: &Address) -> u32 {
         .unwrap_or(0)
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Create a read-only shadow clone of `user`'s current position. Returns
     /// the `clone_id`. Callable by the owner or admin. Max 5 clones per user.

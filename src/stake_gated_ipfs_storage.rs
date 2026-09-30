@@ -58,7 +58,7 @@ fn set_user_records(env: &Env, user: &Address, records: &Vec<IPFSRecord>) {
         .set(&(IPFS_RECORDS_KEY, user.clone()), records);
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure the stake-gated IPFS storage service. Admin only.
     ///

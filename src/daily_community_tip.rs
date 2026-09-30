@@ -95,7 +95,7 @@ fn set_voted(env: &Env, day: u32, user: &Address) {
         .set(&(VOTED_KEY, day, user.clone()), &true);
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #458: Submit a nomination for the daily featured tip. Content
     /// is capped at `MAX_TIP_CONTENT_LEN` characters, and each staker may

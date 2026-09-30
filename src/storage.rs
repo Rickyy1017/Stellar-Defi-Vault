@@ -79,6 +79,15 @@ pub enum DataKey {
     // Symbol::new(env, "prop")/"voted" tuple keys above).
 }
 
+/// Pool-wide share price at a particular ledger (issue #494).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharePriceSnapshot {
+    pub price_numerator: i128,
+    pub price_denominator: i128,
+    pub ledger: u32,
+}
+
 /// Storage key for an individual epoch snapshot.
 ///
 /// Soroban's enum contracttype support is stricter for tuple variants, so we
@@ -307,6 +316,18 @@ pub struct ChangelogEntry {
     pub change_type: String,
     pub old_value: i128,
     pub new_value: i128,
+}
+
+/// One entry in the on-chain reward-rate changelog exposed by
+/// `get_rate_history` (issue #522).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RateChange {
+    pub old_rate_bps: u32,
+    pub new_rate_bps: u32,
+    /// Ledger sequence number of the update, matching the timestamp carried by
+    /// the `rate_changed` event.
+    pub changed_at: u32,
 }
 
 /// One entry in the rich reward-rate history exposed by `get_reward_rate_history` (issue #124).
@@ -1193,6 +1214,7 @@ pub struct WithdrawalReceipt {
     pub lock_penalty_paid: i128,
 }
 
+/// Tracks completion of recommended onboarding steps for a staker.
 
 
 
@@ -1362,13 +1384,7 @@ pub struct OnboardingChecklist {
     pub completed_at: Option<u32>,
 }
 
-// ── Issue #310: contract allowance delegation ─────────────────────────────────
-
-/// A smart-contract address approved to call `stake_via_contract()` on a
-/// user's behalf (issue #310), up to `max_stake_per_call` per invocation and
-/// `total_authorized` lifetime. Distinct from the human-wallet delegation in
-/// `approve_delegate()`/`add_delegate_to_chain()` (issues #23/#200), which
-/// target EOA delegates rather than contracts.
+/// A contract address approved to stake on a user's behalf.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContractDelegate {
@@ -1471,5 +1487,4 @@ pub struct ProposalComment {
     pub stake_weight: i128,
     pub posted_at: u32,
 }
-
 

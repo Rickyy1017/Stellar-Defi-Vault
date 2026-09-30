@@ -67,7 +67,7 @@ fn signed_current(env: &Env, user: &Address) -> bool {
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Publishes the pool terms as a hash and version. Admin only. Existing
     /// stakers' positions are untouched, but their `CovenantRecord` is no

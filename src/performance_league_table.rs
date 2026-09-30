@@ -136,7 +136,7 @@ fn assign_ranks(env: &Env, table: &mut Vec<LeagueTableEntry>) {
     *table = ranked;
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Publish this pool's performance metrics for a completed season.
     /// Admin only.

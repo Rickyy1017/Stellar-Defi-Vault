@@ -92,7 +92,7 @@ fn get_position_amount(env: &Env, user: &Address) -> Option<i128> {
     balance::shares_to_amount(total_shares, total_deposited, shares)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Submit a new content item for curation voting.
     ///
@@ -232,8 +232,9 @@ impl VaultContract {
                 items.set(i, updated.clone());
 
                 if updated.votes_for > updated.votes_against {
+                    let admin = admin::get_admin(&env)?;
                     env.events().publish(
-                        (symbol_short!("cc_apprv"),),
+                        (symbol_short!("cc_apprv"), admin),
                         (
                             content_hash.clone(),
                             updated.votes_for,

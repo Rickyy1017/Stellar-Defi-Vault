@@ -103,11 +103,11 @@ fn test_integration_full_lifecycle() {
     let stake4: i128 = 4_000_000;
     let stake5: i128 = 5_000_000;
 
-    vault.stake(&user1, &stake1);
-    vault.stake(&user2, &stake2);
-    vault.stake(&user3, &stake3);
-    vault.stake(&user4, &stake4);
-    vault.stake(&user5, &stake5);
+    vault.stake(&user1, &stake1, &0);
+    vault.stake(&user2, &stake2, &0);
+    vault.stake(&user3, &stake3, &0);
+    vault.stake(&user4, &stake4, &0);
+    vault.stake(&user5, &stake5, &0);
 
     // Verify pool_stats shows 5 stakers and correct total
     let stats = vault.pool_stats();
@@ -335,7 +335,7 @@ fn test_revocation_blocks_new_stake_but_allows_unstake_and_claim() {
 
     token_admin.mint(&alice, &200_000);
     // alice stakes 100k
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // advance ledger and set a reward rate so claim will return >0
     env.ledger().with_mut(|li| li.sequence_number = 500);
@@ -384,14 +384,14 @@ fn test_total_stakers_tracks_entries_and_exits() {
     // No stakers initially
     assert_eq!(vault.pool_stats().total_stakers, 0);
 
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
     assert_eq!(
         vault.pool_stats().total_stakers,
         1,
         "total_stakers should be 1 after alice stakes"
     );
 
-    vault.stake(&bob, &200_000);
+    vault.stake(&bob, &200_000, &0);
     assert_eq!(
         vault.pool_stats().total_stakers,
         2,
@@ -443,7 +443,7 @@ fn test_position_of_returns_correct_fields() {
     vault.set_reward_rate_bps(&1000);
 
     token_admin.mint(&alice, &500_000);
-    vault.stake(&alice, &200_000);
+    vault.stake(&alice, &200_000, &0);
 
     let position = vault.position_of(&alice).unwrap();
     assert_eq!(
@@ -639,8 +639,8 @@ fn test_position_opened_event_on_first_stake() {
     vault.initialize(&admin, &token_addr, &0_u32, &None, &None);
     token_admin.mint(&alice, &500_000);
 
-    vault.stake(&alice, &100_000);
-    vault.stake(&alice, &100_000); // second stake ΓÇö should NOT emit position_opened again
+    vault.stake(&alice, &100_000, &0);
+    vault.stake(&alice, &100_000, &0); // second stake ΓÇö should NOT emit position_opened again
 
     let events = env.events().all();
     let matched: std::vec::Vec<_> = events
@@ -686,7 +686,7 @@ fn test_position_closed_event_on_full_unstake() {
     vault.initialize(&admin, &token_addr, &0_u32, &None, &None);
     token_admin.mint(&alice, &500_000);
 
-    vault.stake(&alice, &200_000);
+    vault.stake(&alice, &200_000, &0);
     vault.unstake(&alice, &100_000); // partial ΓÇö should NOT emit pos_clos
     vault.unstake(&alice, &100_000); // full ΓÇö SHOULD emit pos_clos
 
@@ -781,7 +781,7 @@ fn test_slash_partial_and_treasury_receive() {
 
     // fund alice and stake
     token_admin.mint(&alice, &500_000);
-    vault.stake(&alice, &200_000);
+    vault.stake(&alice, &200_000, &0);
 
     // pre-check balances
     assert_eq!(token.balance(&vault_id), 200_000);
@@ -819,7 +819,7 @@ fn test_slash_full_and_position_removed() {
     vault.set_slash_treasury(&treasury);
 
     token_admin.mint(&alice, &300_000);
-    vault.stake(&alice, &150_000);
+    vault.stake(&alice, &150_000, &0);
 
     // slash full or larger amount
     let slashed = vault.slash(&admin, &alice, &200_000);
@@ -850,7 +850,7 @@ fn test_slash_works_while_paused() {
     vault.set_slash_treasury(&treasury);
 
     token_admin.mint(&alice, &200_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // pause the contract
     vault.pause(
@@ -885,7 +885,7 @@ fn test_non_admin_rejected_for_slash() {
     vault.initialize(&admin, &token_addr, &0_u32, &None, &None);
 
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &50_000);
+    vault.stake(&alice, &50_000, &0);
 
     // Verify admin auth is required: the recorded authorizer must be the admin address.
     vault.slash(&admin, &alice, &10_000);
@@ -913,7 +913,7 @@ fn test_reward_forfeiture_on_slash() {
     vault.set_slash_treasury(&treasury);
 
     token_admin.mint(&alice, &500_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // advance ledger to accrue rewards
     env.ledger().with_mut(|li| li.sequence_number = 1000);
@@ -949,7 +949,7 @@ fn test_initialization_defaults_treasury_to_admin() {
     vault.initialize(&admin, &token_addr, &0_u32, &None, &None);
 
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &20_000);
+    vault.stake(&alice, &20_000, &0);
 
     // admin slashes -> funds should go to admin (default treasury)
     vault.slash(&admin, &alice, &10_000);
@@ -979,7 +979,7 @@ fn test_full_cooldown_flow() {
     vault.set_cooldown_period(&5);
 
     token_admin.mint(&alice, &200_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // request unstake 50_000
     vault.request_unstake(&alice, &50_000);
@@ -1018,7 +1018,7 @@ fn test_premature_execute_unstake_fails() {
 
     vault.set_cooldown_period(&10);
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &50_000);
+    vault.stake(&alice, &50_000, &0);
 
     vault.request_unstake(&alice, &20_000);
 
@@ -1048,7 +1048,7 @@ fn test_zero_cooldown_bypass_allows_instant_unstake() {
     vault.set_cooldown_period(&0);
 
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &50_000);
+    vault.stake(&alice, &50_000, &0);
 
     // instant unstake allowed
     let returned = vault.unstake(&alice, &50_000);
@@ -1081,7 +1081,7 @@ fn test_no_rewards_accrued_during_cooldown() {
     vault.fund_reward_pool(&admin, &1_000_000);
 
     token_admin.mint(&alice, &500_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // Set rate, then advance to 100_000 ledgers.
     // reward = amount * rate_bps * elapsed / 10_000 / 6_307_200
@@ -1135,7 +1135,7 @@ fn test_revenue_sharing_flow() {
 
     // Stake 100_000 tokens for Alice
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // Unstake 100_000: Unstake fee is 5% = 5,000.
     // 20% of 5,000 = 1,000 goes to RevenueSharePool.
@@ -1200,7 +1200,7 @@ fn test_revenue_sharing_invalid_proof_and_double_claim() {
     vault.set_unstake_fee_bps(&admin, &500);
 
     token_admin.mint(&alice, &200_000);
-    vault.stake(&alice, &200_000);
+    vault.stake(&alice, &200_000, &0);
     vault.unstake(&alice, &200_000); // 10,000 fee -> 5,000 to rev pool
 
     assert_eq!(vault.get_revenue_share_pool(), 5000);
@@ -1286,7 +1286,7 @@ fn test_new_staker_reward_escrow_flow() {
 
     // Alice stakes at ledger 100 -> release ledger should be 200
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     assert_eq!(vault.get_escrow_release_ledger(&alice), Some(200));
     assert_eq!(vault.get_escrow_balance(&alice), 0);
@@ -1340,7 +1340,7 @@ fn test_escrow_period_zero_disables_and_restaker_gets_new_escrow() {
     // 1. Escrow period 0 disables escrow for new stakers
     vault.set_escrow_period(&admin, &0);
     token_admin.mint(&bob, &50_000);
-    vault.stake(&bob, &50_000);
+    vault.stake(&bob, &50_000, &0);
     assert_eq!(vault.get_escrow_release_ledger(&bob), None);
 
     // 2. Configure escrow period = 50 ledgers
@@ -1348,7 +1348,7 @@ fn test_escrow_period_zero_disables_and_restaker_gets_new_escrow() {
 
     // Alice stakes at ledger 100
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
     assert_eq!(vault.get_escrow_release_ledger(&alice), Some(150));
 
     vault.set_reward_rate_bps(&1000);
@@ -1366,7 +1366,7 @@ fn test_escrow_period_zero_disables_and_restaker_gets_new_escrow() {
     // Re-staker after full exit gets a new escrow period starting at new stake ledger
     env.ledger().with_mut(|li| li.sequence_number = 300);
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // New release ledger is 300 + 50 = 350
     assert_eq!(vault.get_escrow_release_ledger(&alice), Some(350));
@@ -1418,12 +1418,12 @@ fn test_stake_gated_access_flow() {
 
     // 1. Staker with 30_000 (below threshold) -> no eligibility
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &30_000);
+    vault.stake(&alice, &30_000, &0);
     assert_eq!(vault.check_access_eligibility(&alice), None);
     assert!(vault.try_claim_access_token(&alice).is_err());
 
     // 2. Stake up to 60_000, advance ledgers by 10
-    vault.stake(&alice, &30_000); // total 60_000
+    vault.stake(&alice, &30_000, &0); // total 60_000
     env.ledger().with_mut(|li| li.sequence_number = 25);
 
     // Qualifies for Tier 0 (index 0)
@@ -1435,7 +1435,7 @@ fn test_stake_gated_access_flow() {
     assert!(nft_client_1.has_receipt(&alice));
 
     // 3. Stake up to 100_000 and advance ledgers to 35 -> qualifies for Tier 1 (highest tier wins)
-    vault.stake(&alice, &40_000); // total 100_000
+    vault.stake(&alice, &40_000, &0); // total 100_000
     env.ledger().with_mut(|li| li.sequence_number = 35);
     assert_eq!(vault.check_access_eligibility(&alice), Some(1));
 
@@ -1494,7 +1494,7 @@ fn test_reward_halving_schedule_integration() {
 
     // Stake at ledger 0
     token_admin.mint(&alice, &100_000);
-    vault.stake(&alice, &100_000);
+    vault.stake(&alice, &100_000, &0);
 
     // Ledger 50: halving count is 0
     env.ledger().with_mut(|li| li.sequence_number = 50);

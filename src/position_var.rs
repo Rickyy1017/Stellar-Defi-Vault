@@ -38,7 +38,7 @@ impl VaRReport {
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Estimate potential loss for `user`'s position under adverse
     /// conditions (issue #408). `reward_price_drop_bps` is caller-supplied â€”

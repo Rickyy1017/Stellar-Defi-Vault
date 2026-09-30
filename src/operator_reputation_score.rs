@@ -91,7 +91,7 @@ fn compute_scores(data: &OperatorReputationData) -> (u32, u32, u32, u32, u32) {
     )
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Record or update an operator's raw reputation inputs. Admin only.
     /// `pool_uptime_ledgers` is the pool's continuous running time in ledgers;

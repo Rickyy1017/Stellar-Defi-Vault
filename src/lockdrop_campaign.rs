@@ -118,7 +118,7 @@ fn token_address(env: &Env) -> Result<Address, VaultCampaignError> {
         .ok_or(VaultCampaignError::NotInitialized)
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #460: admin starts the lockdrop. Funds the fixed reward pool by
     /// transferring `total_reward_pool` of the stake token from the admin into

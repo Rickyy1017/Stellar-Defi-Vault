@@ -159,7 +159,7 @@ fn compute_effective_weight(env: &Env, user: &Address) -> (i128, i128, u32) {
     (raw, effective, epochs_inactive)
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure governance vote-weight decay. Admin only.
     ///

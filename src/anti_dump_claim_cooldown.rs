@@ -63,7 +63,7 @@ fn set_cooldown_until(env: &Env, user: &Address, ledger: u32) {
         .set(&(COOLDOWN_KEY, user.clone()), &ledger);
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Configure the claim-size threshold and cooldown length. Admin only.
     pub fn set_anti_dump_cooldown(

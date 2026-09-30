@@ -56,7 +56,7 @@ fn sum_7day_inflow(env: &Env) -> i128 {
     total
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Record a stake inflow entry for the rolling 7-day forecast window.
     /// Requires the staker's own auth, matching `stake()`'s auth model.

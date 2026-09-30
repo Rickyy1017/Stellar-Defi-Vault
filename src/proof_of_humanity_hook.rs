@@ -135,7 +135,7 @@ pub fn fee_surcharge_bps(env: &Env, user: &Address) -> u32 {
     }
 }
 
-#[contractimpl]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #461: admin registers the external verification oracle. Preserves
     /// any previously configured thresholds; new registrations default them to
@@ -279,6 +279,7 @@ impl VaultContract {
         if surcharge > 0 {
             token_client.transfer(&user, &contract, &surcharge);
             balance::add_protocol_fee_collected(&env, surcharge);
+            crate::community_treasury::route_fee_revenue(&env, surcharge)?;
         }
 
         token_client.transfer(&user, &contract, &stake_amount);

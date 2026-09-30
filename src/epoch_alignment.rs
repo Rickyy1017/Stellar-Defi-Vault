@@ -114,7 +114,7 @@ pub fn maybe_emit_boundary_crossed(env: &Env, user: &Address) {
     }
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Set calendar-style epoch alignment. Admin only.
     ///

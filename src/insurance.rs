@@ -78,7 +78,7 @@ pub fn is_insolvent(env: &Env) -> bool {
     insolvency_ledger(env).is_some()
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Register a guarantor and the coverage they commit to. Admin only.
     ///
@@ -91,6 +91,9 @@ impl VaultContract {
         coverage_amount: i128,
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        if guarantor == env.current_contract_address() {
+            return Err(VaultError::InvalidAddress);
+        }
 
         if coverage_amount <= 0 {
             return Err(VaultError::ZeroAmount);

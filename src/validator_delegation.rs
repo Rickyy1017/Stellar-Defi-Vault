@@ -87,7 +87,7 @@ fn adjust_weight(env: &Env, validator: &Address, delta: i128) -> Result<(), Vaul
     Ok(())
 }
 
-#[cfg_attr(not(test), contractimpl)]
+#[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Assign the caller's current stake weight to `validator`. Replaces any
     /// existing delegation (the old validator's weight is removed first).
