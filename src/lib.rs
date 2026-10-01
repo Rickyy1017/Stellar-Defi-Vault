@@ -52,6 +52,9 @@ mod test;
 mod test_share_decimals;
 
 #[cfg(test)]
+mod test_issues_628_631;
+
+#[cfg(test)]
 mod test_content_curation;
 
 #[cfg(test)]

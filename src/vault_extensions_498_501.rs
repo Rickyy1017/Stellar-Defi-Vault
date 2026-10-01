@@ -11,6 +11,8 @@ use crate::admin;
 use crate::balance;
 use crate::errors::{VaultError, VaultFeature5Error};
 
+pub const MAX_TREASURY_SPLIT_RECIPIENTS: u32 = 3;
+
 // ----------------------------------------------------------------------------
 // Issue #498: Batch Withdraw
 // ----------------------------------------------------------------------------
@@ -57,7 +59,9 @@ impl VaultContract {
     pub fn set_treasury_split(env: Env, admin: Address, recipients: Vec<Address>, bps_shares: Vec<u32>) -> Result<(), VaultFeature5Error> {
         admin.require_auth();
         admin::require_admin(&env)?;
-        if recipients.len() > 3 || recipients.len() != bps_shares.len() {
+        if recipients.len() > MAX_TREASURY_SPLIT_RECIPIENTS
+            || recipients.len() != bps_shares.len()
+        {
             return Err(VaultFeature5Error::InvalidSplitRecipients);
         }
         let mut sum: u32 = 0;

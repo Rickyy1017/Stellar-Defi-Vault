@@ -44,6 +44,8 @@ pub enum RewardType {
     ReferralBonus,
 }
 
+pub const MAX_REWARD_WATERFALL_ENTRIES: u32 = 5;
+
 /// Instance-storage key for the admin-configured priority order.
 const WATERFALL_KEY: Symbol = symbol_short!("rw_order");
 
@@ -113,6 +115,9 @@ impl VaultContract {
 
         if order.is_empty() {
             return Err(VaultError::ZeroAmount);
+        }
+        if order.len() > MAX_REWARD_WATERFALL_ENTRIES {
+            return Err(VaultError::BatchTooLarge);
         }
 
         // Reject duplicates â€” a repeated type would silently swallow one of
