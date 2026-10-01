@@ -44,6 +44,52 @@ use seven decimal places internally, so the vault queries the token's actual
 Stellar's common seven-decimal precision. The legacy `stake_decimals` argument
 is retained for ABI compatibility but does not override the token query.
 
+## Trust Assumptions and Admin Powers
+
+Depositors must trust the current admin key, and any configured Treasurer,
+Pauser, or Rater role holder. The following admin-controlled actions are
+available. Unless marked **delayed**, they take effect in the transaction that
+calls them:
+
+- **Vault operation:** `pause`, `unpause`, `pause_until`,
+  `set_max_pause_duration`, `initiate_sunset`, `emergency_stop`, and
+  `start_graceful_shutdown` can stop deposits, stop withdrawals, or permanently
+  close new deposits. `pause_until` is lazy and auto-unpauses at its target
+  ledger; `unpause` always clears that schedule. A configured pause-duration
+  limit lets anyone force an overdue pause open.
+- **Economics:** `set_reward_rate_bps`, `set_referral_bonus_bps`,
+  `set_unstake_fee_bps`, `set_fee_recipients`, `set_treasury_split`,
+  `set_boost_schedule`, `set_lock_boost_schedule`, `set_rounding_policy`,
+  `set_pool_cap`, `set_min_stake`, withdrawal limits, claim fees, insurance
+  rates, reward smoothing, halving, and other rate/fee/cap setters can change
+  future returns, fees, eligibility, or the rate at which rewards are paid.
+- **Assets and treasury:** `set_reward_token`, `add_yield`, reward funding,
+  treasury withdrawals, fee routing, buyback configuration, output-token and
+  bridge configuration, and `rescue_token` can change reward liquidity or move
+  treasury and non-vault assets. `rescue_token` cannot move the configured stake
+  or reward token. `add_yield` moves tokens into the vault; it does not withdraw
+  user principal.
+- **Access and administration:** `transfer_admin`, `set_emergency_admin`,
+  `revoke_emergency_admin`, `set_roles`, `grant_role`, `revoke_role`,
+  `initialize_multisig`, `set_timelock_delay`, and admin recovery change who
+  can exercise these powers. `upgrade_wasm` can replace the contract code.
+- **User-state and migration:** `slash`, `schedule_vesting`, KYC/allowlist
+  batches, `export_state`, and `import_state` can affect individual positions,
+  eligibility, or migration. `slash` can reduce a user's position; it does not
+  require that user's signature.
+- **Delayed controls:** `queue_action` followed by `execute_action` is delayed
+  by the configured ledger timelock for supported rate and pause actions.
+  Multisig proposals require their approval threshold but are not an
+  additional time delay. Admin recovery has its own delay. The timelock can be
+  set to zero, so delayed actions are not an absolute guarantee.
+
+The admin cannot withdraw another user's shares or principal through the normal
+withdrawal path: user withdrawals require the user's own authorization. Read
+the full function-by-function model, shutdown behavior, and failure scenarios
+in [`docs/SECURITY.md`](docs/SECURITY.md). This section and that document must
+be updated whenever an admin-gated function, role, or admin-controlled
+parameter is added or changed.
+
 ## Getting Started
 
 ### Prerequisites
@@ -82,13 +128,15 @@ To deploy the staking vault to Stellar Testnet and initialize it:
    make deploy-testnet
    ```
 
-   *Alternatively, you can customize the identity or network via environment variables:*
+   _Alternatively, you can customize the identity or network via environment variables:_
+
    ```bash
    IDENTITY=my-identity NETWORK=testnet make deploy-testnet
    ```
 
 2. **Configure your Environment**:
    The script will print configuration variables. Save them to a `.env` file in the project root:
+
    ```env
    CONTRACT_ID=CB...
    TOKEN_ID=CD...
@@ -98,6 +146,7 @@ To deploy the staking vault to Stellar Testnet and initialize it:
 
 3. **Staking via CLI**:
    Stake tokens into the vault (amount in raw units, e.g., 10 XLM = `100000000` stroops):
+
    ```bash
    make stake AMOUNT=100000000
    ```
@@ -108,36 +157,35 @@ To deploy the staking vault to Stellar Testnet and initialize it:
    make claim
    ```
 
-
 ## Contract Interface
 
-| Function | Auth Required | Description |
-|---|---|---|
-| `initialize(admin, token, stake_decimals?, reward_decimals?)` | — | One-time init; stake decimals are queried from the token |
-| `deposit(depositor, amount)` | depositor | Deposit tokens, receive shares |
-| `stake(staker, amount)` | staker | Alias for `deposit` |
-| `withdraw(user, shares)` | user | Burn shares, receive tokens |
-| `unstake(staker, shares)` | staker | Alias for `withdraw` |
-| `claim(staker)` | staker | Claim accrued rewards from the reward pool |
-| `calc_pending_reward(user)` | — | Pending reward query |
-| `shares_of(user)` | — | Query share balance |
-| `current_vote_weight(user)` | — | Current governance vote weight |
-| `vote_weight_at(user, ledger)` | — | Historical governance vote weight |
-| `total_vote_weight()` | — | Pool-wide governance vote weight |
-| `preview_redeem(shares)` | — | Preview token return |
-| `vault_state()` | — | Query pool totals |
-| `set_min_stake(amount)` | admin | Configure minimum stake; `0` disables it |
-| `get_min_stake()` | — | Read current minimum stake |
-| `set_unstake_fee_bps(admin, bps)` | admin | Configure unstake fee (max 500 bps); `0` disables it |
-| `get_unstake_fee_bps()` | — | Read current unstake fee in bps |
-| `set_reward_rate_bps(rate_bps)` | admin | Configure base reward APR |
-| `fund_reward_pool(admin_addr, amount)` | admin | Deposit claimable rewards |
-| `set_boost_schedule(tiers)` | admin | Configure up to 5 reward-boost tiers |
-| `get_boost_multiplier(user)` | — | Current reward multiplier for a user |
-| `pause()` | admin | Emergency pause |
-| `unpause()` | admin | Resume operations |
-| `add_yield(admin_addr, amount)` | admin | Inject yield; raises share price |
-| `transfer_admin(new_admin)` | admin | Rotate admin key |
+| Function                                                      | Auth Required | Description                                              |
+| ------------------------------------------------------------- | ------------- | -------------------------------------------------------- |
+| `initialize(admin, token, stake_decimals?, reward_decimals?)` | —             | One-time init; stake decimals are queried from the token |
+| `deposit(depositor, amount)`                                  | depositor     | Deposit tokens, receive shares                           |
+| `stake(staker, amount)`                                       | staker        | Alias for `deposit`                                      |
+| `withdraw(user, shares)`                                      | user          | Burn shares, receive tokens                              |
+| `unstake(staker, shares)`                                     | staker        | Alias for `withdraw`                                     |
+| `claim(staker)`                                               | staker        | Claim accrued rewards from the reward pool               |
+| `calc_pending_reward(user)`                                   | —             | Pending reward query                                     |
+| `shares_of(user)`                                             | —             | Query share balance                                      |
+| `current_vote_weight(user)`                                   | —             | Current governance vote weight                           |
+| `vote_weight_at(user, ledger)`                                | —             | Historical governance vote weight                        |
+| `total_vote_weight()`                                         | —             | Pool-wide governance vote weight                         |
+| `preview_redeem(shares)`                                      | —             | Preview token return                                     |
+| `vault_state()`                                               | —             | Query pool totals                                        |
+| `set_min_stake(amount)`                                       | admin         | Configure minimum stake; `0` disables it                 |
+| `get_min_stake()`                                             | —             | Read current minimum stake                               |
+| `set_unstake_fee_bps(admin, bps)`                             | admin         | Configure unstake fee (max 500 bps); `0` disables it     |
+| `get_unstake_fee_bps()`                                       | —             | Read current unstake fee in bps                          |
+| `set_reward_rate_bps(rate_bps)`                               | admin         | Configure base reward APR                                |
+| `fund_reward_pool(admin_addr, amount)`                        | admin         | Deposit claimable rewards                                |
+| `set_boost_schedule(tiers)`                                   | admin         | Configure up to 5 reward-boost tiers                     |
+| `get_boost_multiplier(user)`                                  | —             | Current reward multiplier for a user                     |
+| `pause()`                                                     | admin         | Emergency pause                                          |
+| `unpause()`                                                   | admin         | Resume operations                                        |
+| `add_yield(admin_addr, amount)`                               | admin         | Inject yield; raises share price                         |
+| `transfer_admin(new_admin)`                                   | admin         | Rotate admin key                                         |
 
 ## Using the CLI Helper
 
@@ -228,15 +276,16 @@ This contract is unaudited. Do not use in production without an independent secu
 ## Known Limitations
 
 ### Reward Rounding Dust Loss
-In fixed-point math, calculating reward using standard division leads to rounding loss where small stakes over short periods truncate to 0. Specifically:
-- **Without Remainder Tracking**: The reward dust is permanently lost on every checkpoint update (e.g., on stake, unstake, slash, or claim), as the division remainder is discarded. These tokens remain in the contract's general `RewardPoolBalance` but are unallocated and unrecoverable for the users.
 
+In fixed-point math, calculating reward using standard division leads to rounding loss where small stakes over short periods truncate to 0. Specifically:
+
+- **Without Remainder Tracking**: The reward dust is permanently lost on every checkpoint update (e.g., on stake, unstake, slash, or claim), as the division remainder is discarded. These tokens remain in the contract's general `RewardPoolBalance` but are unallocated and unrecoverable for the users.
 
 ## License
 
 [MIT](./LICENSE)
-# Stellar-Defi-Vault
 
+# Stellar-Defi-Vault
 
 ## Gas & Resource Costs
 
@@ -270,8 +319,11 @@ Any third party can verify that an on-chain deployed contract bytecode matches t
 4. Compare this digest with the contract code hash published on the Stellar ledger explorer.
 
 ## Testnet Integration Tests
+
 You can run the integration test suite against the Stellar Testnet by executing:
+
 ```bash
 ./scripts/integration-test.sh
 ```
+
 Note: Ensure you have the Stellar CLI configured with testnet credentials before running this script.

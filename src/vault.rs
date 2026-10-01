@@ -81,6 +81,13 @@ pub(crate) const CONTRACT_DESCRIPTION: &str =
     "A staking pool contract for Stellar DeFi vault positions.";
 pub(crate) const BOOST_BPS_BASE: u32 = 10_000;
 pub(crate) const MAX_BOOST_TIERS: u32 = 5;
+pub(crate) const MAX_BATCH_ENTRIES: u32 = 20;
+pub(crate) const MAX_FEE_RECIPIENTS: u32 = 5;
+pub(crate) const MAX_MULTISIG_ADMINS: u32 = 5;
+pub(crate) const MAX_COMPARISON_POOLS: u32 = 5;
+pub(crate) const MAX_COMPETITOR_POOLS: u32 = 10;
+pub(crate) const MAX_WAVE_USERS: u32 = 50;
+pub(crate) const MAX_KYC_APPROVALS: u32 = 50;
 pub(crate) const MAX_HISTORY_SNAPSHOTS: u32 = 100;
 pub(crate) const STELLAR_LEDGERS_PER_YEAR: u32 = 6_307_200;
 pub(crate) const MAX_UNSTAKE_FEE_BPS: u32 = 500;
@@ -1386,7 +1393,7 @@ impl VaultContract {
         env: Env,
         users: Vec<Address>,
     ) -> Result<Vec<Option<StakePosition>>, VaultError> {
-        if users.len() > 20 {
+        if users.len() > MAX_BATCH_ENTRIES {
             return Err(VaultError::BatchTooLarge);
         }
         let mut results = Vec::new(&env);
@@ -1692,7 +1699,7 @@ impl VaultContract {
     ) -> Result<(), VaultExtError> {
         admin::require_admin(&env)?;
 
-        if recipients.len() > 5 {
+        if recipients.len() > MAX_FEE_RECIPIENTS {
             return Err(VaultExtError::TooManyRecipients);
         }
         if !recipients.is_empty() {
@@ -1923,7 +1930,7 @@ impl VaultContract {
         admins: Vec<Address>,
         threshold: u32,
     ) -> Result<(), VaultExtError> {
-        if admins.is_empty() || admins.len() > 5 {
+        if admins.is_empty() || admins.len() > MAX_MULTISIG_ADMINS {
             return Err(VaultExtError::InvalidMultisigConfig);
         }
         if threshold == 0 || threshold > admins.len() {
@@ -8551,7 +8558,7 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin::require_admin_as(&env, &admin)?;
 
-        if active_users.len() > 50 {
+        if active_users.len() > MAX_WAVE_USERS {
             return Err(VaultError::TooManyActiveUsers);
         }
 
@@ -9985,7 +9992,7 @@ impl VaultContract {
         env: Env,
         other_pools: Vec<Address>,
     ) -> Result<Vec<PoolComparison>, VaultExtError> {
-        if other_pools.len() > 5 {
+        if other_pools.len() > MAX_COMPARISON_POOLS {
             return Err(VaultExtError::TooManyPools);
         }
 
@@ -12493,7 +12500,7 @@ impl VaultContract {
     ) -> Result<(), VaultFeatureError> {
         admin::require_admin_as(&env, &admin)?;
 
-        if pools.len() > 10 {
+        if pools.len() > MAX_COMPETITOR_POOLS {
             return Err(VaultFeatureError::TooManyCompetitors);
         }
 
@@ -13929,7 +13936,7 @@ pub fn bulk_set_kyc(
     admin::require_admin(&env)?;
     let _ = admin; // follows existing admin patterns
 
-    if approvals.len() > 50 {
+    if approvals.len() > MAX_KYC_APPROVALS {
         return Err(VaultError::BatchKycTooLarge);
     }
 
@@ -14378,7 +14385,7 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         if beneficiaries.len() != amounts.len() {
             return Err(VaultError::ArithmeticError);
         }
-        if beneficiaries.len() > 20 {
+        if beneficiaries.len() > MAX_BATCH_ENTRIES {
             return Err(VaultError::BatchTooLarge);
         }
         if beneficiaries.is_empty() {
