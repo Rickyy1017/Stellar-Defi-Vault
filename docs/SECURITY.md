@@ -32,7 +32,7 @@ Transfers `amount` tokens **from the admin's own wallet** into the vault contrac
 
 **Emits:** `yield_add` event with the admin address and the amount added.
 
-**Key constraint:** The admin is sending their own tokens *into* the vault, not extracting anything from it. This function cannot be used to remove user principal.
+**Key constraint:** The admin is sending their own tokens _into_ the vault, not extracting anything from it. This function cannot be used to remove user principal.
 
 ### `rescue_token(admin_addr, token, amount, recipient)`
 
@@ -140,11 +140,11 @@ The vault has three distinct shutdown mechanisms. They differ in reversibility, 
 
 ### Comparison table
 
-| Mode | Blocks stake | Blocks unstake/claim | Reversible | Event |
-|---|---|---|---|---|
-| `pause` | Yes | Yes | Yes | `paused` |
-| `start_graceful_shutdown` | Yes | No | No | `shutdown_started` |
-| `emergency_stop` | Yes | No | No | `stopped` |
+| Mode                      | Blocks stake | Blocks unstake/claim | Reversible | Event              |
+| ------------------------- | ------------ | -------------------- | ---------- | ------------------ |
+| `pause`                   | Yes          | Yes                  | Yes        | `paused`           |
+| `start_graceful_shutdown` | Yes          | No                   | No         | `shutdown_started` |
+| `emergency_stop`          | Yes          | No                   | No         | `stopped`          |
 
 ---
 
@@ -159,6 +159,7 @@ Self::require_not_paused(&env)?;
 ```
 
 If paused:
+
 - Deposits return `VaultError::VaultPaused`. No tokens are moved.
 - Withdrawals return `VaultError::VaultPaused`. User principal stays in the vault contract.
 - User share balances are unchanged — they continue to represent the same ownership fraction.
@@ -189,6 +190,7 @@ Share minting and redemption use `checked_mul` / `checked_div`. On failure these
 ### Admin key compromise
 
 If the admin key is compromised, an attacker can:
+
 - Pause the vault (freezing user withdrawals).
 - Call `add_yield` with a zero-value amount (no effect due to `amount <= 0` guard).
 - Transfer admin to another address, locking out the legitimate admin.
@@ -215,3 +217,9 @@ This is a single-step, irreversible operation. The current admin loses authority
 ## Audit Status
 
 This contract is unaudited. Do not use in production without an independent security audit. If you discover a vulnerability, please open a private [GitHub Security Advisory](../../security/advisories/new) rather than a public issue.
+
+## Dependency Advisory Triage
+
+CI runs `cargo deny check advisories` against `Cargo.lock` on every pull request. Resolve reported advisories by updating the affected dependency and reviewing the resulting lockfile changes. If an advisory is accepted temporarily, add its RustSec ID to `deny.toml` under `[advisories].ignore` as an object with a `reason`. The accompanying pull request must explain why the affected code is not exploitable here or why immediate remediation is impractical, identify the planned remediation and owner, and set a review date. Reassess every exception when dependencies change and remove it as soon as the risk is resolved; do not add blanket ignores.
+
+Current exceptions are limited to the `adler` and `paste` unmaintained advisories and the yanked `spin 0.9.8`, all pulled in through Soroban SDK 21.7.7 host dependencies. The advisory database reports no safe upgrades for the two unmaintained crates. The vault maintainers must reassess these entries by 2026-12-31, including when the Soroban SDK dependency is upgraded.
