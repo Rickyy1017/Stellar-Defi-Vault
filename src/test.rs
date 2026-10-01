@@ -2124,6 +2124,18 @@ fn test_pending_reward_scaled_up_when_reward_decimals_larger() {
 // â”€â”€ pool cap (TVL limit) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
+fn test_first_depositor_donation_does_not_inflate_share_price() {
+    let f = VaultFixture::new();
+
+    assert_eq!(f.vault.stake(&f.alice, &1, &0), 1);
+    f.token.transfer(&f.alice, &f.vault.address, &10_000_000);
+
+    let victim_shares = f.vault.stake(&f.bob, &1_000_000, &0);
+    assert_eq!(victim_shares, 1_000_000);
+    assert_eq!(f.vault.shares_of(&f.bob), 1_000_000);
+}
+
+#[test]
 fn test_stake_within_cap_succeeds() {
     let f = VaultFixture::new();
     f.vault.set_pool_cap(&1_000_000);

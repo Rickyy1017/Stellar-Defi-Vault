@@ -16,14 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned to match rust-toolchain.toml. With @stable, rustup honours
-      # rust-toolchain.toml and switches to 1.81.0 anyway, but components and
-      # targets are installed for stable — so anything needing a component
-      # fails with "not installed for the toolchain '1.81.0'".
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.81.0
-        with:
-          targets: wasm32-unknown-unknown
+        uses: dtolnay/rust-toolchain@1.94.0
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -37,15 +31,43 @@ jobs:
       - name: Run tests
         run: cargo test --features testutils
 
+  wasm:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          targets: wasm32-unknown-unknown
       - name: Build optimized vault WASM
         run: cargo build --target wasm32-unknown-unknown --release --features vault-wasm
+      - name: Upload optimized vault WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: stellar-defi-vault-wasm
+          path: target/wasm32-unknown-unknown/release/stellar_defi_vault.wasm
+          if-no-files-found: error
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.0
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Check dependency advisories
+        run: cargo deny check advisories
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.81.0
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: rustfmt
       - run: cargo fmt --check
@@ -55,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.81.0
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: clippy
           targets: wasm32-unknown-unknown
