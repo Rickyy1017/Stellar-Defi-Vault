@@ -255,3 +255,34 @@ maintained top-N index instead of a full-registry scan, as `get_top_depositors`'
 own doc comment already suggests) is future work — out of scope for a
 documentation-plus-audit issue — but is exactly what those tests would need
 to keep passing if a future change tries to bound these functions further.
+
+## Storage Read/Write Cost Audit for Per-User Scan Operations (Issue #600)
+
+### Executive Summary
+
+As pool size grows, full-registry and multi-user iteration pathways incur quadratic or linear gas and storage read/write amplification. This audit catalogs every iteration path across the vault, documents read/write amplification metrics, establishes bounding mechanisms, and outlines architectural migration from full-scan aggregations to incrementally-maintained running totals.
+
+### Multi-User Iteration Pathways & Amplification Matrix
+
+| Function / Operation | Module / Entrypoint | Storage Keys Accessed | Read Amplification | Write Amplification | Current Bound / Mitigation | Recommended Next Architecture |
+|---|---|---|---|---|---|---|
+| `balance::register_staker` | `src/balance.rs` | `DataKey::AllStakers` | $O(N)$ instance read | $O(N)$ instance write | Linearly rewrites full staker list | Sharded staker bitmap or set |
+| `get_top_depositors` | `src/vault.rs` | `DataKey::AllStakers`, `ShareBalance(Address)` | $O(\min(N, 200))$ persistent reads | $O(0)$ (read-only) | Hard-capped at `MAX_DEPOSITOR_SCAN = 200` | Incrementally-maintained top-N sorted skip-list on deposit/withdraw |
+| `get_reward_gini_coefficient` | `src/vault.rs` | `DataKey::AllStakers`, `ShareBalance(Address)` | $O(\min(N, 100))$ persistent reads | $O(0)$ (read-only) | Reverts above `MAX_GINI_STAKERS = 100` | Sample-based Monte Carlo estimation for pools > 100 users |
+| `scan_for_collusion` | `src/collusion_detector.rs` | `DataKey::AllStakers`, `"cld_snap"` | $O(\min(N, 100))$ persistent reads | $O(K)$ alerts | Bounded to `MAX_GINI_STAKERS` | Event emission trigger with off-chain indexer analysis |
+| `stake_weighted_average_duration` | `src/vault.rs` | `DataKey::AllStakers`, `ShareBalance`, `StakedAtLedger` | $O(N)$ persistent reads | $O(0)$ (read-only) | Unbounded scan on full staker registry | Maintain running accumulators `TotalStakeTimeWeight` & `TotalShares` |
+| `view_all_positions` | `src/vault.rs` | `DataKey::AllStakers`, `ShareBalance(Address)` | $O(N)$ instance read + $O(\text{limit})$ persistent reads | $O(0)$ (read-only) | Paginated output, but loads full `AllStakers` vector | Index-based pagination with range cursors |
+| `export_state` | `src/vault.rs` | All instance & persistent keys | $O(N)$ exhaustive read | $O(0)$ (read-only) | Admin-only emergency diagnostic path | Chunked export with cursor continuation tokens |
+
+### Mitigation Architectures: Running Totals vs. Full Scans
+
+1. **Incremental Running Totals (Zero-Scan Pattern)**:
+   - Aggregations such as total deposits (`DataKey::TotalDeposited`), total shares (`DataKey::TotalShares`), and total stakers count (`DataKey::TotalStakers`) are strictly maintained incrementally upon every deposit, withdrawal, and stake action.
+   - Any new aggregation metric must follow this pattern rather than traversing the registry at query time.
+
+2. **Hard Bounding & Safe Truncation**:
+   - Diagnostic and analytics operations (`get_top_depositors`, `collusion_detector`) enforce deterministic ceilings (`MAX_DEPOSITOR_SCAN = 200`, `MAX_GINI_STAKERS = 100`).
+   - If user count exceeds the ceiling, functions either truncate with clear API caveats or require off-chain indexing.
+
+3. **Pagination & Range Limits**:
+   - All multi-user view functions must require `start_after: Option<Address>` or `offset: u32` along with `limit: u32` clamped to at most 50 entries.
