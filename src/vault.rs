@@ -214,6 +214,17 @@ impl VaultContract {
     /// between token base units and the vault's fixed seven-decimal shares.
     /// The legacy `stake_decimals` argument is retained for interface
     /// compatibility; it is not used as a substitute for the token query.
+    ///
+    /// # Authorization
+    /// `admin` must sign.
+    ///
+    /// # Errors
+    /// - `AlreadyInitialized`: the vault already has an admin, or the admin role was renounced.
+    /// - `InvalidAddress`: `admin` or `token` is this contract's own address.
+    /// - `RateTooHigh`: `reward_rate_bps` exceeds `MAX_RATE_BPS`.
+    ///
+    /// # Events
+    /// - `pool_initialized` (`events::pool_initialized`).
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -280,6 +291,22 @@ impl VaultContract {
     /// shares proportional to the current share price. The first deposit is
     /// scaled from the token's queried precision into the vault's fixed
     /// seven-decimal share precision. Returns the number of shares minted.
+    ///
+    /// # Authorization
+    /// `user` must sign.
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `PoolShuttingDown`: the pool is sunsetting (no new deposits).
+    /// - `ZeroAmount`: `amount <= 0`.
+    /// - `NotInitialized`: no deposit token is configured.
+    /// - `ArithmeticError`: share/total overflow.
+    /// - Errors from the pool-seeded check, the unique-depositor cap and the token pull.
+    ///
+    /// # Events
+    /// Publishes no event itself. The activity-log, position-mirroring and
+    /// low-balance-alert helpers it calls may emit their own.
     pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         user.require_auth();
         // Issue #525: no new deposits once the pool is sunsetting. Checked
@@ -352,6 +379,21 @@ impl VaultContract {
 
     /// Deposit tokens into the vault, optionally crediting a referrer on the
     /// depositor's first-ever deposit.
+    ///
+    /// # Authorization
+    /// `user` must sign (enforced by [`Self::stake`]).
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `InvalidAddress`: `referrer` is `user`.
+    /// - `ArithmeticError`: deposit delta underflow.
+    /// - Every error from [`Self::stake`], and from paying the referral bonus on a
+    ///   first deposit.
+    ///
+    /// # Events
+    /// Those of [`Self::stake`], plus the referral-bonus event when a referrer is
+    /// credited on the depositor's first deposit.
     pub fn deposit(
         env: Env,
         user: Address,
@@ -421,9 +463,17 @@ impl VaultContract {
         Ok(())
     }
 
-    /// Admin: set the base reward APR in basis points. Every accepted update is
-    /// appended to the on-chain changelog returned by `get_rate_history`.
-    
+    /// Admin-only: replace this contract's Wasm with the already-uploaded `new_wasm_hash`.
+    ///
+    /// # Authorization
+    /// `admin` must equal the stored admin **and** sign.
+    ///
+    /// # Errors
+    /// - `NotInitialized`: no admin is stored.
+    /// - `Unauthorized`: `admin` is not the stored admin.
+    ///
+    /// # Events
+    /// - Topic `("upgrade",)` with data `(admin, new_wasm_hash, ledger_sequence)`.
     pub fn upgrade_wasm(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), VaultError> {
         if admin != admin::get_admin(&env)? {
             return Err(VaultError::Unauthorized);
@@ -434,6 +484,19 @@ impl VaultContract {
         Ok(())
     }
 
+    /// Admin: set the base reward APR in basis points, cancelling any active
+    /// rate ramp. Every accepted update is appended to the on-chain changelog
+    /// returned by [`Self::get_rate_history`].
+    ///
+    /// # Authorization
+    /// The stored admin must sign.
+    ///
+    /// # Errors
+    /// - `NotInitialized`: no admin is stored.
+    /// - `RateTooHigh`: `rate_bps` exceeds `MAX_RATE_BPS`.
+    ///
+    /// # Events
+    /// None. The change is recorded in the on-chain rate history instead.
     pub fn set_reward_rate_bps(env: Env, rate_bps: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         Self::validate_rate_bps(rate_bps)?;
@@ -610,6 +673,22 @@ impl VaultContract {
     /// Rejects the withdrawal with `WithdrawalLimitExceeded` when it would
     /// push the withdrawer's cumulative withdrawals over the admin-configured
     /// rolling 24h per-user cap (issue #554).
+    ///
+    /// # Authorization
+    /// `withdrawer` must sign (enforced in the internal unstake path).
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `Unauthorized`: re-entrant call (reentrancy guard).
+    /// - `WithdrawalLimitExceeded`: exceeds the rolling 24h per-user withdrawal cap.
+    /// - From the unstake path: `ZeroAmount`, `InsufficientShares`, `ContractStopped`,
+    ///   `PositionCollateralized`, `UseCooldownFlow`, `ArithmeticError`, and the
+    ///   paused-vault check.
+    ///
+    /// # Events
+    /// - `withdraw` (`events::withdraw`).
+    /// - `position_closed` when the position is fully exited.
     pub fn withdraw(env: Env, withdrawer: Address, shares: i128) -> Result<i128, VaultError> {
         let _guard = ReentrancyGuard::new(&env)?;
         crate::daily_withdrawal_limit::enforce_and_record(
@@ -626,6 +705,20 @@ impl VaultContract {
     /// permanently forfeits all accrued rewards. This intentionally bypasses
     /// withdrawal fees, queues, reward claims, and routine exit accounting.
     /// It is an emergency mechanism, not a routine withdrawal path.
+    ///
+    /// # Authorization
+    /// `user` must sign.
+    ///
+    /// # Errors
+    /// - `VaultPaused`: returned when the vault is **not** paused (this path only
+    ///   works while paused).
+    /// - `PositionNotFound`: `user` holds no shares.
+    /// - `NotInitialized`: no deposit token is configured.
+    /// - `ArithmeticError`: share-to-amount conversion overflow.
+    ///
+    /// # Events
+    /// - `emergency_withdrawal` (`events::emergency_withdrawal`) with the amount
+    ///   returned and the rewards forfeited.
     pub fn emergency_withdraw(env: Env, user: Address) -> Result<i128, VaultError> {
         user.require_auth();
         balance::apply_scheduled_unpause_if_due(&env);
@@ -672,6 +765,19 @@ impl VaultContract {
     /// `WithdrawalLimitExceeded` when it would push the staker's cumulative
     /// withdrawals over the admin-configured rolling 24h per-user cap
     /// (issue #554).
+    ///
+    /// # Authorization
+    /// `staker` must sign (enforced in the internal unstake path).
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `BelowMinimumUnstake`: below the configured minimum (partial exits only).
+    /// - `WithdrawalLimitExceeded`: exceeds the rolling 24h per-user cap.
+    /// - Every unstake-path error listed on [`Self::withdraw`].
+    ///
+    /// # Events
+    /// Same as [`Self::withdraw`].
     pub fn unstake(env: Env, staker: Address, shares: i128) -> Result<i128, VaultError> {
         let position_amount = balance::get_shares(&env, &staker);
         crate::minimum_unstake_amount::enforce_min_unstake(&env, shares, position_amount)?;
@@ -691,6 +797,19 @@ impl VaultContract {
     /// Reverts with `PositionNotFound` when the user has no active position.
     /// Subject to the same rolling 24h per-user withdrawal cap as `unstake`
     /// (issue #554) — a full exit isn't a backdoor around it.
+    ///
+    /// # Authorization
+    /// `user` must sign (enforced in the internal unstake path).
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `PositionNotFound`: `user` has no shares.
+    /// - `WithdrawalLimitExceeded`: exceeds the rolling 24h per-user cap.
+    /// - Every unstake-path error listed on [`Self::withdraw`].
+    ///
+    /// # Events
+    /// Same as [`Self::withdraw`]; `position_closed` is always emitted on success.
     pub fn unstake_all(env: Env, user: Address) -> Result<i128, VaultError> {
         let shares = balance::get_shares(&env, &user);
         if shares == 0 {
@@ -830,6 +949,25 @@ impl VaultContract {
     ///
     /// Large claims are queued when MEV protection is enabled and the accrued
     /// reward meets or exceeds the configured threshold.
+    ///
+    /// # Authorization
+    /// `staker` must sign.
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `Unauthorized`: re-entrant call (reentrancy guard).
+    /// - Errors from the MEV large-claim queue check.
+    /// - From the claim path: `InsufficientRewardPool`, `EpochModeConflict`,
+    ///   `VestingQueueFull`, `ArithmeticError`.
+    ///
+    /// Note: the per-claim rate-limit hook (`check_claim_rate_limit`) is currently a
+    /// no-op, so no rate-limit error is raised.
+    ///
+    /// # Events
+    /// - `claimed` (`events::claimed`) on a paid claim.
+    /// - `escrow_released` when escrowed rewards are released.
+    /// - None when the claim is queued by MEV protection (returns `0`).
     pub fn claim(env: Env, staker: Address) -> Result<i128, VaultError> {
         let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
@@ -868,6 +1006,21 @@ impl VaultContract {
     /// and applies the same standalone-claim rate limit as `claim`. Unlike
     /// `claim` it is never routed through the MEV large-claim queue: a partial
     /// claim is a deliberate, bounded withdrawal rather than a large one.
+    ///
+    /// # Authorization
+    /// `staker` must sign.
+    ///
+    /// # Errors
+    /// Errors returned directly by this function or its main helper; errors from deeper
+    /// helpers and token transfers can also propagate.
+    /// - `Unauthorized`: re-entrant call (reentrancy guard).
+    /// - `ZeroAmount`: `amount <= 0`.
+    /// - `InsufficientRewardPool`: `amount` exceeds the pending reward.
+    /// - `ArithmeticError`: overflow updating reward totals.
+    /// - Errors from the claim fee and reward-token lookup.
+    ///
+    /// # Events
+    /// - `claimed` (`events::claimed`) for the net payout.
     pub fn claim_partial(env: Env, staker: Address, amount: i128) -> Result<i128, VaultError> {
         let _guard = ReentrancyGuard::new(&env)?;
         staker.require_auth();
@@ -2200,6 +2353,17 @@ impl VaultContract {
     }
 
     /// Transfer the admin role to a new address (admin only).
+    ///
+    /// # Authorization
+    /// The current (stored) admin must sign.
+    ///
+    /// # Errors
+    /// - `NotInitialized`: no admin is stored.
+    /// - `InvalidAddress`: `new_admin` is this contract's own address.
+    ///
+    /// # Events
+    /// - `admin_changed` (`events::admin_changed`).
+    /// - `admin_action_transfer_admin` (`events::admin_action_transfer_admin`).
     pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
         if new_admin == env.current_contract_address() {

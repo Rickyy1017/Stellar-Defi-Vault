@@ -1,10 +1,15 @@
-.PHONY: build test deploy-testnet stake claim
+.PHONY: build test docs deploy-testnet stake claim
 
 build:
 	cargo build --target wasm32-unknown-unknown --release
 
 test:
 	cargo test --features testutils
+
+# Build rustdoc and list undocumented public items (#675).
+docs:
+	cargo doc --no-deps --lib 2>&1 | tee target/rustdoc.log
+	@echo "Undocumented public items: $$(grep -c 'missing documentation' target/rustdoc.log || true)"
 
 deploy-testnet:
 	chmod +x scripts/deploy_testnet.sh

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 echo "Deploying vault to testnet..."
 # Placeholders for actual stellar cli calls

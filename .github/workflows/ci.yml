@@ -62,6 +62,16 @@ jobs:
       - name: Check dependency advisories
         run: cargo deny check advisories
 
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # shellcheck is preinstalled on GitHub's ubuntu runners. These scripts
+      # handle keys and network config, so lint them for quoting bugs (#669).
+      - name: Lint scripts
+        run: shellcheck --version && shellcheck scripts/*.sh
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

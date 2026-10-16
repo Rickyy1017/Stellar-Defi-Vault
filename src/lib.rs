@@ -1,4 +1,14 @@
+//! Stellar DeFi Vault: a non-custodial yield vault built on Soroban.
+//!
+//! The canonical public API is the [`interface::VaultTrait`] trait, implemented
+//! by [`vault::VaultContract`]. Entrypoint docs follow a common layout:
+//! a summary, then `# Authorization`, `# Errors` and `# Events` sections
+//! (issue #675).
 #![no_std]
+// Issue #675: every public item should be documented. Left at `warn` while the
+// existing ~1,000 undocumented items are worked through; flip to `deny` once
+// `cargo doc` is clean.
+#![warn(missing_docs)]
 
 mod admin;
 mod balance;

@@ -92,10 +92,29 @@ parameter is added or changed.
 
 ## Getting Started
 
-### Prerequisites
+### Dev container (recommended)
+
+The repo ships a [dev container](https://containers.dev/) in `.devcontainer/` with
+everything preinstalled: the Rust toolchain pinned in `rust-toolchain.toml`,
+the `wasm32-unknown-unknown` target, `rustfmt`/`clippy`/`rust-analyzer`, and the
+Stellar CLI.
+
+- **VS Code:** install the *Dev Containers* extension, open the repo, then run
+  **Dev Containers: Reopen in Container**.
+- **GitHub Codespaces:** **Code → Codespaces → Create codespace on main**.
+- **CLI:** `devcontainer up --workspace-folder .` then
+  `devcontainer exec --workspace-folder . make test`.
+
+Inside the container, `make build` and `make test` work with no further setup.
+When `rust-toolchain.toml` changes, update `RUST_TOOLCHAIN` in
+`.devcontainer/devcontainer.json` (and the Dockerfile default) to match.
+
+### Prerequisites (without the dev container)
 
 ```bash
 rustup target add wasm32-unknown-unknown
+# Stellar CLI, needed for deploy/stake/claim scripts:
+# https://developers.stellar.org/docs/tools/cli/install-cli
 ```
 
 ### Build

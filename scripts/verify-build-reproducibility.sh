@@ -8,6 +8,7 @@ set -euo pipefail
 echo "=== Verifying Build Reproducibility (Issue #632) ==="
 
 TMP_DIR="$(mktemp -d /tmp/stellar-vault-build-check-XXXXXX)"
+# shellcheck disable=SC2329 # invoked indirectly via `trap cleanup EXIT` below
 cleanup() {
     rm -rf "${TMP_DIR}"
 }
