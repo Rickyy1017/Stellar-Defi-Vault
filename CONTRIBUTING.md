@@ -70,6 +70,11 @@ The compiled `.wasm` file will be at `target/wasm32-unknown-unknown/release/stel
 
 ## PR Checklist
 
+Opening a pull request pre-fills
+[`.github/pull_request_template.md`](.github/pull_request_template.md), which
+covers the full checklist (tests, events, docs, lint), a storage-layout
+declaration, and a section for any deferred work. The essentials:
+
 - [ ] Tests pass (`cargo test --features testutils`)
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy --all-targets -- -D warnings` passes with no warnings
