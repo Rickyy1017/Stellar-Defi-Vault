@@ -1637,3 +1637,61 @@ pub fn reward_accumulator_updated(env: &Env, global_index: i128, ledger: u32) {
     );
 }
 
+/// Emitted when the minimum idle buffer ratio is updated (issue #765).
+pub fn min_idle_ratio_updated(env: &Env, admin: &Address, bps: u32, ledger: u32) {
+    env.events().publish(
+        (symbol_short!("idle_upd"), admin.clone()),
+        (bps, ledger),
+    );
+}
+
+/// Emitted when funds are allocated to a strategy adapter (issue #765).
+pub fn strategy_allocated(env: &Env, adapter: &Address, amount: i128, ledger: u32) {
+    env.events().publish(
+        (symbol_short!("str_alloc"), adapter.clone()),
+        (amount, ledger),
+    );
+}
+
+/// Emitted when funds are pulled from a strategy to satisfy a withdrawal (issue #765).
+pub fn strategy_pulled(env: &Env, adapter: &Address, amount: i128, ledger: u32) {
+    env.events().publish(
+        (symbol_short!("str_pull"), adapter.clone()),
+        (amount, ledger),
+    );
+}
+
+/// Emitted when strategy yield is harvested and performance fee taken (issue #766).
+pub fn harvested(env: &Env, strategy: &Address, gain: i128, fee: i128, ledger: u32) {
+    let topics = (Symbol::new(env, "harvested"), strategy.clone());
+    env.events().publish(topics, (gain, fee, ledger));
+}
+
+/// Emitted when a strategy shortfall or realized loss is recorded (issue #767).
+pub fn strategy_loss_recorded(
+    env: &Env,
+    strategy: &Address,
+    total_loss: i128,
+    reserve_absorbed: i128,
+    share_price_absorbed: i128,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "strategy_loss_recorded"), strategy.clone());
+    env.events().publish(
+        topics,
+        (total_loss, reserve_absorbed, share_price_absorbed, ledger),
+    );
+}
+
+/// Emitted when a strategy is emergency unwound and disabled (issue #768).
+pub fn strategy_unwound(
+    env: &Env,
+    strategy: &Address,
+    recovered: i128,
+    loss: i128,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "strategy_unwound"), strategy.clone());
+    env.events().publish(topics, (recovered, loss, ledger));
+}
+

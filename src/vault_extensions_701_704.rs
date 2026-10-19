@@ -138,11 +138,17 @@ fn get_insurance_share_bps(env: &Env) -> u32 {
         .unwrap_or(0)
 }
 
-fn get_reserve(env: &Env) -> i128 {
+pub fn get_reserve(env: &Env) -> i128 {
     env.storage()
         .instance()
         .get(&INSURANCE_RESERVE_KEY)
         .unwrap_or(0)
+}
+
+pub fn set_reserve(env: &Env, amount: i128) {
+    env.storage()
+        .instance()
+        .set(&INSURANCE_RESERVE_KEY, &amount);
 }
 
 /// Credit the configured share of `fee` to the insurance reserve and return
