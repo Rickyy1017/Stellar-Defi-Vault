@@ -79,8 +79,13 @@ pub fn apply_claim_fee(
     let user_received = reward_before_fee
         .checked_sub(fee_amount)
         .ok_or(VaultError::ArithmeticError)?;
+    // Issue #754: recycle a configured share of the fee into the reward pool
+    // before booking the remainder in the claim-fee reserve.
+    let recyclable_fee = fee_amount
+        .checked_sub(crate::vault::fee_recycle::recycle_fee(env, fee_amount)?)
+        .ok_or(VaultError::ArithmeticError)?;
     let reserve = get_claim_fee_reserve_internal(env)
-        .checked_add(fee_amount)
+        .checked_add(recyclable_fee)
         .ok_or(VaultError::ArithmeticError)?;
     set_claim_fee_reserve(env, reserve);
 

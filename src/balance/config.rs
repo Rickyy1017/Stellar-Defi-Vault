@@ -709,9 +709,17 @@ pub fn set_referral_registry(env: &Env, registry: &Vec<Address>) {
         .set(&symbol_short!("ref_reg"), registry);
 }
 
-pub fn get_referral_stats(env: &Env, referrer: &Address) -> Option<ReferralStats> {
+pub fn get_referral_stats(env: &Env, referrer: &Address) -> ReferralStats {
     let key = (symbol_short!("ref_stat"), referrer.clone());
-    env.storage().persistent().get(&key)
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(ReferralStats {
+            referee_count: 0,
+            total_referred_deposits: 0,
+            earned: 0,
+            claimed: 0,
+        })
 }
 
 pub fn set_referral_stats(env: &Env, referrer: &Address, stats: &ReferralStats) {

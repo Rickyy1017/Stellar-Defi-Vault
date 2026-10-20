@@ -279,7 +279,12 @@ impl VaultContract {
         if surcharge > 0 {
             token_client.transfer(&user, &contract, &surcharge);
             balance::add_protocol_fee_collected(&env, surcharge);
-            crate::community_treasury::route_fee_revenue(&env, surcharge)?;
+            // Issue #754: recycle a configured share of the surcharge into the
+            // reward pool before community-treasury routing.
+            let recyclable_surcharge = surcharge
+                - crate::vault::fee_recycle::recycle_fee(&env, surcharge)
+                    .map_err(|_| VaultCampaignError::ArithmeticError)?;
+            crate::community_treasury::route_fee_revenue(&env, recyclable_surcharge)?;
         }
 
         token_client.transfer(&user, &contract, &stake_amount);

@@ -173,6 +173,12 @@ impl VaultContract {
             }
             balance::set_proposal(&env, id, &proposal);
             balance::set_voted(&env, id, &user);
+            let receipt = crate::storage::VoteReceipt {
+                support: entry.support,
+                weight,
+                ledger: now,
+            };
+            balance::set_vote_receipt(&env, id, &user, &receipt);
 
             env.events().publish(
                 (symbol_short!("vote_cast"), user.clone()),

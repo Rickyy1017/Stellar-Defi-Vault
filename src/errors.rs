@@ -1277,3 +1277,49 @@ impl From<VaultError> for VaultSafetyError {
         }
     }
 }
+
+/// Errors for proposal categories, expedited proposals, vote delegation expiry,
+/// and strategy adapter management (issues #761-#764).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum GovernanceStrategyError {
+    Unauthorized = 1,
+    NotInitialized = 2,
+    ArithmeticError = 3,
+    ZeroAmount = 4,
+    InvalidBps = 5,
+    InvalidPeriod = 6,
+    ProposalNotFound = 7,
+    ProposalAlreadyEnacted = 8,
+    VotingStillActive = 9,
+    QuorumNotMet = 10,
+    ThresholdNotMet = 11,
+    ProposalVetoed = 12,
+    ExpeditedLimitReached = 13,
+    InsufficientBond = 14,
+    DelegationExpired = 15,
+    SelfDelegationNotAllowed = 16,
+    MaxStrategiesReached = 17,
+    StrategyAlreadyExists = 18,
+    StrategyNotFound = 19,
+    StrategyCapExceeded = 20,
+    AdapterCallFailed = 21,
+    PositionNotFound = 22,
+    AlreadyVoted = 23,
+    DelayNotElapsed = 24,
+}
+
+impl From<VaultError> for GovernanceStrategyError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::Unauthorized => GovernanceStrategyError::Unauthorized,
+            VaultError::NotInitialized => GovernanceStrategyError::NotInitialized,
+            VaultError::ArithmeticError => GovernanceStrategyError::ArithmeticError,
+            VaultError::ZeroAmount => GovernanceStrategyError::ZeroAmount,
+            VaultError::PositionNotFound => GovernanceStrategyError::PositionNotFound,
+            _ => GovernanceStrategyError::Unauthorized,
+        }
+    }
+}
+

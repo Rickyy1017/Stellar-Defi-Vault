@@ -1,221 +1,204 @@
-﻿//! Loyalty points system (issue #392).
+﻿//! Non-transferable loyalty points ledger (issue #756).
 //!
-//! Non-transferable, pool-internal points earned alongside staking rewards.
-//! Points are awarded for actions (staking duration, claims, milestones,
-//! governance, referrals) and can be redeemed for pool benefits.
+//! Tracks a record-keeping-only points balance for each staker, earned from how
+//! much they have staked and for how long. The figure is for off-chain use
+//! (campaigns, allowlists, dashboards) and is **not** a token, a share, a
+//! reward, or a claim of any kind:
+//!
+//! - points cannot be transferred between accounts,
+//! - they cannot be spent, redeemed, withdrawn, or exchanged on-chain, and
+//! - they confer no ownership, yield, or governance right.
+//!
+//! Integrators must present points as informational only, never as a financial
+//! claim or an expectation of payment.
+//!
+//! # Accrual
+//!
+//! Points accrue per ledger as:
+//!
+//! ```text
+//! points = staked_amount * elapsed_ledgers * points_rate
+//! ```
+//!
+//! `staked_amount` is the user's current position converted back to token
+//! units, `elapsed_ledgers` runs from the user's `StakedAtLedger` to the
+//! current ledger, and `points_rate` is the admin-configured rate. The rate is
+//! stored as a short history of `(ledger, rate)` checkpoints, so a rate change
+//! only affects ledgers after it is set (the same accumulator style the reward
+//! accounting uses). A rate of `0` disables accrual.
+//!
+//! # Time-weighting
+//!
+//! The vault keeps no separate time-weighted-average-balance accumulator for
+//! points, so the ledger integrates over `(ledger, rate)` checkpoints directly,
+//! yielding the exact `balance * ledgers * rate` TWAB integral. Where an
+//! off-chain indexer already has a TWAB window, it can be reconstructed from
+//! these same checkpoints. `get_points` is read-only and never mutates state.
 //!
 //! # Storage
 //!
-//! `DataKey` is at Soroban's 50-variant cap (`storage.rs:72-80`), so this
-//! module uses raw `Symbol`-keyed storage, matching `balance.rs` and
-//! `reputation_decay.rs` / `partial_freeze.rs`.
+//! `DataKey` is at Soroban's 50-variant cap, so this module uses raw
+//! `Symbol`-keyed instance storage, matching `balance.rs` and the other feature
+//! modules.
 
 use soroban_sdk::{contractimpl, symbol_short, Address, Env, Symbol, Vec};
 
 use crate::admin;
 use crate::balance;
 use crate::errors::VaultError;
-use crate::storage::{PointsAction, PointsBenefit, PointsRule};
-use crate::vault::{VaultContract, VaultContractClient};
+use crate::vault::{VaultContract, VaultContractArgs, VaultContractClient};
 
-// ---------------------------------------------------------------------------
-// Storage keys
-// ---------------------------------------------------------------------------
+/// Instance key for the bounded history of `(ledger, points_rate)` checkpoints.
+const RATE_HISTORY_KEY: Symbol = symbol_short!("pts_hist");
 
-/// Instance-storage key for the global points rules.
-const LOY_CFG_KEY: Symbol = symbol_short!("loy_cfg");
-/// Persistent-storage key for per-user current balance.
-const LOY_BAL_KEY: Symbol = symbol_short!("loy_bal");
-/// Persistent-storage key for per-user lifetime earned.
-const LOY_EARN_KEY: Symbol = symbol_short!("loy_earn");
+/// Maximum number of rate checkpoints retained. Older entries are dropped.
+pub const MAX_RATE_CHECKPOINTS: u32 = 50;
 
-// Types are defined in storage.rs to allow events.rs to reference them.
-
-// ---------------------------------------------------------------------------
-// Storage helpers
-// ---------------------------------------------------------------------------
-
-fn get_rules(env: &Env) -> Vec<PointsRule> {
+fn get_rate_history(env: &Env) -> Vec<(u32, i128)> {
     env.storage()
         .instance()
-        .get(&LOY_CFG_KEY)
-        .unwrap_or(Vec::new(env))
+        .get(&RATE_HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env))
 }
 
-fn set_rules(env: &Env, rules: &Vec<PointsRule>) {
-    env.storage().instance().set(&LOY_CFG_KEY, rules);
+fn set_rate_history(env: &Env, history: &Vec<(u32, i128)>) {
+    env.storage().instance().set(&RATE_HISTORY_KEY, history);
 }
 
-fn get_balance(env: &Env, user: &Address) -> u32 {
-    env.storage()
-        .persistent()
-        .get(&(LOY_BAL_KEY, user.clone()))
-        .unwrap_or(0)
-}
-
-fn set_balance(env: &Env, user: &Address, bal: u32) {
-    env.storage()
-        .persistent()
-        .set(&(LOY_BAL_KEY, user.clone()), &bal);
-}
-
-fn get_lifetime(env: &Env, user: &Address) -> u32 {
-    env.storage()
-        .persistent()
-        .get(&(LOY_EARN_KEY, user.clone()))
-        .unwrap_or(0)
-}
-
-fn set_lifetime(env: &Env, user: &Address, lifetime: u32) {
-    env.storage()
-        .persistent()
-        .set(&(LOY_EARN_KEY, user.clone()), &lifetime);
-}
-
-/// Internal helper â€” adds `amount` points to `user`'s balance and lifetime.
-/// Mirrors `balance::add_user_total_claimed` pattern `src/balance.rs:520-530`.
-pub(crate) fn award_points(env: &Env, user: &Address, amount: u32) {
-    if amount == 0 {
-        return;
+/// The rate currently in effect (the newest checkpoint), or `0` when the
+/// ledger has never been configured.
+fn current_rate(env: &Env) -> i128 {
+    let history = get_rate_history(env);
+    if history.is_empty() {
+        0
+    } else {
+        history.get(history.len() - 1).unwrap().1
     }
-    let bal = get_balance(env, user);
-    let lifetime = get_lifetime(env, user);
-    let new_bal = bal.checked_add(amount).unwrap_or(u32::MAX);
-    let new_lifetime = lifetime.checked_add(amount).unwrap_or(u32::MAX);
-    set_balance(env, user, new_bal);
-    set_lifetime(env, user, new_lifetime);
-    env.events().publish(
-        (symbol_short!("loy_awd"), user.clone()),
-        (amount, new_bal, env.ledger().sequence()),
-    );
 }
 
-/// Award points for a specific action using the configured rules.
-/// For `PerLedgerStaked`, `amount` is calculated as `elapsed * points_per_action`.
-pub(crate) fn award_points_for_action(env: &Env, user: &Address, action: PointsAction) {
-    let rules = get_rules(env);
-    let mut points_per_action: Option<u32> = None;
-    for r in rules.iter() {
-        if r.action == action {
-            points_per_action = Some(r.points_per_action);
-            break;
-        }
+/// The user's staked position converted back to token units.
+///
+/// Mirrors `balance::shares_to_amount` (shares are minted in a fixed
+/// seven-decimal precision, so the ratio already accounts for scale).
+fn position_amount(env: &Env, user: &Address) -> i128 {
+    let shares = balance::get_shares(env, user);
+    if shares <= 0 {
+        return 0;
     }
-    let Some(per_action) = points_per_action else {
-        return;
+    let total_shares = balance::get_total_shares(env);
+    if total_shares <= 0 {
+        return shares;
+    }
+    let total_deposited = balance::get_total_deposited(env);
+    shares
+        .checked_mul(total_deposited)
+        .and_then(|value| value.checked_div(total_shares))
+        .unwrap_or(shares)
+}
+
+/// Accrued points for `user`, integrating the rate checkpoints over the
+/// position's lifetime. Read-only: no storage is written.
+fn accrued_points(env: &Env, user: &Address) -> i128 {
+    let amount = position_amount(env, user);
+    if amount <= 0 {
+        return 0;
+    }
+
+    // Prefer the live stake ledger; fall back to the first-ever stake ledger so
+    // a position that predates `StakedAtLedger` still has a duration anchor.
+    let baseline = match balance::get_staked_at_ledger(env, user)
+        .or_else(|| balance::get_first_staked_at(env, user))
+    {
+        Some(ledger) => ledger,
+        // Without a recorded stake ledger there is no duration to measure.
+        None => return 0,
     };
-    if per_action == 0 {
-        return;
+
+    let current_ledger = env.ledger().sequence();
+    if current_ledger <= baseline {
+        return 0;
     }
-    let amount = match action {
-        PointsAction::PerLedgerStaked => {
-            // Per spec: awarded on claim based on elapsed ledgers since last claim.
-            let last_claim = balance::get_last_claim_ledger(env, user);
-            let current = env.ledger().sequence();
-            let elapsed = current.saturating_sub(last_claim);
-            // points = elapsed * per_action (per ledger)
-            per_action.checked_mul(elapsed).unwrap_or(u32::MAX)
+
+    let history = get_rate_history(env);
+    if history.is_empty() {
+        return 0;
+    }
+
+    let mut total: i128 = 0;
+    let count = history.len();
+    let mut i = 0u32;
+    while i < count {
+        let (checkpoint_ledger, rate) = history.get(i).unwrap();
+        let segment_start = if checkpoint_ledger > baseline {
+            checkpoint_ledger
+        } else {
+            baseline
+        };
+        let segment_end = if i + 1 < count {
+            let next_ledger = history.get(i + 1).unwrap().0;
+            if next_ledger < current_ledger {
+                next_ledger
+            } else {
+                current_ledger
+            }
+        } else {
+            current_ledger
+        };
+
+        if segment_end > segment_start && rate > 0 {
+            let ledgers = (segment_end - segment_start) as i128;
+            let segment_points = amount.saturating_mul(ledgers).saturating_mul(rate);
+            total = total.saturating_add(segment_points);
         }
-        _ => per_action,
-    };
-    award_points(env, user, amount);
+        i += 1;
+    }
+
+    total
 }
 
-// ---------------------------------------------------------------------------
-// Contract entrypoints
-// ---------------------------------------------------------------------------
-
-#[cfg_attr(not(feature = "testutils"), contractimpl)]
+#[contractimpl]
 impl VaultContract {
-    /// Configure points earning rules. Admin only.
-    pub fn set_points_rules(
-        env: Env,
-        admin: Address,
-        rules: Vec<PointsRule>,
-    ) -> Result<(), VaultError> {
-        admin.require_auth();
-        admin::require_admin(&env)?;
-        if admin != crate::admin::get_admin(&env)? {
-            return Err(VaultError::Unauthorized);
+    /// Admin: set the rate at which loyalty points accrue, in points per token
+    /// unit per ledger. `0` disables accrual from this ledger onward.
+    ///
+    /// Points are informational only and carry no on-chain value; see the
+    /// module docs. They can never be transferred or spent.
+    ///
+    /// # Authorization
+    /// `admin` must sign and be the configured admin.
+    ///
+    /// # Errors
+    /// - `InvalidRate`: `rate` is negative.
+    /// - `Unauthorized` / `NotInitialized`: admin check failed.
+    pub fn set_points_rate(env: Env, admin: Address, rate: i128) -> Result<(), VaultError> {
+        admin::require_admin_as(&env, &admin)?;
+        if rate < 0 {
+            return Err(VaultError::InvalidRate);
         }
-        // Validate no duplicate actions and points_per_action >0
-        let mut seen: u32 = 0;
-        for r in rules.iter() {
-            if r.points_per_action == 0 {
-                return Err(VaultError::InvalidRate);
-            }
-            let flag = match r.action {
-                PointsAction::PerLedgerStaked => 1,
-                PointsAction::PerClaim => 2,
-                PointsAction::PerGovernanceVote => 4,
-                PointsAction::PerMilestone => 8,
-                PointsAction::PerReferral => 16,
-            };
-            if seen & flag != 0 {
-                return Err(VaultError::InvalidRate);
-            }
-            seen |= flag;
+
+        let ledger = env.ledger().sequence();
+        let mut history = get_rate_history(&env);
+        history.push_back((ledger, rate));
+        while history.len() > MAX_RATE_CHECKPOINTS {
+            history.remove(0);
         }
-        set_rules(&env, &rules);
-        env.events().publish(
-            (symbol_short!("loy_cfg"),),
-            (rules, env.ledger().sequence()),
-        );
+        set_rate_history(&env, &history);
+
+        env.events()
+            .publish((symbol_short!("pts_rate"),), (rate, ledger));
         Ok(())
     }
 
-    /// Read-only: current rules.
-    pub fn get_points_rules(env: Env) -> Vec<PointsRule> {
-        get_rules(&env)
+    /// Read-only: the points rate currently in effect (`0` = accrual disabled).
+    pub fn get_points_rate(env: Env) -> i128 {
+        current_rate(&env)
     }
 
-    /// Redeem points for a benefit. User must have sufficient balance.
-    pub fn redeem_points(
-        env: Env,
-        user: Address,
-        amount: u32,
-        benefit: PointsBenefit,
-    ) -> Result<(), VaultError> {
-        user.require_auth();
-        if amount == 0 {
-            return Err(VaultError::ZeroAmount);
-        }
-        let bal = get_balance(&env, &user);
-        if amount > bal {
-            return Err(VaultError::InsufficientShares);
-        }
-        let new_bal = bal - amount;
-        set_balance(&env, &user, new_bal);
-        // Store benefit flag (pool-internal, non-transferable)
-        let benefit_key = (
-            Symbol::new(&env, "loy_bene"),
-            user.clone(),
-            benefit as u32,
-        );
-        env.storage()
-            .persistent()
-            .set(&benefit_key, &true);
-        env.events().publish(
-            (symbol_short!("loy_rdm"), user.clone()),
-            (amount, benefit, new_bal, env.ledger().sequence()),
-        );
-        Ok(())
-    }
-
-    /// Read-only query for points balances.
-    pub fn get_loyalty_points(env: Env, user: Address) -> (u32, u32) {
-        (get_balance(&env, &user), get_lifetime(&env, &user))
-    }
-
-    /// Check if user has redeemed a specific benefit.
-    pub fn has_loyalty_benefit(env: Env, user: Address, benefit: PointsBenefit) -> bool {
-        let key = (
-            Symbol::new(&env, "loy_bene"),
-            user.clone(),
-            benefit as u32,
-        );
-        env.storage().persistent().get(&key).unwrap_or(false)
+    /// Read-only: `user`'s accrued loyalty points.
+    ///
+    /// Points are record-keeping only: they cannot be transferred, spent, or
+    /// redeemed on-chain and imply no financial claim.
+    pub fn get_points(env: Env, user: Address) -> i128 {
+        accrued_points(&env, &user)
     }
 }
-
-

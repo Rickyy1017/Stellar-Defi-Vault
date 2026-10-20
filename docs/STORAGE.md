@@ -81,6 +81,7 @@ power-decay layer... so inactivity [decay applies]"), not a collision.
 | `compliance_report` | `"cr_hist"`=instance, `"cr_next"`=instance |
 | `compound_optimizer` | `"cmp_opt"`=persistent |
 | `content_curation` | `"cc_items"`=instance, `"cc_vote"`=persistent |
+| `balance_checkpoints` | `"ck_tot"`=persistent, `"ck_usr"`=persistent |
 | `cross_pool_identity` | `"cp_gov_w"`=instance, `"cp_id"`=persistent |
 | `daily_community_tip` | `"tip_day"`=persistent, `"tip_flt"`=instance, `"tip_ftd"`=persistent, `"tip_nid"`=instance, `"tip_usr"`=persistent, `"tip_vot"`=persistent |
 | `daily_token_velocity_limiter` | `"dv_cfg"`=instance, `"dv_dfr"`=persistent, `"dv_trk"`=instance |
@@ -91,6 +92,7 @@ power-decay layer... so inactivity [decay applies]"), not a collision.
 | `epoch_alignment` | `"epc_algn"`=instance |
 | `epoch_reward_cap` | `"epc_cap"`=instance, `"epc_dfr"`=persistent, `"epc_trk"`=instance |
 | `external_price_oracle` | `"ext_orcl"`=instance |
+| `governance_params` | `"gv_cfg"`=instance, `"gv_snap"`=persistent |
 | `governance_power_decay` | `"gpd_cfg"`=instance, `"gpd_lv"`=persistent |
 | `guardian_pause` | `"guardian"`=instance |
 | `insurance` | `"gtor"`=instance, `"gtor_cov"`=instance, `"gtor_ins"`=instance, `"gtor_reg"`=instance, `"gtor_res"`=instance |
@@ -135,6 +137,7 @@ power-decay layer... so inactivity [decay applies]"), not a collision.
 | `snapshot_airdrop` | `"air_clmd"`=persistent, `"air_cnt"`=instance, `"air_rgst"`=persistent |
 | `stake_funded_bug_bounty` | `"bb_bps"`=persistent, `"bb_fund"`=instance |
 | `stake_gated_ipfs_storage` | `"ipfscfg"`=instance, `"ipfsrec"`=persistent |
+| `stake_hooks` | `"stk_hooks"`=instance |
 | `stake_quota` | `"qt_cfg"`=instance, `"qt_use"`=persistent |
 | `stake_weighted_news_feed` | `"news_cnt"`=instance, `"news_itm"`=instance, `"news_vt"`=persistent |
 | `stake_weighted_tip_jar` | `"tip_recv"`=persistent, `"tip_sent"`=persistent |

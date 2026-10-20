@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, String, Vec, Env, Symbol, symbol_short};
 
 /// Storage keys for all persistent and instance state in the vault.
 ///
@@ -505,12 +505,32 @@ pub struct RateHistoryEntry {
     pub changed_by: Address,
 }
 
-/// Accumulated referral stats stored per referrer.
+/// Accumulated referral stats stored per referrer (issue #757).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReferralStats {
-    pub total_referred_stake: i128,
-    pub referral_count: u32,
+    pub referee_count: u32,
+    pub total_referred_deposits: i128,
+    pub earned: i128,
+    pub claimed: i128,
+}
+
+/// Receipt for a cast governance vote (issue #760).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VoteReceipt {
+    pub support: bool,
+    pub weight: i128,
+    pub ledger: u32,
+}
+
+/// Vote-escrow style reward boost lock (issue #758).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VeBoostLock {
+    pub amount: i128,
+    pub unlock_ledger: u32,
+    pub duration_ledgers: u32,
 }
 
 /// Result of `get_boost_tier_progress` showing where a user is toward the next boost tier.
@@ -762,6 +782,33 @@ pub enum RoundingPolicy {
     Ceiling,
     Nearest,
 }
+// ── Issue #220: rounding dust handling ────────────────────────────────────────
+
+use crate::errors::VaultSafetyError;
+
+/// Storage key for accumulated rounding dust (issue #220).
+pub const ROUNDING_DUST_KEY: Symbol = symbol_short!("rounding_dust");
+
+/// Retrieve the current rounding dust amount (0 if none).
+pub fn get_rounding_dust(env: &Env) -> i128 {
+    env.storage().instance().get(&ROUNDING_DUST_KEY).unwrap_or(0)
+}
+
+/// Add amount to rounding dust counter (checked arithmetic).
+pub fn add_rounding_dust(env: &Env, amount: i128) -> Result<(), VaultSafetyError> {
+    let cur = get_rounding_dust(env);
+    let new = cur.checked_add(amount).ok_or(VaultSafetyError::ArithmeticError)?;
+    env.storage().instance().set(&ROUNDING_DUST_KEY, &new);
+    Ok(())
+}
+
+/// Sweep accumulated rounding dust into reward pool, clearing the counter.
+pub fn sweep_rounding_dust(env: &Env) -> Result<i128, VaultSafetyError> {
+    let dust = get_rounding_dust(env);
+    env.storage().instance().remove(&ROUNDING_DUST_KEY);
+    Ok(dust)
+}
+
 
 // ── Issue #216: governance voting ────────────────────────────────────────────
 
