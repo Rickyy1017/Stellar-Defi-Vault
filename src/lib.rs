@@ -16,6 +16,7 @@
 
 mod admin;
 mod balance;
+pub mod claim_receipts;
 mod errors;
 mod events;
 pub mod example_consumer;
@@ -24,6 +25,8 @@ pub mod nft;
 pub mod reward_accumulator;
 mod reward_math;
 mod storage;
+pub mod ttl_management;
+pub mod user_ttl;
 pub mod vault;
 
 pub mod commitment;
@@ -41,8 +44,10 @@ pub mod stake_quota;
 // keys, types, and entrypoints together instead of appending to a 25k-line
 // file. `DataKey` is at Soroban's 50-variant cap for `#[contracttype]` enums,
 // so all of them use raw `Symbol`-keyed storage as `balance.rs` does.
+pub mod balance_checkpoints; // issues #709, #710 — balance checkpoints and TWAB
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
 pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
+pub mod governance_params; // issue #712 — governance quorum and pass threshold
 pub mod lockdrop_campaign; // issue #460 — lockdrop campaign
 pub mod minimum_unstake_amount; // issue #441 — minimum unstake amount
 pub mod peg_stabilization;
@@ -52,6 +57,7 @@ pub mod proof_of_humanity_hook; // issue #461 — proof-of-humanity hook
 pub mod reward_token_audit_trail; // issue #467 — reward token audit trail
 pub mod roadmap_voting; // issue #462 — roadmap voting
 pub mod stake_funded_bug_bounty; // issue #468 — stake-funded bug bounty
+pub mod stake_hooks; // issue #711 — stake and unstake hook contracts
 pub mod staker_favor_rounding; // issue #457 — always round in the staker's favor
 pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph
 pub mod time_locked_admin_proposal; // issue #455 -- time-locked admin config-change announcements
@@ -61,6 +67,9 @@ pub mod vesting_cliff; // issue #287 — reward vesting cliff // reward-token pr
 
 pub use nft::StakeReceiptNFT;
 pub use vault::VaultContract;
+
+#[cfg(test)]
+mod test_issues_757_760;
 
 #[cfg(test)]
 mod test;
@@ -110,10 +119,8 @@ mod test_issues_459_462;
 #[cfg(test)]
 mod test_peg_stabilization;
 
-// Issues #705-#708: withdraw-only mode, position split/merge, beneficiary
-// inheritance and dust cleanup.
 #[cfg(test)]
-mod test_issues_705_708;
+mod test_issues_709_712;
 
 // ── Issue #659: storage-layout upgrade-safety snapshot ───────────────────────
 #[cfg(test)]
@@ -144,3 +151,8 @@ pub mod fuzz_support {
     pub use crate::balance::{amount_to_shares_with_decimals, shares_to_amount_with_decimals};
     pub use crate::reward_math::reward_for_ledgers;
 }
+#[cfg(test)]
+mod test_resource_costs;
+
+#[cfg(test)]
+mod test_runbook_interface_snapshot;

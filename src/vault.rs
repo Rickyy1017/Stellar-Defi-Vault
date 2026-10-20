@@ -18,7 +18,7 @@ use crate::{
         InsurancePolicy, InsuranceProduct, InterfaceId, LeaderboardEntry, Loan, LoanConfig,
         LotteryConfig, MerkleRoot, MigrationExport, Milestone, MilestoneCondition, MultisigConfig,
         OptimalClaimAdvice, PauseInfo, PauseReason, PendingAction, PoolComparison, PoolConfig,
-        PoolHealthReport, PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam,
+        PoolHealthReport, PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam, VoteWeightMode,
         RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
         RewardMultiplierBreakdown, RevenueShareMerkleRoot, RevenueSharingConfig, RoundingPolicy,
         Season, SmoothingSchedule, SmoothingStatus,
@@ -34,7 +34,7 @@ use crate::{
         LeaderboardEntry, Loan, LoanConfig, LotteryConfig, MatchingProgram, MerkleRoot,
         MigrationExport, Milestone, MilestoneCondition, MultisigConfig, OptimalClaimAdvice,
         PauseInfo, PauseReason, PendingAction, PoolComparison, PoolConfig, PoolHealthReport,
-        PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam, Quiz,
+        PoolStats, PredictionMarket, PriceCondition, PriorityBidRecord, ProposableParam, Quiz, VoteWeightMode,
         RateChange, RateHistoryEntry, ReferralLeaderboardEntry, ReferralTreeNode, ReputationScore,
         RevenueShareMerkleRoot, RevenueSharingConfig, RewardMultiplierBreakdown, RewardTier,
         RoundingPolicy, Season, SmoothingSchedule, SmoothingStatus, StakeAction, StakeHistoryEntry,
@@ -409,8 +409,8 @@ impl VaultContract {
     /// - Errors from the pool-seeded check, the unique-depositor cap and the token pull.
     ///
     /// # Events
-    /// Publishes no event itself. The activity-log, position-mirroring and
-    /// low-balance-alert helpers it calls may emit their own.
+    /// Publishes no event itself. The activity-log, position-mirroring,
+    /// low-balance-alert and stake-hook helpers it calls may emit their own.
     pub fn stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         user.require_auth();
         // Issue #525: no new deposits once the pool is sunsetting. Checked
@@ -475,8 +475,14 @@ impl VaultContract {
         // Issue #544: single-shot low-balance alert on state-changing calls.
         crate::vault_extensions_542_545::check_and_emit_low_balance(&env);
 
+        // Issue #711: notify registered hooks once the stake is finalized.
+        crate::stake_hooks::notify(&env, &user, symbol_short!("stake"), amount);
+
         // Issue #589: best-effort instance TTL bump on a high-traffic path.
         crate::ttl_management::bump(&env);
+        // Extend this user's own position/checkpoint/settings entries so a
+        // dormant position isn't archived while the user is actively staking.
+        crate::user_ttl::bump_entries(&env, &user);
 
         Ok(shares_minted)
     }
@@ -1176,9 +1182,13 @@ impl VaultContract {
             crate::stake_funded_bug_bounty::deduct_bounty_contribution(&env, &staker, amount);
         let reward_after_bounty = amount.saturating_sub(bounty_contribution);
         let user_payout = crate::claim_fee::apply_claim_fee(&env, &staker, reward_after_bounty)?;
+        // Deduct mirror performance fee when the follower has opted in; net
+        // payout to the follower is reduced and the fee goes directly to the leader.
+        let user_payout =
+            crate::position_mirroring::apply_mirror_perf_fee(&env, &staker, user_payout)?;
 
+        let reward_token_addr = Self::reward_token_address(&env)?;
         if user_payout > 0 {
-            let reward_token_addr = Self::reward_token_address(&env)?;
             token::Client::new(&env, &reward_token_addr).transfer(
                 &env.current_contract_address(),
                 &staker,
@@ -1196,6 +1206,13 @@ impl VaultContract {
         );
 
         events::claimed(&env, &staker, user_payout, env.ledger().sequence());
+        crate::claim_receipts::record_receipt(
+            &env,
+            &staker,
+            user_payout,
+            &reward_token_addr,
+            &staker,
+        );
         balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
         Ok(user_payout)
     }
@@ -3003,10 +3020,9 @@ impl VaultContract {
             return Err(VaultError::Unauthorized);
         }
         admin.require_auth();
-        if bps > 500 {
-            return Err(VaultError::UnstakeFeeTooHigh);
-        }
-        balance::set_unstake_fee_bps(&env, bps);
+        // Routes through the ceiling check (MAX_FEE_BPS) and notice-period
+        // gate: increases are queued; decreases apply immediately.
+        crate::fee_change_notice::propose_fee_change(&env, bps)?;
         Ok(())
     }
 
@@ -3078,10 +3094,9 @@ impl VaultContract {
     /// `UnstakeFeeTooHigh`.
     pub fn set_unstake_fee_bps(env: Env, admin: Address, bps: u32) -> Result<(), VaultError> {
         admin::require_admin_as(&env, &admin)?;
-        if bps > MAX_UNSTAKE_FEE_BPS {
-            return Err(VaultError::UnstakeFeeTooHigh);
-        }
-        balance::set_unstake_fee_bps(&env, bps);
+        // Routes through the ceiling check (MAX_FEE_BPS) and notice-period
+        // gate: increases are queued; decreases apply immediately.
+        crate::fee_change_notice::propose_fee_change(&env, bps)?;
         Ok(())
     }
 
@@ -3230,9 +3245,6 @@ impl VaultContract {
             if client.balance(&pool_address) < total_bonus {
                 return Err(VaultError::InsufficientRewardPool);
             }
-            if referrer_bonus > 0 {
-                client.transfer(&pool_address, referrer, &referrer_bonus);
-            }
             if referee_bonus > 0 {
                 client.transfer(&pool_address, referee, &referee_bonus);
             }
@@ -3242,11 +3254,15 @@ impl VaultContract {
         balance::set_referrer_of(env, referee, referrer);
         balance::add_referee(env, referrer, referee);
         let mut stats = balance::get_referral_stats(env, referrer);
-        stats.total_referred_stake = stats
-            .total_referred_stake
+        stats.total_referred_deposits = stats
+            .total_referred_deposits
             .checked_add(deposit_amount)
             .ok_or(VaultError::ArithmeticError)?;
-        stats.referral_count = stats.referral_count.saturating_add(1);
+        stats.referee_count = stats.referee_count.saturating_add(1);
+        stats.earned = stats
+            .earned
+            .checked_add(referrer_bonus)
+            .ok_or(VaultError::ArithmeticError)?;
         balance::set_referral_stats(env, referrer, &stats);
         events::referral_bonus_paid(
             env,
@@ -3276,7 +3292,20 @@ impl VaultContract {
     }
 
     fn normalize_to_reward_decimals(env: &Env, amount: i128) -> Result<i128, VaultError> {
-        Ok(amount)
+        let stake_dec = balance::get_stake_decimals(env);
+        let reward_dec = balance::get_reward_decimals(env);
+        if stake_dec == reward_dec {
+            return Ok(amount);
+        }
+        if reward_dec > stake_dec {
+            let factor = 10i128.pow(reward_dec - stake_dec);
+            amount
+                .checked_mul(factor)
+                .ok_or(VaultError::ArithmeticError)
+        } else {
+            let factor = 10i128.pow(stake_dec - reward_dec);
+            Ok(amount / factor)
+        }
     }
 
     fn require_not_paused(env: &Env) -> Result<(), VaultError> {
@@ -4081,8 +4110,8 @@ impl VaultContract {
             address: address.clone(),
             parent: parent.clone(),
             level,
-            referred_count: stats.referral_count,
-            total_referred_stake: stats.total_referred_stake,
+            referred_count: stats.referee_count,
+            total_referred_stake: stats.total_referred_deposits,
         }
     }
 
@@ -6565,7 +6594,7 @@ impl VaultContract {
         // gross unstaked amount so the leaderboard stays accurate.
         if let Some(referrer) = balance::get_referrer_of(env, staker) {
             let mut stats = balance::get_referral_stats(env, &referrer);
-            stats.total_referred_stake = stats.total_referred_stake.saturating_sub(amount);
+            stats.total_referred_deposits = stats.total_referred_deposits.saturating_sub(amount);
             balance::set_referral_stats(env, &referrer, &stats);
         }
 
@@ -6656,7 +6685,11 @@ impl VaultContract {
             // revenue-share and treasury routing of the remainder.
             let insurance_share =
                 crate::vault_extensions_701_704::take_insurance_share(env, unstake_fee)?;
-            let distributable_fee = unstake_fee - insurance_share;
+            // Issue #754: recycle a configured share of the post-insurance fee
+            // into the reward pool before revenue-share/treasury routing.
+            let recyclable_fee = unstake_fee - insurance_share;
+            let recycled_fee = crate::vault::fee_recycle::recycle_fee(env, recyclable_fee)?;
+            let distributable_fee = recyclable_fee - recycled_fee;
             let rev_share_portion = if let Some(rev_cfg) = balance::get_revenue_sharing_config(env) {
                 if rev_cfg.share_bps > 0 {
                     (distributable_fee * rev_cfg.share_bps as i128) / BOOST_BPS_BASE as i128
@@ -6746,6 +6779,9 @@ impl VaultContract {
         let penalty_paid = amount - amount_after_penalty;
         let rewards_claimed = balance::get_accrued_reward(env, staker);
         Self::mint_withdrawal_receipt(env, staker, amount_returned, rewards_claimed, penalty_paid);
+
+        // Issue #711: notify registered hooks once the unstake is finalized.
+        crate::stake_hooks::notify(env, staker, symbol_short!("unstake"), amount_returned);
 
         Ok(amount_returned)
     }
@@ -7766,6 +7802,8 @@ impl VaultContract {
             balance::set_claim_history(env, staker, &claim_history);
 
             events::claimed(env, staker, reward, current_ledger);
+            let token_addr = Self::token_address(env)?;
+            crate::claim_receipts::record_receipt(env, staker, reward, &token_addr, staker);
             return Ok(0);
         }
 
@@ -7844,6 +7882,7 @@ impl VaultContract {
         balance::set_claim_history(env, staker, &claim_history);
 
         events::claimed(env, staker, reward, env.ledger().sequence());
+        crate::claim_receipts::record_receipt(env, staker, reward, &token_addr, staker);
         balance::set_last_updated_ledger(env, env.ledger().sequence()); // Issue #69
 
         // Issue #129: auto-pause if reward balance drops below threshold
@@ -9150,9 +9189,9 @@ impl VaultContract {
 
         let mut stats = balance::get_referral_stats(&env, &effective_referrer);
         if is_new_referral {
-            stats.referral_count += 1;
+            stats.referee_count += 1;
         }
-        stats.total_referred_stake = stats.total_referred_stake.saturating_add(amount);
+        stats.total_referred_deposits = stats.total_referred_deposits.saturating_add(amount);
         balance::set_referral_stats(&env, &effective_referrer, &stats);
 
         Ok(shares)
@@ -9173,7 +9212,7 @@ impl VaultContract {
         while i < registry.len() {
             let referrer = registry.get(i).unwrap();
             let stats = balance::get_referral_stats(&env, &referrer);
-            let stake = stats.total_referred_stake;
+            let stake = stats.total_referred_deposits;
 
             // Find insertion index in the descending-sorted top list.
             let mut ins = top.len(); // default: append at end
@@ -9191,7 +9230,7 @@ impl VaultContract {
                 let entry = ReferralLeaderboardEntry {
                     referrer,
                     total_referred_stake: stake,
-                    referral_count: stats.referral_count,
+                    referral_count: stats.referee_count,
                 };
                 // Rebuild the sorted vec with the new entry at `ins`.
                 let mut new_top: Vec<ReferralLeaderboardEntry> = Vec::new(&env);
@@ -9468,15 +9507,32 @@ impl VaultContract {
         duration_ledgers: u32,
     ) -> Result<u32, VaultError> {
         user.require_auth();
-        if balance::get_shares(&env, &user) == 0 {
+        let proposer_shares = balance::get_shares(&env, &user);
+        if proposer_shares == 0 {
             return Err(VaultError::PositionNotFound);
+        }
+        // Minimum-stake gate (distinct from `balance::get_min_stake`, which
+        // floors a *deposit*): a proposer must hold at least
+        // `proposal_requirements::min_stake_amount()` of staked token value
+        // to deter spam proposals from near-empty positions.
+        let min_stake = proposal_requirements::min_stake_amount(&env);
+        if min_stake > 0 {
+            let total_shares = balance::get_total_shares(&env);
+            let total_deposited = balance::get_total_deposited(&env);
+            let staked_amount =
+                balance::shares_to_amount(total_shares, total_deposited, proposer_shares)
+                    .ok_or(VaultError::ArithmeticError)?;
+            if staked_amount < min_stake {
+                return Err(VaultError::PositionNotFound);
+            }
         }
         if balance::get_open_proposal_count(&env) >= MAX_OPEN_PROPOSALS {
             return Err(VaultError::MaxPositionsReached);
         }
 
         let id = balance::get_next_proposal_id(&env);
-        let ends_at = env.ledger().sequence().saturating_add(duration_ledgers);
+        let created_at = env.ledger().sequence();
+        let ends_at = created_at.saturating_add(duration_ledgers);
         let proposal = GovernanceProposal {
             id,
             parameter,
@@ -9485,8 +9541,25 @@ impl VaultContract {
             votes_against: 0,
             ends_at,
             enacted: false,
+            weight_mode: balance::get_vote_weight_mode(&env),
         };
+
+        // Pairs with `cancel_proposal` (`proposal_cancel.rs`): pull the
+        // admin-configured bond, if any, and record who proposed this and
+        // when, so only this proposer can cancel it within the allowed
+        // window and get the bond back.
+        let bond_due = proposal_cancel::bond_amount(&env);
+        let bond_paid = if bond_due > 0 {
+            let token_addr = Self::token_address(&env)?;
+            crate::transfer_safety::pull_tokens(&env, &token_addr, &user, bond_due)?
+        } else {
+            0
+        };
+        proposal_cancel::record_proposal_created(&env, id, &user, created_at, bond_paid);
+
         balance::set_proposal(&env, id, &proposal);
+        // Issue #712: freeze the quorum/threshold that apply to this proposal.
+        crate::governance_params::snapshot(&env, id);
         balance::set_next_proposal_id(&env, id + 1);
         balance::set_open_proposal_count(&env, balance::get_open_proposal_count(&env) + 1);
         events::proposal_created(&env, &user, id, ends_at);
@@ -9529,11 +9602,20 @@ impl VaultContract {
         if proposal.enacted || env.ledger().sequence() > proposal.ends_at {
             return Err(VaultError::BatchKycTooLarge);
         }
+        if proposal_cancel::is_cancelled(&env, proposal_id) {
+            return Err(VaultError::BatchKycTooLarge);
+        }
 
         let total_shares = balance::get_total_shares(&env);
         let total_deposited = balance::get_total_deposited(&env);
-        let own_weight = balance::shares_to_amount(total_shares, total_deposited, shares)
+        let raw_weight = balance::shares_to_amount(total_shares, total_deposited, shares)
             .ok_or(VaultError::ArithmeticError)?;
+        // Apply weighting mode snapshotted at proposal creation time so that
+        // a mode change by the admin never alters an already-open proposal.
+        let own_weight = match proposal.weight_mode {
+            VoteWeightMode::Linear => raw_weight,
+            VoteWeightMode::Quadratic => crate::quadratic_vote::isqrt(raw_weight),
+        };
         let delegated_weight = balance::get_delegated_vote_weight(&env, &user);
         let weight = own_weight
             .checked_add(delegated_weight)
@@ -9552,6 +9634,12 @@ impl VaultContract {
         }
         balance::set_proposal(&env, proposal_id, &proposal);
         balance::set_voted(&env, proposal_id, &user);
+        let receipt = crate::storage::VoteReceipt {
+            support,
+            weight,
+            ledger: env.ledger().sequence(),
+        };
+        balance::set_vote_receipt(&env, proposal_id, &user, &receipt);
         events::proposal_voted(
             &env,
             &user,
@@ -9564,8 +9652,10 @@ impl VaultContract {
     }
 
     /// Enact a proposal after its voting period ends. Callable by anyone
-    /// (permissionless keeper call) — the change only applies if
-    /// `votes_for > votes_against`; otherwise the proposal is still marked
+    /// (permissionless keeper call) — the change only applies if the proposal
+    /// meets the quorum and pass threshold snapshotted at creation (issue #712),
+    /// or `votes_for > votes_against` when none were configured; otherwise the
+    /// proposal is still marked
     /// enacted (so it cannot be retried) but no parameter changes.
     ///
     /// Reverts with `PositionNotFound` if the proposal does not exist,
@@ -9577,17 +9667,45 @@ impl VaultContract {
         if proposal.enacted {
             return Err(VaultError::AlreadyInitialized);
         }
-        if env.ledger().sequence() <= proposal.ends_at {
+        if proposal_cancel::is_cancelled(&env, proposal_id) {
+            return Err(VaultError::BatchKycTooLarge);
+        }
+        let now = env.ledger().sequence();
+        if now <= proposal.ends_at {
             return Err(VaultError::EpochNotFinalized);
+        }
+        // Guardian veto safeguard: a proposal that passed its vote must sit
+        // through its execution delay before it can be enacted, giving the
+        // guardian a window to veto it (see `guardian_veto.rs`). A failed
+        // proposal has nothing to veto, so it needs no delay.
+        if proposal.votes_for > proposal.votes_against {
+            let executable_at = proposal
+                .ends_at
+                .saturating_add(guardian_veto::execution_delay_ledgers(&env));
+            if now < executable_at {
+                return Err(VaultError::EpochNotFinalized);
+            }
         }
         // Issue #241: a vetoed proposal can never be enacted, even if it
         // passed the vote threshold.
         if balance::get_proposal_vetoer(&env, proposal_id).is_some() {
             return Err(VaultError::BatchKycTooLarge);
         }
+        // A guardian veto, like the stake-weighted one above, permanently
+        // blocks enactment.
+        if guardian_veto::is_vetoed(&env, proposal_id) {
+            return Err(VaultError::BatchKycTooLarge);
+        }
 
         proposal.enacted = true;
-        if proposal.votes_for > proposal.votes_against {
+        // Issue #712: quorum, then threshold, from the params snapshotted at
+        // creation (simple majority when none were configured).
+        if crate::governance_params::passes(
+            &env,
+            proposal_id,
+            proposal.votes_for,
+            proposal.votes_against,
+        )? {
             match proposal.parameter {
                 ProposableParam::RewardRate => {
                     let rate = u32::try_from(proposal.new_value)
@@ -9634,6 +9752,15 @@ impl VaultContract {
             proposal.new_value,
             total_votes,
             env.ledger().sequence(),
+        );
+        // Resolve this proposal's bond (if any) purely on whether it
+        // reached quorum, independent of whether it passed or failed — see
+        // `proposal_requirements.rs` for why.
+        proposal_requirements::settle_bond(
+            &env,
+            proposal_id,
+            proposal.votes_for,
+            proposal.votes_against,
         );
         Ok(())
     }
@@ -11707,16 +11834,21 @@ impl VaultContract {
             .ok_or(VaultFeatureError::ArithmeticError)?
             / BOOST_BPS_BASE as i128;
         if fee > 0 {
+            // Issue #754: recycle a configured share into the reward pool
+            // before revenue-share/slash-treasury routing.
+            let recyclable_fee = fee
+                - crate::vault::fee_recycle::recycle_fee(&env, fee)
+                    .map_err(|_| VaultFeatureError::ArithmeticError)?;
             let rev_share_portion = if let Some(rev_cfg) = balance::get_revenue_sharing_config(&env) {
                 if rev_cfg.share_bps > 0 {
-                    (fee * rev_cfg.share_bps as i128) / BOOST_BPS_BASE as i128
+                    (recyclable_fee * rev_cfg.share_bps as i128) / BOOST_BPS_BASE as i128
                 } else {
                     0
                 }
             } else {
                 0
             };
-            let treasury_fee = fee - rev_share_portion;
+            let treasury_fee = recyclable_fee - rev_share_portion;
             if rev_share_portion > 0 {
                 let rev_pool = balance::get_revenue_share_pool(&env);
                 balance::set_revenue_share_pool(&env, rev_pool + rev_share_portion);
@@ -13447,6 +13579,9 @@ impl VaultContract {
         crate::vault_extensions_542_545::check_and_emit_low_balance(env);
         // Issue #589: best-effort instance TTL bump on a high-traffic path.
         crate::ttl_management::bump(env);
+        // Extend the staker's own position/checkpoint/settings entries so a
+        // dormant position isn't archived while the user is actively withdrawing.
+        crate::user_ttl::bump_entries(env, staker);
         Ok(amount)
     }
 
@@ -13475,6 +13610,10 @@ impl VaultContract {
             crate::stake_funded_bug_bounty::deduct_bounty_contribution(env, staker, accrued);
         let reward_after_bounty = accrued.saturating_sub(bounty_contribution);
         let user_payout = crate::claim_fee::apply_claim_fee(env, staker, reward_after_bounty)?;
+        // Deduct mirror performance fee when the follower has opted in; net
+        // payout to the follower is reduced and the fee goes directly to the leader.
+        let user_payout =
+            crate::position_mirroring::apply_mirror_perf_fee(env, staker, user_payout)?;
 
         if user_payout > 0 {
             reward_token_client.transfer(&env.current_contract_address(), staker, &user_payout);
@@ -13509,8 +13648,12 @@ impl VaultContract {
         crate::position_value_appreciation_log::maybe_auto_snapshot(env, staker);
 
         events::claimed(env, staker, user_payout, env.ledger().sequence());
+        crate::claim_receipts::record_receipt(env, staker, user_payout, &reward_token_addr, staker);
         // Issue #544: single-shot low-balance alert on state-changing calls.
         crate::vault_extensions_542_545::check_and_emit_low_balance(env);
+        // Extend the claimer's own position/checkpoint/settings entries so a
+        // dormant position isn't archived while the user is actively claiming.
+        crate::user_ttl::bump_entries(env, staker);
         Ok(user_payout)
     }
 }
@@ -14677,6 +14820,7 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         Ok(())
     }
 
+    /// Stake on behalf of a user from a contract caller.
     pub fn stake_via_contract(
         env: Env,
         contract: Address,
@@ -14975,3 +15119,23 @@ pub mod position_split_merge;
 pub mod beneficiary_inheritance;
 #[path = "dust_cleanup.rs"]
 pub mod dust_cleanup;
+#[path = "fee_change_notice.rs"]
+pub mod fee_change_notice;
+#[path = "sub_pool_delegation.rs"]
+pub mod sub_pool_delegation;
+#[path = "sub_pool_rebalancing.rs"]
+pub mod sub_pool_rebalancing;
+#[path = "quadratic_vote.rs"]
+pub mod quadratic_vote;
+#[path = "benchmark_rate.rs"]
+pub mod benchmark_rate;
+#[path = "guardian_pause.rs"]
+pub mod guardian_pause;
+#[path = "guardian_veto.rs"]
+pub mod guardian_veto;
+#[path = "vote_change.rs"]
+pub mod vote_change;
+#[path = "proposal_cancel.rs"]
+pub mod proposal_cancel;
+#[path = "proposal_requirements.rs"]
+pub mod proposal_requirements;

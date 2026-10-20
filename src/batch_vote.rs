@@ -37,9 +37,11 @@ pub const MAX_BATCH_VOTES: u32 = 10;
 /// that layer is not yet registered as a crate module.
 const LAST_VOTE_KEY: Symbol = symbol_short!("gpd_lv");
 
-/// A user's raw governance vote weight: the token amount their position is
-/// worth, derived identically to the (unregistered) governance power-decay
-/// layer's `raw_weight` helper.
+/// A user's governance vote weight, adjusted for the pool-wide `VoteWeightMode`.
+///
+/// In `Linear` mode (default) weight equals the user's raw staked token amount.
+/// In `Quadratic` mode weight equals `isqrt(raw_amount)`, reducing whale dominance.
+/// See `crate::quadratic_vote::isqrt` for the rounding contract.
 fn vote_weight(env: &Env, user: &Address) -> i128 {
     let shares = balance::get_shares(env, user);
     if shares <= 0 {
@@ -47,7 +49,11 @@ fn vote_weight(env: &Env, user: &Address) -> i128 {
     }
     let total_shares = balance::get_total_shares(env);
     let total_deposited = balance::get_total_deposited(env);
-    balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0)
+    let raw = balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
+    match balance::get_vote_weight_mode(env) {
+        crate::storage::VoteWeightMode::Linear => raw,
+        crate::storage::VoteWeightMode::Quadratic => crate::quadratic_vote::isqrt(raw),
+    }
 }
 
 /// Set the caller's last-voted ledger to `ledger`; read by the governance
@@ -82,6 +88,7 @@ const REASON_NOT_FOUND: &str = "proposal_not_found";
 const REASON_ALREADY_VOTED: &str = "already_voted";
 const REASON_ENDED: &str = "voting_ended";
 const REASON_ENACTED: &str = "proposal_enacted";
+const REASON_CANCELLED: &str = "proposal_cancelled";
 const REASON_NO_POSITION: &str = "no_position";
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
@@ -136,6 +143,10 @@ impl VaultContract {
                 results.push_back((id, false, String::from_str(&env, REASON_ENACTED)));
                 continue;
             }
+            if crate::vault::proposal_cancel::is_cancelled(&env, id) {
+                results.push_back((id, false, String::from_str(&env, REASON_CANCELLED)));
+                continue;
+            }
             if now > proposal.ends_at {
                 results.push_back((id, false, String::from_str(&env, REASON_ENDED)));
                 continue;
@@ -162,6 +173,12 @@ impl VaultContract {
             }
             balance::set_proposal(&env, id, &proposal);
             balance::set_voted(&env, id, &user);
+            let receipt = crate::storage::VoteReceipt {
+                support: entry.support,
+                weight,
+                ledger: now,
+            };
+            balance::set_vote_receipt(&env, id, &user, &receipt);
 
             env.events().publish(
                 (symbol_short!("vote_cast"), user.clone()),

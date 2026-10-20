@@ -1,4 +1,37 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, String, Vec, Env, Symbol, symbol_short};
+
+/// Consolidated per-user settings (issue #796).
+///
+/// Stores all user preferences in a single storage entry to reduce rent costs.
+/// Uses versioned-enum pattern so new settings can be added later.
+///
+/// - `version`: struct version for future migrations
+/// - `claim_destination`: address to receive claimed rewards (None = self)
+/// - `auto_compound`: whether to automatically compound rewards
+/// - `keepers`: list of addresses authorized to act on behalf of user
+/// - `notifications_enabled`: whether user wants notifications
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UserSettings {
+    pub version: u32,
+    pub claim_destination: Option<Address>,
+    pub auto_compound: bool,
+    pub keepers: Vec<Address>,
+    pub notifications_enabled: bool,
+}
+
+impl UserSettings {
+    /// Create default settings for a new user.
+    pub fn default() -> Self {
+        Self {
+            version: 1,
+            claim_destination: None,
+            auto_compound: false,
+            keepers: Vec::new(&soroban_sdk::Env::default()),
+            notifications_enabled: true,
+        }
+    }
+}
 
 /// Storage keys for all persistent and instance state in the vault.
 ///
@@ -505,12 +538,32 @@ pub struct RateHistoryEntry {
     pub changed_by: Address,
 }
 
-/// Accumulated referral stats stored per referrer.
+/// Accumulated referral stats stored per referrer (issue #757).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReferralStats {
-    pub total_referred_stake: i128,
-    pub referral_count: u32,
+    pub referee_count: u32,
+    pub total_referred_deposits: i128,
+    pub earned: i128,
+    pub claimed: i128,
+}
+
+/// Receipt for a cast governance vote (issue #760).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VoteReceipt {
+    pub support: bool,
+    pub weight: i128,
+    pub ledger: u32,
+}
+
+/// Vote-escrow style reward boost lock (issue #758).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VeBoostLock {
+    pub amount: i128,
+    pub unlock_ledger: u32,
+    pub duration_ledgers: u32,
 }
 
 /// Result of `get_boost_tier_progress` showing where a user is toward the next boost tier.
@@ -762,6 +815,33 @@ pub enum RoundingPolicy {
     Ceiling,
     Nearest,
 }
+// ── Issue #220: rounding dust handling ────────────────────────────────────────
+
+use crate::errors::VaultSafetyError;
+
+/// Storage key for accumulated rounding dust (issue #220).
+pub const ROUNDING_DUST_KEY: Symbol = symbol_short!("rounding_dust");
+
+/// Retrieve the current rounding dust amount (0 if none).
+pub fn get_rounding_dust(env: &Env) -> i128 {
+    env.storage().instance().get(&ROUNDING_DUST_KEY).unwrap_or(0)
+}
+
+/// Add amount to rounding dust counter (checked arithmetic).
+pub fn add_rounding_dust(env: &Env, amount: i128) -> Result<(), VaultSafetyError> {
+    let cur = get_rounding_dust(env);
+    let new = cur.checked_add(amount).ok_or(VaultSafetyError::ArithmeticError)?;
+    env.storage().instance().set(&ROUNDING_DUST_KEY, &new);
+    Ok(())
+}
+
+/// Sweep accumulated rounding dust into reward pool, clearing the counter.
+pub fn sweep_rounding_dust(env: &Env) -> Result<i128, VaultSafetyError> {
+    let dust = get_rounding_dust(env);
+    env.storage().instance().remove(&ROUNDING_DUST_KEY);
+    Ok(dust)
+}
+
 
 // ── Issue #216: governance voting ────────────────────────────────────────────
 
@@ -775,11 +855,35 @@ pub enum ProposableParam {
     MinStake,
 }
 
+/// How vote weight is computed for a governance proposal.
+///
+/// The mode is **snapshotted at proposal-creation time** so that a mid-vote
+/// mode change by the admin cannot alter the weighting rules of an already-open
+/// proposal.
+///
+/// # Quadratic weighting caveat
+///
+/// Quadratic weighting reduces whale dominance: a holder with 10 000 tokens
+/// gets `sqrt(10 000) = 100` weight instead of 10 000.  However, it is easy
+/// to bypass by splitting stake across multiple wallets, so meaningful
+/// protection requires a complementary identity/sybil-resistance layer
+/// (e.g. the existing KYC or proof-of-humanity hook).  Use with awareness.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum VoteWeightMode {
+    /// Weight = staked token amount.  This is the default.
+    Linear,
+    /// Weight = integer square root of staked token amount.
+    /// Rounds down; a position worth 0 still has 0 weight.
+    Quadratic,
+}
+
 /// A governance proposal to change a pool parameter, created via
 /// `create_proposal` and resolved via `enact_proposal` (issue #216).
 ///
 /// Voting power is the staker's token amount at the time of the `vote` call,
 /// not adjusted retroactively if the staker's position changes afterward.
+/// The `weight_mode` is fixed at creation time from the pool-wide setting.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct GovernanceProposal {
@@ -790,6 +894,9 @@ pub struct GovernanceProposal {
     pub votes_against: i128,
     pub ends_at: u32,
     pub enacted: bool,
+    /// Weighting mode active when this proposal was created.
+    /// Immutable after creation so mode changes don't affect open proposals.
+    pub weight_mode: VoteWeightMode,
 }
 
 // ── Issue #207: cross-chain bridge relayer hook ──────────────────────────────

@@ -20,16 +20,12 @@
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol};
 
 use crate::admin;
-use crate::balance;
 use crate::errors::VaultAccessError;
 use crate::runway_guard;
 use crate::storage::PauseReason;
 use crate::vault::{VaultContract, VaultContractClient};
 
 const ROLE_PREFIX: Symbol = symbol_short!("role");
-
-/// Upper bound on the unstake fee, matching `set_unstake_fee_bps`.
-const MAX_UNSTAKE_FEE_BPS: u32 = 500;
 
 /// Delegable responsibilities split out of the single admin.
 #[contracttype]
@@ -190,10 +186,9 @@ impl VaultContract {
         bps: u32,
     ) -> Result<(), VaultAccessError> {
         require_role(&env, Role::TreasuryManager, &caller)?;
-        if bps > MAX_UNSTAKE_FEE_BPS {
-            return Err(VaultAccessError::UnstakeFeeTooHigh);
-        }
-        balance::set_unstake_fee_bps(&env, bps);
+        // Routes through the ceiling check (MAX_FEE_BPS) and notice-period
+        // gate: increases are queued; decreases apply immediately.
+        crate::fee_change_notice::propose_fee_change(&env, bps)?;
         Ok(())
     }
 }

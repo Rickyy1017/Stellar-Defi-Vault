@@ -21,6 +21,68 @@ pub fn referral_bonus_paid(
     );
 }
 
+pub fn referral_earnings_claimed(
+    env: &Env,
+    referrer: &Address,
+    amount: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("ref_clm"), referrer.clone()),
+        (amount, ledger),
+    );
+}
+
+pub fn ve_boost_locked(
+    env: &Env,
+    user: &Address,
+    amount: i128,
+    duration_ledgers: u32,
+    unlock_ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("ve_lck"), user.clone()),
+        (amount, duration_ledgers, unlock_ledger),
+    );
+}
+
+pub fn ve_boost_unlocked(
+    env: &Env,
+    user: &Address,
+    amount: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("ve_unl"), user.clone()),
+        (amount, ledger),
+    );
+}
+
+pub fn gauge_voted(
+    env: &Env,
+    user: &Address,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("g_voted"), user.clone()),
+        ledger,
+    );
+}
+
+pub fn proposal_vote_changed(
+    env: &Env,
+    user: &Address,
+    proposal_id: u32,
+    support: bool,
+    weight: i128,
+    ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("v_chg"), user.clone(), proposal_id),
+        (support, weight, ledger),
+    );
+}
+
 pub fn withdraw(
     env: &Env,
     withdrawer: &Address,
@@ -634,6 +696,49 @@ pub fn proposal_created(env: &Env, proposer: &Address, proposal_id: u32, ends_at
     env.events().publish(topics, (proposal_id, ends_at));
 }
 
+/// Emitted when a proposal's bond is refunded to its proposer at
+/// `enact_proposal` time because the proposal reached quorum (win or
+/// lose). Distinct from `proposal_cancelled`'s refund, which happens
+/// earlier, when the proposer withdraws the proposal themselves.
+pub fn proposal_bond_refunded(
+    env: &Env,
+    proposer: &Address,
+    proposal_id: u32,
+    amount: i128,
+    ledger: u32,
+) {
+    let topics = (symbol_short!("bond_rfnd"), proposer);
+    env.events().publish(topics, (proposal_id, amount, ledger));
+}
+
+/// Emitted when a proposal's bond is slashed to the treasury at
+/// `enact_proposal` time because the proposal failed to reach quorum.
+pub fn proposal_bond_slashed(
+    env: &Env,
+    proposer: &Address,
+    proposal_id: u32,
+    amount: i128,
+    ledger: u32,
+) {
+    let topics = (symbol_short!("bond_slsh"), proposer);
+    env.events().publish(topics, (proposal_id, amount, ledger));
+}
+
+/// Emitted when the original proposer cancels their own proposal
+/// (`cancel_proposal`) before the window closes. `bond_refunded` is `0`
+/// when no bond was collected at creation.
+pub fn proposal_cancelled(
+    env: &Env,
+    proposer: &Address,
+    proposal_id: u32,
+    bond_refunded: i128,
+    ledger: u32,
+) {
+    let topics = (symbol_short!("prop_cncl"), proposer);
+    env.events()
+        .publish(topics, (proposal_id, bond_refunded, ledger));
+}
+
 /// Emitted when a staker votes on a governance proposal.
 pub fn proposal_voted(
     env: &Env,
@@ -646,6 +751,26 @@ pub fn proposal_voted(
     let topics = (symbol_short!("prop_vote"), voter);
     env.events()
         .publish(topics, (proposal_id, support, weight, ledger));
+}
+
+/// Emitted when a voter changes their side on an open proposal
+/// (`change_vote`). `weight` is the voter's originally recorded weight
+/// (unchanged by the switch) and `change_count` is how many times they have
+/// now changed their vote on this proposal.
+pub fn vote_changed(
+    env: &Env,
+    voter: &Address,
+    proposal_id: u32,
+    new_support: bool,
+    weight: i128,
+    change_count: u32,
+    ledger: u32,
+) {
+    let topics = (symbol_short!("vote_chg"), voter);
+    env.events().publish(
+        topics,
+        (proposal_id, new_support, weight, change_count, ledger),
+    );
 }
 
 /// Emitted when a governance proposal is enacted (whether or not it passed).
@@ -973,6 +1098,23 @@ pub fn proposal_vetoed(
     let topics = (symbol_short!("prop_veto"), user);
     env.events()
         .publish(topics, (proposal_id, user_stake_bps, ledger));
+}
+
+/// Emitted when the guardian vetoes a proposal that passed its vote, during
+/// its execution delay. Distinct from `proposal_vetoed` above (the
+/// stake-weighted veto, issue #241): this one carries a `reason_hash`
+/// instead of a stake percentage, since the guardian's authority to veto
+/// comes from its role, not from holding a share of the pool.
+pub fn guardian_proposal_vetoed(
+    env: &Env,
+    guardian: &Address,
+    proposal_id: u32,
+    reason_hash: &soroban_sdk::BytesN<32>,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "proposal_vetoed"), guardian);
+    env.events()
+        .publish(topics, (proposal_id, reason_hash.clone(), ledger));
 }
 
 // ── Issue #256: governance vote weight delegation ──────────────────────────────

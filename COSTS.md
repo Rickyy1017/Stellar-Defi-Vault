@@ -56,6 +56,22 @@ When adding a new public function or altering the execution path of an existing 
 2. **Benchmark Both Cold and Warm Paths**:
    Where applicable (e.g. first deposit vs subsequent deposit), measure both scenarios. Report the warm baseline or note worst-case scenarios.
 3. **Check for Regressions**:
-   Ensure new functionality does not cause existing functions to exceed their baseline by more than 15%. If a significant increase is unavoidable (e.g., adding an invariant check), document the rationale.
-4. **Update `COSTS.md`**:
-   Add the new function into the table above under its appropriate category, committing the update alongside the PR.
+   The focused regression harness in `src/test_resource_costs.rs` measures
+   `deposit`, `withdraw`, `claim`, and full-position `exit` (`unstake_all`)
+   with 1, 100, and 1000 existing depositors. It compares
+   CPU instructions and memory bytes with `resource-cost-baseline.csv`, using
+   each row's committed tolerance (currently 10%), and reports the operation,
+   pool size, baseline, allowed value, and actual value on failure.
+4. **Update the baseline deliberately**:
+   Run `cargo test --features testutils core_function_cpu_and_memory_stay_within_committed_budget -- --nocapture`
+   on the reviewed release toolchain, inspect the printed measurements, and
+   update only the affected rows in `resource-cost-baseline.csv`. The committed
+   initial thresholds are deliberately conservative estimates from this
+   document, not results claimed to have been measured in this change. Replace
+   them with a reviewed measurement before treating them as a certified
+   production baseline. Do not raise a baseline just to make a regression pass;
+   explain material increases in the PR and update this document when measured
+   behavior changes.
+5. **Update `COSTS.md`**:
+   Add the new function into the table above under its appropriate category,
+   committing the update alongside the PR.

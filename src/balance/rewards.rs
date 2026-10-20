@@ -7,7 +7,7 @@ use super::positions::assert_non_negative;
 use crate::storage::{
     AutoConvertConfig, DataKey, DynamicFeeConfig, RateHistoryEntry, RewardTier,
 };
-use soroban_sdk::{symbol_short, Address, Env, Vec};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 pub const DEFAULT_TOKEN_DECIMALS: u32 = 7;
 pub const MAX_RATE_HISTORY_ENTRIES: u32 = 50;
@@ -183,6 +183,14 @@ pub fn set_last_claim_ledger(env: &Env, user: &Address, ledger: u32) {
         .set(&DataKey::LastClaimLedger(user.clone()), &ledger);
 }
 
+/// Instance-storage key for the sum of every user's accrued-but-unclaimed
+/// reward (issue #753).
+///
+/// `DataKey` is at Soroban's 50-variant cap, so this uses a raw symbol key,
+/// matching the rest of `balance.rs`. The total is maintained incrementally by
+/// [`set_accrued_reward`] instead of scanning the staker registry.
+const TOTAL_ACCRUED_UNCLAIMED_KEY: Symbol = symbol_short!("tot_acr");
+
 pub fn get_accrued_reward(env: &Env, user: &Address) -> i128 {
     env.storage()
         .persistent()
@@ -190,8 +198,34 @@ pub fn get_accrued_reward(env: &Env, user: &Address) -> i128 {
         .unwrap_or(0)
 }
 
+/// Sum of every user's accrued-but-unclaimed reward (issue #753).
+pub fn get_total_accrued_unclaimed(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&TOTAL_ACCRUED_UNCLAIMED_KEY)
+        .unwrap_or(0)
+}
+
+pub fn set_total_accrued_unclaimed(env: &Env, total: i128) {
+    assert_non_negative(env, total);
+    env.storage()
+        .instance()
+        .set(&TOTAL_ACCRUED_UNCLAIMED_KEY, &total);
+}
+
 pub fn set_accrued_reward(env: &Env, user: &Address, amount: i128) {
     assert_non_negative(env, amount);
+    // Issue #753: keep the pool-wide outstanding-reward total in sync without
+    // requiring `get_solvency_report` to scan the staker registry. Clamping at
+    // zero keeps a stale/missing accumulator from tripping the non-negative
+    // invariant while it is being brought up to date.
+    let previous = get_accrued_reward(env, user);
+    if amount != previous {
+        let adjusted = get_total_accrued_unclaimed(env)
+            .saturating_add(amount)
+            .saturating_sub(previous);
+        set_total_accrued_unclaimed(env, adjusted.max(0));
+    }
     env.storage()
         .persistent()
         .set(&DataKey::AccruedReward(user.clone()), &amount);

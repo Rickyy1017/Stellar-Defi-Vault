@@ -1,4 +1,4 @@
-﻿#![cfg(test)]
+#![cfg(test)]
 
 extern crate std;
 
@@ -389,7 +389,14 @@ fn test_first_deposit_with_referrer_pays_both_bonuses_from_reward_pool() {
     let bob_before = f.token.balance(&f.bob);
     f.vault.deposit(&f.bob, &20_000, &Some(f.alice.clone()));
 
+    assert_eq!(f.token.balance(&f.alice), alice_before);
+    let stats = f.vault.get_referral_stats(&f.alice);
+    assert_eq!(stats.earned, 1_000);
+    assert_eq!(stats.claimed, 0);
+    f.vault.claim_referral_earnings(&f.alice);
     assert_eq!(f.token.balance(&f.alice), alice_before + 1_000);
+    let stats_after = f.vault.get_referral_stats(&f.alice);
+    assert_eq!(stats_after.claimed, 1_000);
     assert_eq!(f.token.balance(&f.bob), bob_before - 20_000 + 500);
     assert_eq!(f.vault.get_reward_pool_balance(), 98_500);
 }
