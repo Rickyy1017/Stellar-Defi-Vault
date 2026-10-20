@@ -149,9 +149,11 @@ cargo clippy --features testutils -- -D warnings
 Quality tooling complements the test suite; each has a doc and a `make` target:
 
 ```bash
-make coverage   # line coverage summary (cargo-llvm-cov)   — docs/COVERAGE.md
-make scout      # Scout static analysis (Soroban)          — docs/STATIC_ANALYSIS.md
-make mutants    # mutation testing of the accounting core  — docs/MUTATION_TESTING.md
+make coverage              # line coverage summary (cargo-llvm-cov)   — docs/COVERAGE.md
+make scout                 # Scout static analysis (Soroban)          — docs/STATIC_ANALYSIS.md
+make mutants                # mutation testing of the accounting core  — docs/MUTATION_TESTING.md
+make interface-spec-check  # fail if the public interface drifted     — docs/INTERFACE_SPEC.md
+make interface-spec        # regenerate the committed snapshot        — docs/INTERFACE_SPEC.md
 ```
 
 - [docs/COVERAGE.md](docs/COVERAGE.md) — coverage on every PR, the no-regression
@@ -162,6 +164,12 @@ make mutants    # mutation testing of the accounting core  — docs/MUTATION_TES
   the baseline, and how survivors are triaged.
 - [docs/INVARIANTS.md](docs/INVARIANTS.md) — the precise accounting and
   share-price invariants that these tools protect, mapped to tests.
+- [docs/INTERFACE_SPEC.md](docs/INTERFACE_SPEC.md) — the committed public-interface
+  snapshot (`interface-spec/VaultContract.json`), generated from the real release
+  build so any change to an exported function's name, parameters, or types shows
+  up as a CI-failing diff instead of shipping silently; see
+  [CHANGELOG.md](CHANGELOG.md) for the entry an intentional change needs
+  alongside the refreshed snapshot.
 
 ### Deploying to Testnet
 
@@ -444,8 +452,12 @@ See [docs/SECURITY.md](./docs/SECURITY.md) for the full security model, includin
 - What the admin can and cannot do (the admin **cannot** access user principal)
 - Failure scenarios: paused vault, halted yield, key compromise
 - Admin key rotation procedure via `transfer_admin`
+- Vulnerability disclosure policy: private reporting channel, response SLA,
+  scope, severity levels, and (currently unfunded) bounty terms
 
-This contract is unaudited. Do not use in production without an independent security audit. If you find a vulnerability, please open a private [GitHub Security Advisory](../../security/advisories/new) rather than a public issue.
+This contract is unaudited. Do not use in production without an independent security audit. If you find a vulnerability, please report it privately via a [GitHub Security Advisory](../../security/advisories/new) rather than a public issue — see [docs/SECURITY.md](./docs/SECURITY.md#vulnerability-disclosure-policy) for the full policy, or [.github/SECURITY.md](./.github/SECURITY.md) for GitHub's own security tab.
+
+See [docs/AUDIT_READINESS.md](./docs/AUDIT_READINESS.md) for the checklist this project works through before engaging an external auditor, and for the defined commit/tag an audit is actually scoped against once one is underway.
 
 ## Known Limitations & Remediations
 
