@@ -62,8 +62,7 @@ pub mod staker_favor_rounding; // issue #457 — always round in the staker's fa
 pub mod staker_network_graph; // issue #456 — staker delegation/referral/mirror network graph
 pub mod time_locked_admin_proposal; // issue #455 -- time-locked admin config-change announcements
 pub mod vault_extensions_463_466; // issues #463-#466 — clawback, NFT boost, milestone, param log
-pub mod vault_extensions_761_764; // issues #761-#764 — proposal categories, expedited proposals, delegation expiry, strategy adapters
-pub mod vault_extensions_792_795; // issues #792-#795 — reward decimals, funder attribution, treasury rate limit, surplus rescue
+pub mod vault_extensions_765_768; // issues #765-#768 — idle buffer, harvest, loss policy, emergency unwind
 pub mod vesting_cliff; // issue #287 — reward vesting cliff // reward-token price peg stabilization
 
 pub use nft::StakeReceiptNFT;
@@ -141,16 +140,7 @@ mod test_token_interface_compliance;
 mod test_vec_storage_capacity;
 
 #[cfg(test)]
-mod test_loyalty_points;
-
-#[cfg(test)]
-mod test_claim_streak;
-
-#[cfg(test)]
-mod test_issue_754;
-
-#[cfg(test)]
-mod test_solvency_report;
+mod test_issues_765_768;
 
 /// Pure math surfaces exposed for property tests and `cargo-fuzz` (issue #661).
 ///

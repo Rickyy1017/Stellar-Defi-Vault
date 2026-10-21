@@ -1779,118 +1779,61 @@ pub fn reward_accumulator_updated(env: &Env, global_index: i128, ledger: u32) {
     );
 }
 
-/// Emitted when parameters for a proposal category are updated (issue #761).
-pub fn category_params_set(
-    env: &Env,
-    admin: &Address,
-    category: u32,
-    quorum_bps: u32,
-    threshold_bps: u32,
-    period_ledgers: u32,
-    ledger: u32,
-) {
+/// Emitted when the minimum idle buffer ratio is updated (issue #765).
+pub fn min_idle_ratio_updated(env: &Env, admin: &Address, bps: u32, ledger: u32) {
     env.events().publish(
-        (symbol_short!("cat_prm"), admin.clone()),
-        (category, quorum_bps, threshold_bps, period_ledgers, ledger),
+        (symbol_short!("idle_upd"), admin.clone()),
+        (bps, ledger),
     );
 }
 
-/// Emitted when an expedited emergency proposal is created (issue #762).
-pub fn expedited_proposal_created(
-    env: &Env,
-    proposer: &Address,
-    proposal_id: u32,
-    bond: i128,
-    ends_at: u32,
-    ledger: u32,
-) {
+/// Emitted when funds are allocated to a strategy adapter (issue #765).
+pub fn strategy_allocated(env: &Env, adapter: &Address, amount: i128, ledger: u32) {
     env.events().publish(
-        (symbol_short!("exp_prop"), proposer.clone()),
-        (proposal_id, bond, ends_at, ledger),
-    );
-}
-
-/// Emitted when an expedited proposal bond is refunded (issue #762).
-pub fn expedited_bond_refunded(
-    env: &Env,
-    proposer: &Address,
-    proposal_id: u32,
-    bond: i128,
-    ledger: u32,
-) {
-    env.events().publish(
-        (symbol_short!("exp_rfnd"), proposer.clone()),
-        (proposal_id, bond, ledger),
-    );
-}
-
-/// Emitted when an expedited proposal bond is slashed for failing quorum (issue #762).
-pub fn expedited_bond_slashed(
-    env: &Env,
-    proposer: &Address,
-    proposal_id: u32,
-    bond: i128,
-    ledger: u32,
-) {
-    env.events().publish(
-        (symbol_short!("exp_slsh"), proposer.clone()),
-        (proposal_id, bond, ledger),
-    );
-}
-
-/// Emitted when vote delegation with optional expiry is configured (issue #763).
-pub fn vote_delegation_with_expiry_set(
-    env: &Env,
-    delegator: &Address,
-    delegate: &Address,
-    expires_at: Option<u32>,
-    ledger: u32,
-) {
-    env.events().publish(
-        (symbol_short!("vdel_exp"), delegator.clone()),
-        (delegate.clone(), expires_at, ledger),
-    );
-}
-
-/// Emitted when an external yield strategy adapter is added (issue #764).
-pub fn strategy_added(
-    env: &Env,
-    admin: &Address,
-    adapter: &Address,
-    cap_bps: u32,
-    ledger: u32,
-) {
-    env.events().publish(
-        (symbol_short!("str_add"), admin.clone()),
-        (adapter.clone(), cap_bps, ledger),
-    );
-}
-
-/// Emitted when idle funds are allocated to a strategy adapter (issue #764).
-pub fn strategy_allocated(
-    env: &Env,
-    keeper: &Address,
-    adapter: &Address,
-    amount: i128,
-    ledger: u32,
-) {
-    env.events().publish(
-        (symbol_short!("str_alc"), keeper.clone()),
-        (adapter.clone(), amount, ledger),
-    );
-}
-
-/// Emitted when funds are recalled or withdrawn from a strategy adapter (issue #764).
-pub fn strategy_withdrawn(
-    env: &Env,
-    adapter: &Address,
-    amount: i128,
-    ledger: u32,
-) {
-    env.events().publish(
-        (symbol_short!("str_wdr"), adapter.clone()),
+        (symbol_short!("str_alloc"), adapter.clone()),
         (amount, ledger),
     );
 }
 
+/// Emitted when funds are pulled from a strategy to satisfy a withdrawal (issue #765).
+pub fn strategy_pulled(env: &Env, adapter: &Address, amount: i128, ledger: u32) {
+    env.events().publish(
+        (symbol_short!("str_pull"), adapter.clone()),
+        (amount, ledger),
+    );
+}
+
+/// Emitted when strategy yield is harvested and performance fee taken (issue #766).
+pub fn harvested(env: &Env, strategy: &Address, gain: i128, fee: i128, ledger: u32) {
+    let topics = (Symbol::new(env, "harvested"), strategy.clone());
+    env.events().publish(topics, (gain, fee, ledger));
+}
+
+/// Emitted when a strategy shortfall or realized loss is recorded (issue #767).
+pub fn strategy_loss_recorded(
+    env: &Env,
+    strategy: &Address,
+    total_loss: i128,
+    reserve_absorbed: i128,
+    share_price_absorbed: i128,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "strategy_loss_recorded"), strategy.clone());
+    env.events().publish(
+        topics,
+        (total_loss, reserve_absorbed, share_price_absorbed, ledger),
+    );
+}
+
+/// Emitted when a strategy is emergency unwound and disabled (issue #768).
+pub fn strategy_unwound(
+    env: &Env,
+    strategy: &Address,
+    recovered: i128,
+    loss: i128,
+    ledger: u32,
+) {
+    let topics = (Symbol::new(env, "strategy_unwound"), strategy.clone());
+    env.events().publish(topics, (recovered, loss, ledger));
+}
 

@@ -352,6 +352,45 @@ impl VaultContract {
         )
     }
 
+    /// Admin: serialize the full pool state for migrating to a new contract
+    /// instance (issue #203). Both this contract and the destination should
+    /// be paused for the duration of the migration — this is a point-in-time
+    /// snapshot, not a live sync.
+    pub fn export_state(env: Env, admin_addr: Address) -> Result<MigrationExport, VaultExtError> {
+        admin::require_admin_as(&env, &admin_addr)?;
+
+        let all_stakers = balance::get_all_stakers(&env);
+        if all_stakers.len() > 100 {
+            return Err(VaultExtError::TooManyPositions);
+        }
+
+        let mut all_positions: Vec<(Address, StakePosition)> = Vec::new(&env);
+        for staker in all_stakers.iter() {
+            if let Ok(Some(position)) = Self::build_position(&env, &staker) {
+                all_positions.push_back((staker, position));
+            }
+        }
+
+        let token = Self::token_address(&env).unwrap_or_else(|_| admin_addr.clone());
+        let export = MigrationExport {
+            admin: admin_addr.clone(),
+            stake_token: token.clone(),
+            reward_token: balance::get_reward_token(&env).unwrap_or(token),
+            reward_rate_bps: balance::get_reward_rate_bps(&env),
+            total_staked: balance::get_total_deposited(&env),
+            total_stakers: balance::get_total_stakers(&env),
+            paused: Self::paused(&env),
+            all_positions: all_positions.clone(),
+        };
+
+        events::state_exported(
+            &env,
+            &admin_addr,
+            all_positions.len(),
+            env.ledger().sequence(),
+        );
+        Ok(export)
+    }
     /// Stakes `amount` of the pool's token on behalf of `user`, minting
     /// shares proportional to the current share price. The first deposit is
     /// scaled from the token's queried precision into the vault's fixed
@@ -3116,7 +3155,6 @@ impl VaultContract {
         events::webhook_url_updated(&env, &admin, &None, env.ledger().sequence());
         Ok(())
     }
-
     fn validate_rate_bps(rate_bps: u32) -> Result<(), VaultError> {
         if rate_bps > balance::MAX_RATE_BPS {
             return Err(VaultError::RateTooHigh);
@@ -3234,6 +3272,22 @@ impl VaultContract {
             referee_bonus,
             env.ledger().sequence(),
         );
+        Ok(())
+    }
+
+    /// Admin: set the per-user reward claim cap and rolling window size.
+    pub fn set_claim_cap(
+        env: Env,
+        admin: Address,
+        max_amount: i128,
+        window_ledgers: u32,
+    ) -> Result<(), VaultError> {
+        admin::require_admin_as(&env, &admin)?;
+        if max_amount < 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+        balance::set_claim_cap(&env, max_amount);
+        balance::set_claim_cap_window(&env, window_ledgers);
         Ok(())
     }
 
@@ -3403,6 +3457,11 @@ impl VaultContract {
             .ok_or(VaultError::ArithmeticError)?;
         let token_addr = Self::token_address(env)?;
         let token_client = token::Client::new(env, &token_addr);
+        let current_idle = token_client.balance(&env.current_contract_address());
+        if current_idle < amount {
+            let needed = amount - current_idle;
+            let _ = crate::vault_extensions_765_768::pull_from_strategies(env, needed);
+        }
         token_client.transfer(&env.current_contract_address(), staker, &amount);
         balance::set_shares(env, staker, user_shares - shares);
         balance::set_total_shares(env, total_shares - shares);
@@ -6688,6 +6747,11 @@ impl VaultContract {
         Self::append_stake_history(env, staker, StakeAction::Unstake, amount_returned);
 
         let token_client = token::Client::new(env, &token_addr);
+        let current_idle = token_client.balance(&env.current_contract_address());
+        if current_idle < amount_returned {
+            let needed = amount_returned - current_idle;
+            let _ = crate::vault_extensions_765_768::pull_from_strategies(env, needed);
+        }
         token_client.transfer(&env.current_contract_address(), recipient, &amount_returned);
 
         events::withdraw(
@@ -14708,26 +14772,10 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             checklist.completed_at = Some(ledger);
             balance::set_onboarding_checklist(env, user, &checklist);
             events::onboarding_completed(env, user, ledger);
-        let total_shares = balance::get_total_shares(&env);
-        let total_deposited = balance::get_total_deposited(&env);
-        let amount = balance::shares_to_amount(total_shares, total_deposited, shares)
-            .ok_or(VaultError::ArithmeticError)?;
-
-        // Issue #525: same fee waiver as `do_unstake` — `withdraw_to` is a
-        // withdrawal too, so it stays open and free during a sunset (and,
-        // issue #705, while the pool is withdraw-only).
-        let unstake_fee_bps = if balance::get_sunset_exit_deadline(&env).is_some()
-            || withdraw_only_mode::is_active(&env)
-        {
-            0
         } else {
-            balance::get_unstake_fee_bps(&env)
-        };
-        let fee = amount
-            .checked_mul(unstake_fee_bps as i128)
-            .and_then(|v| v.checked_div(10_000))
-            .ok_or(VaultError::ArithmeticError)?;
-        let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
+            balance::set_onboarding_checklist(env, user, &checklist);
+        }
+    }
 
     pub fn set_fee_buyback_enabled(
         env: Env,
@@ -14775,12 +14823,41 @@ pub fn get_reward_threshold(env: Env) -> i128 {
     /// Stake on behalf of a user from a contract caller.
     pub fn stake_via_contract(
         env: Env,
-        caller: Address,
-        user: Address,
+        contract: Address,
+        beneficiary: Address,
         amount: i128,
-    ) -> Result<i128, VaultError> {
-        caller.require_auth();
-        Self::stake(env, user, amount)
+    ) -> Result<i128, VaultFeatureError> {
+        contract.require_auth();
+
+        if amount <= 0 {
+            return Err(VaultFeatureError::ZeroAmount);
+        }
+
+        let mut delegate = balance::get_contract_delegate(&env, &beneficiary, &contract)
+            .ok_or(VaultFeatureError::NotAContractDelegate)?;
+
+        if delegate.max_stake_per_call > 0 && amount > delegate.max_stake_per_call {
+            return Err(VaultFeatureError::ContractDelegatePerCallExceeded);
+        }
+
+        let new_total_used = delegate
+            .total_used
+            .checked_add(amount)
+            .ok_or(VaultFeatureError::ArithmeticError)?;
+        if new_total_used > delegate.total_authorized {
+            return Err(VaultFeatureError::ContractDelegateCapExceeded);
+        }
+
+        let stake_token = Self::token_address(&env)?;
+        let token_client = token::Client::new(&env, &stake_token);
+        token_client.transfer(&contract, &beneficiary, &amount);
+
+        let shares = Self::do_stake_inner(&env, &beneficiary, amount)?;
+
+        delegate.total_used = new_total_used;
+        balance::set_contract_delegate(&env, &beneficiary, &contract, &delegate);
+
+        Ok(shares)
     }
 
     // ── Issue #536: inactivity decay configuration ────────────────────────
@@ -14872,9 +14949,6 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             let shares = balance::amount_to_shares(total_shares, total_deposited, amount)
                 .ok_or(VaultError::ArithmeticError)?;
 
-        Ok(shares)
-    }
-}
             let existing = balance::get_shares(&env, &beneficiary);
             balance::set_shares(&env, &beneficiary, existing + shares);
             new_total_shares += shares;

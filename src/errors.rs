@@ -1285,48 +1285,44 @@ impl From<VaultError> for VaultSafetyError {
     }
 }
 
-/// Errors for proposal categories, expedited proposals, vote delegation expiry,
-/// and strategy adapter management (issues #761-#764).
+/// Errors for strategy operations, idle buffer ratio, yield harvest,
+/// loss accounting, and emergency unwinds (issues #765-#768).
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum GovernanceStrategyError {
+pub enum StrategyError {
+    /// Action not allowed for the caller.
     Unauthorized = 1,
+    /// Contract or token not initialized.
     NotInitialized = 2,
+    /// Numeric overflow or underflow.
     ArithmeticError = 3,
+    /// Supplied amount must be positive.
     ZeroAmount = 4,
-    InvalidBps = 5,
-    InvalidPeriod = 6,
-    ProposalNotFound = 7,
-    ProposalAlreadyEnacted = 8,
-    VotingStillActive = 9,
-    QuorumNotMet = 10,
-    ThresholdNotMet = 11,
-    ProposalVetoed = 12,
-    ExpeditedLimitReached = 13,
-    InsufficientBond = 14,
-    DelegationExpired = 15,
-    SelfDelegationNotAllowed = 16,
-    MaxStrategiesReached = 17,
-    StrategyAlreadyExists = 18,
-    StrategyNotFound = 19,
-    StrategyCapExceeded = 20,
-    AdapterCallFailed = 21,
-    PositionNotFound = 22,
-    AlreadyVoted = 23,
-    DelayNotElapsed = 24,
+    /// Allocation would drop idle funds below the required idle buffer ratio (issue #765).
+    IdleBufferBreached = 5,
+    /// Strategy is disabled and cannot accept new allocations (issue #768).
+    StrategyDisabled = 6,
+    /// Strategy adapter was not found.
+    StrategyNotFound = 7,
+    /// Min idle buffer ratio exceeds 10 000 bps (100%).
+    InvalidRatio = 8,
+    /// Performance fee bps exceeds cap (50%).
+    InvalidFee = 9,
+    /// External adapter call failed or returned unexpected data.
+    AdapterFailed = 10,
+    /// No loss recorded or loss amount is non-positive.
+    NoLoss = 11,
 }
 
-impl From<VaultError> for GovernanceStrategyError {
+impl From<VaultError> for StrategyError {
     fn from(err: VaultError) -> Self {
         match err {
-            VaultError::Unauthorized => GovernanceStrategyError::Unauthorized,
-            VaultError::NotInitialized => GovernanceStrategyError::NotInitialized,
-            VaultError::ArithmeticError => GovernanceStrategyError::ArithmeticError,
-            VaultError::ZeroAmount => GovernanceStrategyError::ZeroAmount,
-            VaultError::PositionNotFound => GovernanceStrategyError::PositionNotFound,
-            _ => GovernanceStrategyError::Unauthorized,
+            VaultError::Unauthorized => StrategyError::Unauthorized,
+            VaultError::NotInitialized => StrategyError::NotInitialized,
+            VaultError::ArithmeticError => StrategyError::ArithmeticError,
+            VaultError::ZeroAmount => StrategyError::ZeroAmount,
+            _ => StrategyError::Unauthorized,
         }
     }
 }
-
