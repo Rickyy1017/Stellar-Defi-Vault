@@ -46,6 +46,13 @@ Format for an entry:
 
 ## Unreleased
 
+### Stellar Wave issue tracking
+- **What:** links the follow-up PR to issues #739, #740, and #741 individually.
+- **Why:** the changes for these issues were merged in PR #816, but editing
+  that merged PR's body did not retroactively close the issues.
+- **Breaking:** no.
+- **PR:** closes #739, #740, and #741 when this follow-up is merged.
+
 ### Time units and event schema
 - **What:** made the withdrawal cooldown's ledger field and selected
   cooldown/vesting arguments unit-explicit, clarified timestamp-only metadata,
