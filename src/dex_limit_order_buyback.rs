@@ -191,7 +191,7 @@ impl VaultContract {
         );
 
         // Keeper incentive: 0.5% of tokens bought
-        let keeper_incentive = tokens_bought.saturating_mul(50) / 10_000; // 0.5% = 50 bps
+        let keeper_incentive = tokens_bought.saturating_mul(50) / crate::constants::BPS_DENOMINATOR; // 0.5% = 50 bps
         let tokens_to_burn = tokens_bought.saturating_sub(keeper_incentive);
 
         if keeper_incentive > 0 {

@@ -29,7 +29,7 @@ pub trait DexPoolInterface {
 }
 
 /// Basis-point scale (10 000) used throughout the impact math.
-const BPS: i128 = 10_000;
+const BPS: i128 = crate::constants::BPS_DENOMINATOR;
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]

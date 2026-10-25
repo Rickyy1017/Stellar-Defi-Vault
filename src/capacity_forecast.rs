@@ -1,4 +1,4 @@
-﻿//! Predicts when the pool will reach its TVL capacity cap, based on recent
+//! Predicts when the pool will reach its TVL capacity cap, based on recent
 //! stake inflow (issue #402).
 
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
@@ -13,8 +13,8 @@ const LAST_WARN_KEY: Symbol = symbol_short!("cuf_warn");
 
 const MAX_INFLOW_ENTRIES: u32 = 100;
 /// 7 days at ~5s/ledger (matches `vault::LEDGERS_PER_DAY` * 7).
-const SEVEN_DAY_LEDGERS: u32 = 120_960;
-const LEDGERS_PER_DAY: u32 = 17_280;
+const SEVEN_DAY_LEDGERS: u32 = crate::constants::LEDGERS_PER_WEEK;
+const LEDGERS_PER_DAY: u32 = crate::constants::LEDGERS_PER_DAY;
 const WARNING_DAYS_THRESHOLD: u32 = 7;
 const WARNING_COOLDOWN_LEDGERS: u32 = LEDGERS_PER_DAY;
 

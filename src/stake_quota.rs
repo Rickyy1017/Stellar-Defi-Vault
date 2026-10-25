@@ -1,4 +1,4 @@
-﻿//! Stake-weighted operation quota ΓÇö bounds how many expensive operations
+//! Stake-weighted operation quota ΓÇö bounds how many expensive operations
 //! (governance proposals, content submissions, poll creation) a staker can
 //! perform per epoch, proportional to their share of the pool, so bot-driven
 //! spam can't outrun genuine economic stake (issue #339).
@@ -31,7 +31,7 @@ use crate::vault::VaultContractClient;
 /// Instance-storage key for the admin-configured quota parameters.
 const CONFIG_KEY: Symbol = symbol_short!("qt_cfg");
 
-/// Persistent-storage key prefix for a user's current-epoch quota usage.
+/// Temporary-storage key prefix for a user's current-epoch quota usage.
 /// Keyed by `(USAGE_KEY, user)`.
 const USAGE_KEY: Symbol = symbol_short!("qt_use");
 
@@ -53,14 +53,31 @@ fn get_config(env: &Env) -> Option<QuotaConfig> {
     env.storage().instance().get(&CONFIG_KEY)
 }
 
+fn usage_key(user: &Address) -> (Symbol, Address) {
+    (USAGE_KEY, user.clone())
+}
+
 fn get_usage(env: &Env, user: &Address) -> Option<QuotaUsage> {
-    env.storage().persistent().get(&(USAGE_KEY, user.clone()))
+    let key = usage_key(user);
+    if let Some(usage) = env.storage().temporary().get(&key) {
+        return Some(usage);
+    }
+    // Migrate prior persistent usage without granting a fresh quota.
+    let legacy = env.storage().persistent().get(&key);
+    if let Some(usage) = legacy.clone() {
+        env.storage().temporary().set(&key, &usage);
+        let ttl = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+        env.storage().temporary().extend_ttl(&key, ttl, ttl);
+        env.storage().persistent().remove(&key);
+    }
+    legacy
 }
 
 fn set_usage(env: &Env, user: &Address, usage: &QuotaUsage) {
-    env.storage()
-        .persistent()
-        .set(&(USAGE_KEY, user.clone()), usage);
+    let key = usage_key(user);
+    env.storage().temporary().set(&key, usage);
+    let ttl = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+    env.storage().temporary().extend_ttl(&key, ttl, ttl);
 }
 
 /// A user's total per-epoch allowance: `max(1, operations_per_epoch *
@@ -79,13 +96,13 @@ pub fn allowance(env: &Env, user: &Address) -> u32 {
     let user_shares = balance::get_shares(env, user);
 
     let share_bps = (user_shares as i128)
-        .checked_mul(10_000)
+        .checked_mul(crate::constants::BPS_DENOMINATOR)
         .and_then(|v| v.checked_div(total_shares as i128))
         .unwrap_or(0);
 
     let raw = (config.operations_per_epoch as i128)
         .checked_mul(share_bps)
-        .and_then(|v| v.checked_div(10_000))
+        .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
         .unwrap_or(0);
 
     raw.max(1) as u32
@@ -154,6 +171,12 @@ impl VaultContract {
         epoch_ledgers: u32,
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        // Reserve one TTL ledger because rollover uses a strict current > end boundary.
+        if epoch_ledgers == 0
+            || epoch_ledgers >= crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL
+        {
+            return Err(VaultError::InvalidRate);
+        }
 
         let config = QuotaConfig {
             operations_per_epoch,

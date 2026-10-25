@@ -1,4 +1,4 @@
-﻿//! Position Value-at-Risk estimate (issue #408).
+//! Position Value-at-Risk estimate (issue #408).
 //!
 //! A deterministic scenario analysis â€” not a statistical VaR in the
 //! probabilistic sense â€” that quantifies a staking position's exposure to
@@ -80,7 +80,7 @@ impl VaultContract {
                 .instance()
                 .get(&DataKey::EarlyExitPenaltyBps)
                 .unwrap_or(0);
-            (position_amount * penalty_bps as i128) / 10_000
+            (position_amount * penalty_bps as i128) / crate::constants::BPS_DENOMINATOR
         } else {
             0
         };
@@ -94,7 +94,7 @@ impl VaultContract {
             position_amount
                 .saturating_mul(reward_rate_bps)
                 .saturating_mul(remaining_ledgers)
-                / (10_000i128.saturating_mul(STELLAR_LEDGERS_PER_YEAR as i128))
+                / (crate::constants::BPS_DENOMINATOR.saturating_mul(STELLAR_LEDGERS_PER_YEAR as i128))
         } else {
             0
         };
@@ -103,10 +103,10 @@ impl VaultContract {
         // position's currently pending (unclaimed) reward.
         let pending_reward = balance::get_accrued_reward(&env, &user);
         let reward_price_drop_impact =
-            (pending_reward * reward_price_drop_bps as i128) / 10_000;
+            (pending_reward * reward_price_drop_bps as i128) / crate::constants::BPS_DENOMINATOR;
 
         let total_var_bps = if position_amount > 0 {
-            (((early_exit_loss + reward_price_drop_impact) * 10_000) / position_amount)
+            (((early_exit_loss + reward_price_drop_impact) * crate::constants::BPS_DENOMINATOR) / position_amount)
                 .clamp(0, u32::MAX as i128) as u32
         } else {
             0

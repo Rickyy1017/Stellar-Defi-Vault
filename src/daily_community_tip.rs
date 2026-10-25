@@ -98,7 +98,7 @@ fn set_voted(env: &Env, day: u32, user: &Address) {
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
     /// Issue #458: Submit a nomination for the daily featured tip. Content
-    /// is capped at `MAX_TIP_CONTENT_LEN` characters, and each staker may
+    /// `content` is capped at `MAX_TIP_CONTENT_LEN` bytes, and each staker may
     /// submit at most one tip per day. Returns the new tip's id.
     pub fn submit_daily_tip(
         env: Env,

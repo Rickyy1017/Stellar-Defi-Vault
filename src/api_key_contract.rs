@@ -1,4 +1,5 @@
 use soroban_sdk::{contract, contractimpl, Address, Bytes, Env};
+use crate::api_key::{API_KEY_BYTES_LEN, API_KEY_HASH_LEN};
 
 use crate::admin::{require_admin, require_admin_or_emergency_admin};
 use crate::api_key::{APIKey, APIKeyManager};
@@ -57,6 +58,7 @@ impl APIKeyContract {
         // Require admin authentication
         admin.require_auth();
         require_admin(&env)?;
+        if key_hash.len() != API_KEY_HASH_LEN { return Err(VaultError::InvalidHashLength); }
         
         APIKeyManager::revoke_api_key(&env, &key_hash)?;
         
@@ -78,6 +80,7 @@ impl APIKeyContract {
     /// # Returns
     /// `true` if the key is valid, `false` otherwise
     pub fn verify_api_key(env: Env, key_bytes: Bytes) -> bool {
+        if key_bytes.len() != API_KEY_BYTES_LEN { return false; }
         let is_valid = APIKeyManager::verify_api_key(&env, &key_bytes);
         
         if is_valid {
@@ -108,6 +111,7 @@ impl APIKeyContract {
     /// # Returns
     /// The API key data if found, `None` otherwise
     pub fn get_api_key_stats(env: Env, key_hash: Bytes) -> Option<APIKey> {
+        if key_hash.len() != API_KEY_HASH_LEN { return None; }
         APIKeyManager::get_api_key_stats(&env, &key_hash)
     }
 
@@ -119,6 +123,7 @@ impl APIKeyContract {
     /// # Returns
     /// `true` if the key is valid, `false` otherwise
     pub fn validate_api_key(env: Env, key_bytes: Bytes) -> bool {
+        if key_bytes.len() != API_KEY_BYTES_LEN { return false; }
         APIKeyManager::validate_api_key(&env, &key_bytes)
     }
 
@@ -130,6 +135,7 @@ impl APIKeyContract {
     /// # Returns
     /// The owner address if the key is valid, `None` otherwise
     pub fn get_key_owner(env: Env, key_bytes: Bytes) -> Option<Address> {
+        if key_bytes.len() != API_KEY_BYTES_LEN { return None; }
         APIKeyManager::get_key_owner(&env, &key_bytes)
     }
 
@@ -189,6 +195,7 @@ impl APIKeyContract {
         // Require admin or emergency admin authentication
         caller.require_auth();
         require_admin_or_emergency_admin(&env, &caller)?;
+        if key_hash.len() != API_KEY_HASH_LEN { return Err(VaultError::InvalidHashLength); }
         
         APIKeyManager::revoke_api_key(&env, &key_hash)?;
         

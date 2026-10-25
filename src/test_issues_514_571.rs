@@ -223,6 +223,43 @@ fn withdrawal_interval_0_disables_check() {
     assert!(al::check_withdrawal_interval(&f.env, &user).is_ok());
 }
 
+#[test]
+fn rate_limit_stamps_are_isolated_per_user() {
+    let f = Fixture::new();
+    let alice = f.funded_user(1_000_000_00);
+    let bob = f.funded_user(1_000_000_00);
+
+    al::set_user_withdrawal_interval(&f.env, &f.admin, &10).unwrap();
+    al::set_claim_cooldown(&f.env, &f.admin, &20).unwrap();
+    f.env.ledger().with_mut(|li| li.sequence_number = 1_000);
+    al::record_withdrawal(&f.env, &alice);
+    al::record_claim(&f.env, &alice);
+
+    assert_eq!(al::get_last_withdrawal_ledger(&f.env, &alice), Some(1_000));
+    assert_eq!(al::get_last_withdrawal_ledger(&f.env, &bob), None);
+    assert_eq!(al::get_last_claim_ledger(&f.env, &alice), Some(1_000));
+    assert_eq!(al::get_last_claim_ledger(&f.env, &bob), None);
+
+    f.env.ledger().with_mut(|li| li.sequence_number = 1_001);
+    assert_eq!(al::check_withdrawal_interval(&f.env, &alice), Err(AllowlistRateLimitError::WithdrawalTooSoon));
+    assert!(al::check_withdrawal_interval(&f.env, &bob).is_ok());
+    assert_eq!(al::check_claim_cooldown(&f.env, &alice), Err(AllowlistRateLimitError::ClaimTooSoon));
+    assert!(al::check_claim_cooldown(&f.env, &bob).is_ok());
+}
+
+#[test]
+fn rate_limit_windows_above_temporary_ttl_are_rejected() {
+    let f = Fixture::new();
+    let too_long = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL + 1;
+    assert_eq!(
+        al::set_user_withdrawal_interval(&f.env, &f.admin, &too_long),
+        Err(AllowlistRateLimitError::WindowTooLong)
+    );
+    assert_eq!(
+        al::set_claim_cooldown(&f.env, &f.admin, &too_long),
+        Err(AllowlistRateLimitError::WindowTooLong)
+    );
+}
 // ── Issue #516: partial reward claim ─────────────────────────────────────────
 
 #[test]

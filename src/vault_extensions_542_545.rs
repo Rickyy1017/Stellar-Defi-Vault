@@ -92,7 +92,7 @@ fn required_pool_balance(env: &Env) -> i128 {
     let obligations = total_outstanding_rewards(env);
     obligations
         .saturating_mul(bps as i128)
-        .checked_div(10_000)
+        .checked_div(crate::constants::BPS_DENOMINATOR)
         .unwrap_or(i128::MAX)
 }
 

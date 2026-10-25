@@ -13,12 +13,14 @@ use soroban_sdk::{
 };
 
 use crate::storage::{BrandingConfig, DataKey, PauseReason};
+use crate::vault::{MAX_PAUSE_MESSAGE_LEN, MAX_POOL_DESCRIPTION_LEN};
 use crate::vault::{
     VaultContract, VaultContractClient, MAX_BRANDING_LOGO_LEN, MAX_BRANDING_NAME_LEN,
     MAX_BRANDING_TWITTER_LEN, MAX_BRANDING_URL_LEN,
 };
 use crate::{admin, balance, events};
 
+const MAX_EMERGENCY_CONTACT_LEN: u32 = 200;
 const ROLES_KEY: Symbol = symbol_short!("adm_roles");
 const POOL_NAME_KEY: Symbol = symbol_short!("pool_nm");
 const CONTACT_KEY: Symbol = symbol_short!("emg_cont");
@@ -224,6 +226,7 @@ impl VaultContract {
     // ── Pauser ──────────────────────────────────────────────────────────────
 
     /// Pauser/admin: pause the pool (same as `pause`).
+    /// `message` is limited to `MAX_PAUSE_MESSAGE_LEN` bytes.
     pub fn role_pause(
         env: Env,
         caller: Address,
@@ -278,14 +281,14 @@ impl VaultContract {
         env.storage().instance().get(&POOL_NAME_KEY)
     }
 
-    /// Rater/admin: set the pool description, max 200 bytes (same as `set_pool_description`).
+    /// Rater/admin: set the pool description, max `MAX_POOL_DESCRIPTION_LEN` bytes.
     pub fn role_set_pool_description(
         env: Env,
         caller: Address,
         description: String,
     ) -> Result<(), RoleError> {
         authorize(&env, &caller, Role::Rater)?;
-        if description.len() > 200 {
+        if description.len() > MAX_POOL_DESCRIPTION_LEN {
             return Err(RoleError::InvalidValue);
         }
         balance::set_pool_description(&env, &description);
@@ -307,14 +310,14 @@ impl VaultContract {
         Ok(())
     }
 
-    /// Rater/admin: set the emergency contact string (1-200 bytes).
+    /// Rater/admin: set the emergency contact string (1-`MAX_EMERGENCY_CONTACT_LEN` bytes).
     pub fn set_emergency_contact(
         env: Env,
         caller: Address,
         contact: String,
     ) -> Result<(), RoleError> {
         authorize(&env, &caller, Role::Rater)?;
-        if contact.len() == 0 || contact.len() > 200 {
+        if contact.len() == 0 || contact.len() > MAX_EMERGENCY_CONTACT_LEN {
             return Err(RoleError::InvalidValue);
         }
         env.storage().instance().set(&CONTACT_KEY, &contact);

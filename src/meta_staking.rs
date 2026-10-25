@@ -40,8 +40,8 @@ use crate::vault::STELLAR_LEDGERS_PER_YEAR;
 use crate::vault::VaultContractClient;
 use crate::VaultContract;
 
-const BPS_DENOMINATOR: i128 = 10_000;
-const RATE_DENOMINATOR: i128 = 10_000 * STELLAR_LEDGERS_PER_YEAR as i128;
+const BPS_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR;
+const RATE_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR * STELLAR_LEDGERS_PER_YEAR as i128;
 
 const USER_POS_KEY: Symbol = symbol_short!("meta_pos");
 const USER_ACCRUED_KEY: Symbol = symbol_short!("meta_acc");

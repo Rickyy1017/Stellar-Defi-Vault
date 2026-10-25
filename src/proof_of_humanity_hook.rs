@@ -182,7 +182,7 @@ impl VaultContract {
         if verified_min_stake < 0 || unverified_min_stake < 0 {
             return Err(VaultCampaignError::InvalidHumanityConfig);
         }
-        if unverified_fee_surcharge_bps > 10_000 {
+        if unverified_fee_surcharge_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultCampaignError::InvalidHumanityConfig);
         }
 
@@ -273,7 +273,7 @@ impl VaultContract {
         let token_client = token::Client::new(&env, &token_addr);
         let contract = env.current_contract_address();
 
-        let surcharge = amount.saturating_mul(surcharge_bps as i128) / 10_000;
+        let surcharge = amount.saturating_mul(surcharge_bps as i128) / crate::constants::BPS_DENOMINATOR;
         let stake_amount = amount - surcharge;
 
         if surcharge > 0 {

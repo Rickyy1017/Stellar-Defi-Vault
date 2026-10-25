@@ -146,7 +146,8 @@ impl VaultContract {
 
     // ── Pauser ──────────────────────────────────────────────────────────────
 
-    /// Pauser: pause all deposits and withdrawals.
+    /// Pauser: pause all deposits and withdrawals; `message` is limited to
+    /// `MAX_PAUSE_MESSAGE_LEN` bytes.
     pub fn role_pause(
         env: Env,
         caller: Address,

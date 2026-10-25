@@ -1,4 +1,4 @@
-﻿//! Active compound-interval optimizer (issue #338).
+//! Active compound-interval optimizer (issue #338).
 //!
 //! Distinct from issue #185 (read-only optimal-claim-frequency advisory):
 //! this lets a user opt in to having a keeper *execute* claim-and-restake at
@@ -37,7 +37,7 @@ const CONFIG_KEY: Symbol = symbol_short!("cmp_opt");
 
 /// Keeper incentive: 0.25% of the claimed amount, per the issue.
 const KEEPER_INCENTIVE_BPS: i128 = 25;
-const BPS_DENOMINATOR: i128 = 10_000;
+const BPS_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR;
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -101,7 +101,7 @@ fn compute_optimal_interval(
     // unit system, so they cancel cleanly: interval ~ sqrt(2 * tx_cost_bps / rate_bps).
     // Scaled by STELLAR_LEDGERS_PER_YEAR so the result lands in ledger units
     // rather than a fraction-of-a-year float this no_std contract can't hold.
-    const LEDGERS_PER_YEAR: u128 = 6_307_200;
+    const LEDGERS_PER_YEAR: u128 = crate::constants::STELLAR_LEDGERS_PER_YEAR as u128;
 
     let numerator = 2u128
         .saturating_mul(tx_cost_bps as u128)

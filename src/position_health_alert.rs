@@ -84,8 +84,8 @@ impl VaultContract {
                                 .unwrap_or(0);
                         let max_borrowable = collateral_value
                             .saturating_mul(loan_config.max_ltv_bps as i128)
-                            / 10_000;
-                        let factor_bps = max_borrowable.saturating_mul(10_000) / debt;
+                            / crate::constants::BPS_DENOMINATOR;
+                        let factor_bps = max_borrowable.saturating_mul(crate::constants::BPS_DENOMINATOR) / debt;
                         let factor_bps_u32 = factor_bps.clamp(0, u32::MAX as i128) as u32;
                         (factor_bps_u32 < LOAN_HEALTH_WARNING_BPS, Some(factor_bps_u32))
                     }

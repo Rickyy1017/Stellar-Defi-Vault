@@ -1,4 +1,4 @@
-﻿//! Slash disputes ΓÇö lets a slashed staker challenge an admin slash on-chain,
+//! Slash disputes ΓÇö lets a slashed staker challenge an admin slash on-chain,
 //! triggering a stake-weighted community vote to overturn or uphold it
 //! (issue #336). Builds on issue #20 (the slash mechanism).
 //!
@@ -71,6 +71,8 @@ const SLASH_TO_DISPUTE_KEY: Symbol = symbol_short!("sd_s2d");
 /// Persistent-storage key prefix recording that a voter has voted on a
 /// dispute. Keyed by `(VOTED_KEY, dispute_id, voter)`.
 const VOTED_KEY: Symbol = symbol_short!("sd_voted");
+/// Maximum slash-dispute reason length, in bytes.
+pub const MAX_DISPUTE_REASON_LEN: u32 = 500;
 
 /// A single slash event, recorded so it can be disputed.
 #[contracttype]
@@ -184,10 +186,14 @@ impl VaultContract {
         Ok(())
     }
 
-    /// File a dispute against slash `slash_id`. Callable only by the user
+    /// File a dispute against slash `slash_id`; `reason` is limited to
+    /// `MAX_DISPUTE_REASON_LEN` bytes (`DescriptionTooLong` otherwise). Callable only by the user
     /// that slash actually targeted, within the configured dispute window.
     pub fn dispute_slash(env: Env, user: Address, slash_id: u32, reason: String) -> Result<u32, VaultError> {
         user.require_auth();
+        if reason.len() > MAX_DISPUTE_REASON_LEN {
+            return Err(VaultError::DescriptionTooLong);
+        }
 
         let record = load_slash_record(&env, slash_id).ok_or(VaultError::PositionNotFound)?;
         if record.user != user {

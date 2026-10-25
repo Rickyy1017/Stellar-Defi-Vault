@@ -18,7 +18,7 @@ use crate::vault::{VaultContract, BOOST_BPS_BASE, LEDGERS_PER_DAY, STELLAR_LEDGE
 
 const EMISSION_HISTORY_KEY: Symbol = symbol_short!("em_hist");
 const MAX_SAMPLES: u32 = 100;
-const BPS_DENOM: i128 = 10_000;
+const BPS_DENOM: i128 = crate::constants::BPS_DENOMINATOR;
 
 /// One sampled emission-rate snapshot.
 #[contracttype]

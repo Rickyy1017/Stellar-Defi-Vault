@@ -1,4 +1,4 @@
-﻿//! Pool pre-sale reserved staking spots (issue #369).
+//! Pool pre-sale reserved staking spots (issue #369).
 //!
 //! Lets the admin open a pre-sale window before the pool is generally
 //! available. During the window, buyers pay a non-refundable reservation fee
@@ -106,7 +106,7 @@ impl VaultContract {
                 return Err(VaultError::InvalidRate);
             }
         }
-        if reservation_fee_bps > 10_000 {
+        if reservation_fee_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultError::InvalidRate);
         }
         if max_reservation_per_user <= 0 || total_reservation_cap <= 0 {
@@ -214,7 +214,7 @@ impl VaultContract {
 
         let fee = amount
             .checked_mul(config.reservation_fee_bps as i128)
-            .and_then(|v| v.checked_div(10_000))
+            .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
             .ok_or(VaultError::ArithmeticError)?;
 
         if fee > 0 {

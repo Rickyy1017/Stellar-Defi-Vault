@@ -102,7 +102,7 @@ pub fn distribute_matched_reward(
     let matched = base_reward
         .checked_mul(record.match_bps as i128)
         .ok_or(VaultFeature2Error::ArithmeticError)?
-        .checked_div(10_000)
+        .checked_div(crate::constants::BPS_DENOMINATOR)
         .ok_or(VaultFeature2Error::ArithmeticError)?;
 
     let actual = matched.min(fund);
@@ -126,7 +126,7 @@ impl VaultContract {
     ) -> Result<(), VaultFeature2Error> {
         admin::require_admin(&env)?;
 
-        if match_bps == 0 || match_bps > 10_000 {
+        if match_bps == 0 || match_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultFeature2Error::InvalidRecoveryConfig);
         }
 

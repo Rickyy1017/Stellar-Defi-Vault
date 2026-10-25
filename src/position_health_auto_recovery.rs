@@ -113,8 +113,8 @@ pub fn current_health_bps(env: &Env, user: &Address) -> Option<u32> {
     let collateral_value =
         balance::shares_to_amount(total_shares, total_deposited, shares).unwrap_or(0);
     let max_borrowable =
-        collateral_value.saturating_mul(loan_config.max_ltv_bps as i128) / 10_000;
-    let factor_bps = max_borrowable.saturating_mul(10_000) / debt;
+        collateral_value.saturating_mul(loan_config.max_ltv_bps as i128) / crate::constants::BPS_DENOMINATOR;
+    let factor_bps = max_borrowable.saturating_mul(crate::constants::BPS_DENOMINATOR) / debt;
     Some(factor_bps.clamp(0, u32::MAX as i128) as u32)
 }
 
@@ -319,7 +319,7 @@ impl VaultContract {
         };
 
         // Keeper incentive: 0.5% of the recovery action value.
-        let incentive = action_value.saturating_mul(KEEPER_INCENTIVE_BPS) / 10_000;
+        let incentive = action_value.saturating_mul(KEEPER_INCENTIVE_BPS) / crate::constants::BPS_DENOMINATOR;
         if incentive > 0 {
             token_client.transfer(&contract, &keeper, &incentive);
         }

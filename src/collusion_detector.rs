@@ -1,4 +1,4 @@
-﻿//! Coordinated stake/unstake pattern detector (issue #406).
+//! Coordinated stake/unstake pattern detector (issue #406).
 //!
 //! Heuristically flags groups of addresses whose staking activity is
 //! suspiciously correlated in timing and amount â€” a signal of possible
@@ -105,7 +105,7 @@ fn within_amount_tolerance(a: i128, b: i128) -> bool {
     if base <= 0 {
         return a == b;
     }
-    diff.saturating_mul(10_000) <= base.saturating_mul(COORDINATION_TOLERANCE_BPS)
+    diff.saturating_mul(crate::constants::BPS_DENOMINATOR) <= base.saturating_mul(COORDINATION_TOLERANCE_BPS)
 }
 
 /// One user's latest recorded staking activity, if any.

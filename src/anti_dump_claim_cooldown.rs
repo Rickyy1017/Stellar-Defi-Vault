@@ -1,4 +1,4 @@
-﻿//! Anti-dump claim cooldown (issue #365).
+//! Anti-dump claim cooldown (issue #365).
 //!
 //! A large reward claim followed immediately by more claims creates
 //! sustained sell pressure on the reward token. Once a claim through this
@@ -29,7 +29,7 @@ use crate::vault::VaultContractClient;
 
 /// Instance key: cooldown configuration.
 const CONFIG_KEY: Symbol = symbol_short!("ad_cfg");
-/// Persistent key prefix: ledger a user's cooldown ends at. Keyed by
+/// Temporary key prefix: ledger a user's cooldown ends at. Keyed by
 /// `(COOLDOWN_KEY, user)`.
 const COOLDOWN_KEY: Symbol = symbol_short!("ad_cool");
 
@@ -50,17 +50,33 @@ fn set_config(env: &Env, config: &AntiDumpCooldownConfig) {
     env.storage().instance().set(&CONFIG_KEY, config);
 }
 
+fn cooldown_key(user: &Address) -> (Symbol, Address) {
+    (COOLDOWN_KEY, user.clone())
+}
+
 fn get_cooldown_until(env: &Env, user: &Address) -> u32 {
-    env.storage()
-        .persistent()
-        .get(&(COOLDOWN_KEY, user.clone()))
-        .unwrap_or(0)
+    let key = cooldown_key(user);
+    if let Some(until) = env.storage().temporary().get(&key) {
+        return until;
+    }
+    // Preserve an active pre-upgrade cooldown, then retire its persistent key.
+    if let Some(until) = env.storage().persistent().get::<_, u32>(&key) {
+        env.storage().persistent().remove(&key);
+        let remaining = until.saturating_sub(env.ledger().sequence());
+        if remaining > 0 {
+            env.storage().temporary().set(&key, &until);
+            env.storage().temporary().extend_ttl(&key, remaining, remaining);
+            return until;
+        }
+    }
+    0
 }
 
 fn set_cooldown_until(env: &Env, user: &Address, ledger: u32) {
-    env.storage()
-        .persistent()
-        .set(&(COOLDOWN_KEY, user.clone()), &ledger);
+    let key = cooldown_key(user);
+    let remaining = ledger.saturating_sub(env.ledger().sequence()).max(1);
+    env.storage().temporary().set(&key, &ledger);
+    env.storage().temporary().extend_ttl(&key, remaining, remaining);
 }
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
@@ -75,6 +91,9 @@ impl VaultContract {
 
         if threshold_amount <= 0 || cooldown_ledgers == 0 {
             return Err(VaultError::ZeroAmount);
+        }
+        if cooldown_ledgers > crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL {
+            return Err(VaultError::InvalidRate);
         }
 
         crate::anti_dump_claim_cooldown::set_config(

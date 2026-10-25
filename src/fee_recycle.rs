@@ -45,10 +45,10 @@ use crate::vault::{VaultContract, VaultContractArgs, VaultContractClient};
 const FEE_RECYCLE_BPS_KEY: Symbol = symbol_short!("fee_rcyc");
 
 /// Basis-point denominator used for the recycle share.
-const BPS_DENOMINATOR: i128 = 10_000;
+const BPS_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR;
 
 /// Highest recycle share the admin may configure (100%).
-pub const MAX_FEE_RECYCLE_BPS: u32 = 10_000;
+pub const MAX_FEE_RECYCLE_BPS: u32 = crate::constants::BPS_DENOMINATOR_U32;
 
 /// Current recycle share in basis points (`0` = disabled).
 pub fn get_fee_recycle_bps_internal(env: &Env) -> u32 {

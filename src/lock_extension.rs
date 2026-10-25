@@ -1,4 +1,4 @@
-﻿//! Voluntary lock-period extension for a reward boost.
+//! Voluntary lock-period extension for a reward boost.
 //!
 //! Vote-escrow-style tokenomics: a user who voluntarily commits to a longer
 //! lock than their position's current baseline receives a reward boost
@@ -105,7 +105,7 @@ impl VaultContract {
 
         let boost_gained = (additional_ledgers as u64)
             .checked_mul(config.boost_per_10k_ledgers_bps as u64)
-            .and_then(|v| v.checked_div(10_000))
+            .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
             .ok_or(VaultError::ArithmeticError)? as u32;
 
         let boost_key = (BOOST_KEY, user.clone());

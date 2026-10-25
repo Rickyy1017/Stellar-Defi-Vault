@@ -263,7 +263,7 @@ impl VaultContract {
             }
         }
         if let Some(bps) = deposit_fee_bps {
-            if bps > 10_000 {
+            if bps > crate::constants::BPS_DENOMINATOR_U32 {
                 return Err(VaultError::InvalidPenaltyBps);
             }
         }

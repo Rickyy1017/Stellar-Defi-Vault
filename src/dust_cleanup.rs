@@ -184,7 +184,7 @@ impl VaultContract {
         let tip_bps: u32 = env.storage().instance().get(&TIP_BPS_KEY).unwrap_or(0);
         let tip = amount
             .checked_mul(tip_bps as i128)
-            .and_then(|v| v.checked_div(10_000))
+            .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
             .ok_or(VaultSafetyError::ArithmeticError)?;
         let payout = amount - tip;
         let recipient: Address = env

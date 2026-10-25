@@ -1,3 +1,8 @@
+/// Maximum admin-configurable rate-limit window stored in temporary state.
+/// Kept below Soroban's protocol maximum entry TTL; used where configuration
+/// can be lengthened after a stamp or usage record is written.
+pub(crate) const MAX_TEMPORARY_RATE_LIMIT_TTL: u32 = 5_000_000;
+
 use soroban_sdk::{contracttype, Address, String, Vec, Env, Symbol, symbol_short};
 
 /// Consolidated per-user settings (issue #796).

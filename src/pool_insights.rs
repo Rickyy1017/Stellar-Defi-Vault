@@ -67,7 +67,7 @@ impl VaultContract {
         let pool_cap = balance::get_pool_cap(&env);
         let utilization_bps = if pool_cap > 0 && total_deposited > 0 {
             let scaled = total_deposited
-                .checked_mul(10_000)
+                .checked_mul(crate::constants::BPS_DENOMINATOR)
                 .and_then(|v| v.checked_div(pool_cap))
                 .unwrap_or(0);
             if scaled > u32::MAX as i128 {

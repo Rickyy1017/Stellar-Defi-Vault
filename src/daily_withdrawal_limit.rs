@@ -26,7 +26,7 @@
 //!
 //! # Storage
 //!
-//! Raw `Symbol`-keyed persistent storage per user, matching `balance.rs`.
+//! Raw `Symbol`-keyed temporary storage per user; absent/expired state is an empty window.
 
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Symbol};
 
@@ -56,14 +56,29 @@ pub fn set_limit(env: &Env, max_per_day: i128) {
     env.storage().instance().set(&LIMIT_KEY, &max_per_day);
 }
 
+fn tracker_key(user: &Address) -> (Symbol, Address) {
+    (TRACKER_KEY, user.clone())
+}
+
 fn get_raw_tracker(env: &Env, user: &Address) -> Option<DailyWithdrawalTracker> {
-    env.storage().persistent().get(&(TRACKER_KEY, user.clone()))
+    let key = tracker_key(user);
+    if let Some(tracker) = env.storage().temporary().get(&key) {
+        return Some(tracker);
+    }
+    // Migrate active state written by the previous version without resetting usage.
+    let legacy = env.storage().persistent().get(&key);
+    if let Some(tracker) = legacy.clone() {
+        env.storage().temporary().set(&key, &tracker);
+        env.storage().temporary().extend_ttl(&key, LEDGERS_PER_DAY, LEDGERS_PER_DAY);
+        env.storage().persistent().remove(&key);
+    }
+    legacy
 }
 
 fn set_tracker(env: &Env, user: &Address, tracker: &DailyWithdrawalTracker) {
-    env.storage()
-        .persistent()
-        .set(&(TRACKER_KEY, user.clone()), tracker);
+    let key = tracker_key(user);
+    env.storage().temporary().set(&key, tracker);
+    env.storage().temporary().extend_ttl(&key, LEDGERS_PER_DAY, LEDGERS_PER_DAY);
 }
 
 /// `user`'s tracker for the current rolling window. A fresh, zeroed tracker

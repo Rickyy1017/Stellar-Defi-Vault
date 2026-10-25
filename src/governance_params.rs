@@ -36,7 +36,7 @@ const SNAPSHOT_KEY: Symbol = symbol_short!("gv_snap");
 /// created, keyed by `(SNAPSHOT_BASE_KEY, proposal_id)`.
 const SNAPSHOT_BASE_KEY: Symbol = symbol_short!("gv_base");
 
-const BPS_BASE: i128 = 10_000;
+const BPS_BASE: i128 = crate::constants::BPS_DENOMINATOR;
 
 /// Quorum and pass threshold, both in basis points.
 #[derive(Clone, Debug, PartialEq)]

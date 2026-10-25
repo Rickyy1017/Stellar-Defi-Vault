@@ -75,6 +75,14 @@ fn unconfigured_pool_has_no_quota_gate() {
 }
 
 #[test]
+fn quota_epoch_must_fit_temporary_ttl_boundary() {
+    let f = Fixture::new();
+    let too_long = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+    assert!(f.vault.try_set_quota_config(&1, &too_long).is_err());
+    assert!(f.vault.try_set_quota_config(&1, &0).is_err());
+}
+
+#[test]
 fn large_staker_gets_more_quota() {
     let f = Fixture::new();
     f.vault.set_quota_config(&100, &1_000);

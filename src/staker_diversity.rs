@@ -1,4 +1,4 @@
-﻿//! Staker diversity / stake-concentration score (issue #407).
+//! Staker diversity / stake-concentration score (issue #407).
 //!
 //! Distinct from `get_reward_gini_coefficient` (issue #275), which measures
 //! inequality of *pending reward* distribution. This measures how evenly
@@ -45,7 +45,7 @@ fn top_n_share_bps(sorted_desc: &Vec<i128>, n: u32, total_staked: i128) -> u32 {
     if total_staked == 0 {
         0
     } else {
-        ((sum * 10_000) / total_staked).clamp(0, 10_000) as u32
+        ((sum * crate::constants::BPS_DENOMINATOR) / total_staked).clamp(0, crate::constants::BPS_DENOMINATOR) as u32
     }
 }
 
@@ -108,11 +108,11 @@ impl VaultContract {
         let mut herfindahl_index: i128 = 0;
         for i in 0..sorted_desc.len() {
             let amount = sorted_desc.get(i).unwrap();
-            let share_bps = (amount * 10_000) / total_staked;
-            herfindahl_index += (share_bps * share_bps) / 10_000;
+            let share_bps = (amount * crate::constants::BPS_DENOMINATOR) / total_staked;
+            herfindahl_index += (share_bps * share_bps) / crate::constants::BPS_DENOMINATOR;
         }
-        let herfindahl_index = herfindahl_index.clamp(0, 10_000) as u32;
-        let diversity_score_bps = 10_000u32.saturating_sub(herfindahl_index);
+        let herfindahl_index = herfindahl_index.clamp(0, crate::constants::BPS_DENOMINATOR) as u32;
+        let diversity_score_bps = crate::constants::BPS_DENOMINATOR_U32.saturating_sub(herfindahl_index);
 
         // "Top 1% / 10% of stakers" â€” at least one staker each, since a
         // fractional staker count rounds up to a whole staker.
