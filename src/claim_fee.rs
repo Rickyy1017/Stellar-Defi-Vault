@@ -9,7 +9,7 @@ use crate::{admin, errors::VaultError, storage::DataKey};
 
 const CLAIM_FEE_BPS_KEY: Symbol = symbol_short!("clm_fee");
 const CLAIM_FEE_RESERVE_KEY: Symbol = symbol_short!("clm_res");
-const BPS_DENOMINATOR: i128 = 10_000;
+const BPS_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR;
 pub const MAX_CLAIM_FEE_BPS: u32 = 500;
 
 pub fn get_claim_fee_bps_internal(env: &Env) -> u32 {

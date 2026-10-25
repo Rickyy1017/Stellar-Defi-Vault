@@ -2,11 +2,11 @@
 //! reward claim, and claim cooldown.
 //!
 //! These features are implemented as pure helper functions that read/write
-//! Soroban persistent storage, plus a new error enum. The vault contract
+//! Soroban temporary storage for short-lived stamps, plus a new error enum. The vault contract
 //! (`vault.rs`) wires these into its existing `deposit`, `stake`, `withdraw`,
 //! `unstake`, and `claim` entry points.
 
-use soroban_sdk::{contracterror, contracttype, Address, Env};
+use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol};
 
 // ── Error enum ───────────────────────────────────────────────────────────────
 
@@ -26,18 +26,20 @@ pub enum AllowlistRateLimitError {
     ClaimTooSoon = 4,
     /// Caller is not the contract admin.
     Unauthorized = 5,
+    /// A configured rate-limit window exceeds the temporary-storage bound.
+    WindowTooLong = 6,
 }
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 
-/// Persistent per-user storage key for withdrawal timing.
+/// Temporary per-user storage key for withdrawal timing.
 #[contracttype]
 #[derive(Clone)]
 pub struct WithdrawalTiming {
     pub last_withdrawal_ledger: u32,
 }
 
-/// Persistent per-user storage key for claim timing.
+/// Temporary per-user storage key for claim timing.
 #[contracttype]
 #[derive(Clone)]
 pub struct ClaimTiming {
@@ -117,17 +119,17 @@ fn allowlist_key(user: &Address) -> soroban_sdk::Symbol {
 const WITHDRAWAL_INTERVAL: &str = "w_int";
 
 /// Set the minimum ledger interval between a user's withdrawals (admin only).
-/// 0 disables the check.
-pub fn set_user_withdrawal_interval(env: &Env, admin: &Address, ledgers: u32) {
+/// 0 disables the check; windows are capped to the supported temporary TTL.
+pub fn set_user_withdrawal_interval(env: &Env, admin: &Address, ledgers: &u32) -> Result<(), AllowlistRateLimitError> {
     admin.require_auth();
+    if *ledgers > crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL {
+        return Err(AllowlistRateLimitError::WindowTooLong);
+    }
     env.storage()
         .instance()
-        .set::<_, u32>(
-            &soroban_sdk::symbol_short!(WITHDRAWAL_INTERVAL),
-            &ledgers,
-        );
+        .set::<_, u32>(&soroban_sdk::symbol_short!(WITHDRAWAL_INTERVAL), ledgers);
+    Ok(())
 }
-
 /// Get the configured withdrawal interval.
 pub fn get_user_withdrawal_interval(env: &Env) -> u32 {
     env.storage()
@@ -138,19 +140,20 @@ pub fn get_user_withdrawal_interval(env: &Env) -> u32 {
 
 /// Get the last ledger at which a user withdrew (None if never).
 pub fn get_last_withdrawal_ledger(env: &Env, user: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get::<_, u32>(&withdrawal_key(user))
+    // Retire the prior globally shared stamp; it cannot be attributed safely.
+    env.storage().persistent().remove(&soroban_sdk::symbol_short!("w_ldg"));
+    let key = withdrawal_key(env, user);
+    env.storage().temporary().get::<_, u32>(&key)
 }
 
 /// Record a withdrawal at the current ledger.
 pub fn record_withdrawal(env: &Env, user: &Address) {
     let ledger = env.ledger().sequence();
-    env.storage()
-        .persistent()
-        .set::<_, u32>(&withdrawal_key(user), &ledger);
+    let key = withdrawal_key(env, user);
+    env.storage().temporary().set::<_, u32>(&key, &ledger);
+    let ttl = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+    env.storage().temporary().extend_ttl(&key, ttl, ttl);
 }
-
 /// Validate that the user hasn't withdrawn too recently.
 pub fn check_withdrawal_interval(env: &Env, user: &Address) -> Result<(), AllowlistRateLimitError> {
     let interval = get_user_withdrawal_interval(env);
@@ -159,33 +162,32 @@ pub fn check_withdrawal_interval(env: &Env, user: &Address) -> Result<(), Allowl
     }
     if let Some(last) = get_last_withdrawal_ledger(env, user) {
         let current = env.ledger().sequence();
-        if current < last + interval {
+        if current < last.saturating_add(interval) {
             return Err(AllowlistRateLimitError::WithdrawalTooSoon);
         }
     }
     Ok(())
 }
 
-fn withdrawal_key(user: &Address) -> soroban_sdk::Symbol {
-    soroban_sdk::symbol_short!("w_ldg")
+fn withdrawal_key(env: &Env, user: &Address) -> (Symbol, Address) {
+    (Symbol::new(env, "w_ldg"), user.clone())
 }
-
 // ── Claim cooldown (#517) ────────────────────────────────────────────────────
 
 const CLAIM_COOLDOWN: &str = "c_int";
 
 /// Set the minimum ledger interval between a user's claims (admin only).
-/// 0 disables the check.
-pub fn set_claim_cooldown(env: &Env, admin: &Address, ledgers: u32) {
+/// 0 disables the check; windows are capped to the supported temporary TTL.
+pub fn set_claim_cooldown(env: &Env, admin: &Address, ledgers: &u32) -> Result<(), AllowlistRateLimitError> {
     admin.require_auth();
+    if *ledgers > crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL {
+        return Err(AllowlistRateLimitError::WindowTooLong);
+    }
     env.storage()
         .instance()
-        .set::<_, u32>(
-            &soroban_sdk::symbol_short!(CLAIM_COOLDOWN),
-            &ledgers,
-        );
+        .set::<_, u32>(&soroban_sdk::symbol_short!(CLAIM_COOLDOWN), ledgers);
+    Ok(())
 }
-
 /// Get the configured claim cooldown.
 pub fn get_claim_cooldown(env: &Env) -> u32 {
     env.storage()
@@ -196,19 +198,20 @@ pub fn get_claim_cooldown(env: &Env) -> u32 {
 
 /// Get the last ledger at which a user claimed (None if never).
 pub fn get_last_claim_ledger(env: &Env, user: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get::<_, u32>(&claim_key(user))
+    // Retire the prior globally shared stamp; it cannot be attributed safely.
+    env.storage().persistent().remove(&soroban_sdk::symbol_short!("c_ldg"));
+    let key = claim_key(env, user);
+    env.storage().temporary().get::<_, u32>(&key)
 }
 
 /// Record a claim at the current ledger.
 pub fn record_claim(env: &Env, user: &Address) {
     let ledger = env.ledger().sequence();
-    env.storage()
-        .persistent()
-        .set::<_, u32>(&claim_key(user), &ledger);
+    let key = claim_key(env, user);
+    env.storage().temporary().set::<_, u32>(&key, &ledger);
+    let ttl = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+    env.storage().temporary().extend_ttl(&key, ttl, ttl);
 }
-
 /// Validate that the user hasn't claimed too recently.
 pub fn check_claim_cooldown(env: &Env, user: &Address) -> Result<(), AllowlistRateLimitError> {
     let cooldown = get_claim_cooldown(env);
@@ -217,17 +220,16 @@ pub fn check_claim_cooldown(env: &Env, user: &Address) -> Result<(), AllowlistRa
     }
     if let Some(last) = get_last_claim_ledger(env, user) {
         let current = env.ledger().sequence();
-        if current < last + cooldown {
+        if current < last.saturating_add(cooldown) {
             return Err(AllowlistRateLimitError::ClaimTooSoon);
         }
     }
     Ok(())
 }
 
-fn claim_key(user: &Address) -> soroban_sdk::Symbol {
-    soroban_sdk::symbol_short!("c_ldg")
+fn claim_key(env: &Env, user: &Address) -> (Symbol, Address) {
+    (Symbol::new(env, "c_ldg"), user.clone())
 }
-
 // ── Partial claim (#516) ─────────────────────────────────────────────────────
 
 /// Validate that a partial claim amount does not exceed pending reward.

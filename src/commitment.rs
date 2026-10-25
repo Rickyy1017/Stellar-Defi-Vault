@@ -1,4 +1,4 @@
-﻿//! Commitâ€“reveal stake commitments (issue #288).
+//! Commitâ€“reveal stake commitments (issue #288).
 //!
 //! Lets a staker commit to an amount without revealing it, then reveal and
 //! stake later. A large stake intention is no longer telegraphed in the
@@ -32,13 +32,17 @@ use crate::vault::VaultContractClient;
 ///
 /// Roughly a day at ~5s ledgers. Long enough to survive a stuck transaction,
 /// short enough that an abandoned commitment does not lock the slot for long.
-pub const DEFAULT_COMMITMENT_WINDOW: u32 = 17_280;
+pub const DEFAULT_COMMITMENT_WINDOW: u32 = crate::constants::LEDGERS_PER_DAY;
 
 /// Instance-storage key for the configured reveal window.
 const WINDOW_KEY: Symbol = symbol_short!("cmt_wnd");
 
 /// Persistent-storage key prefix for a user's outstanding commitment.
 const COMMITMENT_KEY: Symbol = symbol_short!("cmt_rec");
+/// Exact SHA-256 commitment digest size, in bytes.
+pub const COMMITMENT_HASH_LEN: u32 = 32;
+/// Maximum reveal salt length, in bytes.
+pub const MAX_COMMITMENT_SALT_LEN: u32 = 64;
 
 /// An outstanding commitâ€“reveal record.
 #[contracttype]
@@ -134,11 +138,11 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         user.require_auth();
 
-        if commitment_hash.len() != 32 {
+        if commitment_hash.len() != COMMITMENT_HASH_LEN {
             // A SHA-256 digest is 32 bytes; anything else can never match a
             // reveal, so reject it now rather than locking the slot with a
             // commitment that is impossible to satisfy.
-            return Err(VaultError::InvalidAddress);
+            return Err(VaultError::InvalidHashLength);
         }
 
         if let Some(existing) = commitment_for(&env, &user) {
@@ -167,7 +171,7 @@ impl VaultContract {
         commitment_for(&env, &user)
     }
 
-    /// Reveal a commitment and stake the committed amount.
+    /// Reveal a commitment with `salt` limited to `MAX_COMMITMENT_SALT_LEN` bytes.
     ///
     /// Verifies `hash == SHA256(amount || salt)` before staking. On success the
     /// commitment is consumed, so the same reveal cannot be replayed.
@@ -184,6 +188,7 @@ impl VaultContract {
         salt: Bytes,
     ) -> Result<(), VaultError> {
         user.require_auth();
+        if salt.len() > MAX_COMMITMENT_SALT_LEN { return Err(VaultError::MessageTooLong); }
 
         let record = commitment_for(&env, &user).ok_or(VaultError::NotInitialized)?;
 

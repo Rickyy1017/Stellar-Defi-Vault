@@ -70,6 +70,6 @@ pub fn get(env: &Env, user: &Address) -> Option<(u32, Option<u32>)> {
 pub fn get_effective_multiplier_bps(env: &Env, user: &Address) -> u32 {
     match get(env, user) {
         Some((mult, _)) => mult,
-        None => 10_000,
+        None => crate::constants::BPS_DENOMINATOR_U32,
     }
 }

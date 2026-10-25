@@ -5,8 +5,10 @@ use crate::{admin, balance, errors::VaultError, storage::DataKey};
 const TREASURY_CONTRIBUTION_BPS_KEY: Symbol = symbol_short!("ct_bps");
 const COMMUNITY_TREASURY_BALANCE_KEY: Symbol = symbol_short!("ct_bal");
 const NEXT_SPENDING_PROPOSAL_ID_KEY: Symbol = symbol_short!("ct_next");
-const BPS_DENOMINATOR: i128 = 10_000;
-const MAX_TREASURY_CONTRIBUTION_BPS: u32 = 10_000;
+const BPS_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR;
+const MAX_TREASURY_CONTRIBUTION_BPS: u32 = crate::constants::BPS_DENOMINATOR_U32;
+/// Maximum spending proposal purpose length, in bytes.
+pub const MAX_SPENDING_PURPOSE_LEN: u32 = 200;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,6 +128,9 @@ pub fn propose_spending(
     duration_ledgers: u32,
 ) -> Result<u32, VaultError> {
     user.require_auth();
+    if purpose.len() > MAX_SPENDING_PURPOSE_LEN {
+        return Err(VaultError::DescriptionTooLong);
+    }
     if amount <= 0 || duration_ledgers == 0 {
         return Err(VaultError::ZeroAmount);
     }

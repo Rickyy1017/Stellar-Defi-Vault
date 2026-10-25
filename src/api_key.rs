@@ -1,5 +1,9 @@
 use soroban_sdk::{contracttype, Address, Bytes, Env};
 
+/// Exact byte length of issued API keys and their SHA-256 lookup hashes.
+pub const API_KEY_BYTES_LEN: u32 = 32;
+pub const API_KEY_HASH_LEN: u32 = 32;
+
 use crate::errors::VaultError;
 
 /// API Key struct for whitelabel pool integrations.
@@ -114,6 +118,7 @@ impl APIKeyManager {
     /// * `env` - The contract environment
     /// * `key_hash` - Hash of the API key to revoke
     pub fn revoke_api_key(env: &Env, key_hash: &Bytes) -> Result<(), VaultError> {
+        if key_hash.len() != API_KEY_HASH_LEN { return Err(VaultError::InvalidHashLength); }
         let mut api_key = APIKeyStorage::get(env, key_hash)
             .ok_or(VaultError::PositionNotFound)?; // Using PositionNotFound as "key not found"
         
@@ -132,6 +137,7 @@ impl APIKeyManager {
     /// # Returns
     /// `true` if the key is valid, `false` otherwise
     pub fn verify_api_key(env: &Env, key_bytes: &Bytes) -> bool {
+        if key_bytes.len() != API_KEY_BYTES_LEN { return false; }
         let key_hash = env.crypto().sha256(key_bytes);
         
         let mut api_key = match APIKeyStorage::get(env, &key_hash) {
@@ -173,6 +179,7 @@ impl APIKeyManager {
     /// # Returns
     /// The API key data if found, `None` otherwise
     pub fn get_api_key_stats(env: &Env, key_hash: &Bytes) -> Option<APIKey> {
+        if key_hash.len() != API_KEY_HASH_LEN { return None; }
         APIKeyStorage::get(env, key_hash)
     }
 
@@ -185,6 +192,7 @@ impl APIKeyManager {
     /// # Returns
     /// `true` if the key is valid, `false` otherwise
     pub fn validate_api_key(env: &Env, key_bytes: &Bytes) -> bool {
+        if key_bytes.len() != API_KEY_BYTES_LEN { return false; }
         let key_hash = env.crypto().sha256(key_bytes);
         
         let api_key = match APIKeyStorage::get(env, &key_hash) {
@@ -220,6 +228,7 @@ impl APIKeyManager {
     /// # Returns
     /// The owner address if the key is valid, `None` otherwise
     pub fn get_key_owner(env: &Env, key_bytes: &Bytes) -> Option<Address> {
+        if key_bytes.len() != API_KEY_BYTES_LEN { return None; }
         let key_hash = env.crypto().sha256(key_bytes);
         
         APIKeyStorage::get(env, &key_hash)

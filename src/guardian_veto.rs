@@ -66,7 +66,7 @@ const VETO_KEY: Symbol = symbol_short!("gv_veto");
 /// at 5s/ledger. Until it is raised above `0`, the guardian veto window has
 /// zero width and `guardian_veto_proposal` can never succeed — the admin
 /// must opt in to a real delay for this safeguard to do anything.
-pub const DEFAULT_EXECUTION_DELAY_LEDGERS: u32 = 17_280;
+pub const DEFAULT_EXECUTION_DELAY_LEDGERS: u32 = crate::constants::LEDGERS_PER_DAY;
 
 /// A permanent, publicly readable record of a guardian veto.
 #[contracttype]

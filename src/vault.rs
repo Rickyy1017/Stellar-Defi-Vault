@@ -79,7 +79,7 @@ pub const CONTRACT_VERSION: &str = "0.1.0";
 pub(crate) const CONTRACT_NAME: &str = "stellar-staking-pool";
 pub(crate) const CONTRACT_DESCRIPTION: &str =
     "A staking pool contract for Stellar DeFi vault positions.";
-pub(crate) const BOOST_BPS_BASE: u32 = 10_000;
+pub(crate) use crate::constants::BPS_DENOMINATOR_U32 as BOOST_BPS_BASE;
 pub(crate) const MAX_BOOST_TIERS: u32 = 5;
 pub(crate) const MAX_BATCH_ENTRIES: u32 = 20;
 pub(crate) const MAX_FEE_RECIPIENTS: u32 = 5;
@@ -89,10 +89,10 @@ pub(crate) const MAX_COMPETITOR_POOLS: u32 = 10;
 pub(crate) const MAX_WAVE_USERS: u32 = 50;
 pub(crate) const MAX_KYC_APPROVALS: u32 = 50;
 pub(crate) const MAX_HISTORY_SNAPSHOTS: u32 = 100;
-pub(crate) const STELLAR_LEDGERS_PER_YEAR: u32 = 6_307_200;
+pub(crate) use crate::constants::STELLAR_LEDGERS_PER_YEAR;
 pub(crate) const MAX_UNSTAKE_FEE_BPS: u32 = 500;
 /// Approximate number of Stellar ledgers in one day at 5 s/ledger (issue #133).
-pub(crate) const LEDGERS_PER_DAY: u32 = 17_280;
+pub(crate) use crate::constants::LEDGERS_PER_DAY;
 /// Days of runway below which a refill alert is emitted.
 pub(crate) const REFILL_ALERT_DAYS: u32 = 30;
 /// Fraction of total_staked reserved as a liquidity buffer, never deployed to
@@ -151,6 +151,28 @@ pub const MAX_DEPOSITOR_SCAN: u32 = 200;
 pub(crate) const MAX_SEASONS: u32 = 10;
 /// Longest allowed `set_staker_bio()` bio, in bytes (issue #274).
 pub(crate) const MAX_BIO_LEN: u32 = 160;
+/// Maximum human-readable pause message length, in bytes.
+pub(crate) const MAX_PAUSE_MESSAGE_LEN: u32 = 200;
+/// Maximum persisted pool-description length, in bytes.
+pub(crate) const MAX_POOL_DESCRIPTION_LEN: u32 = 200;
+/// Exact SHA-256 digest size for bug-bounty description references.
+pub(crate) const BUG_BOUNTY_DESCRIPTION_HASH_LEN: u32 = 32;
+/// Maximum reward movement trigger label length, in bytes.
+pub(crate) const MAX_TRIGGERED_BY_LEN: u32 = 128;
+/// Maximum spending purpose length, in bytes.
+pub(crate) const MAX_SPENDING_PURPOSE_LEN: u32 = 200;
+/// Maximum season name length, in bytes.
+pub(crate) const MAX_SEASON_NAME_LEN: u32 = 64;
+/// Maximum milestone name length, in bytes.
+pub(crate) const MAX_MILESTONE_NAME_LEN: u32 = 64;
+/// Maximum oracle asset identifier length, in bytes.
+pub(crate) const MAX_ASSET_ID_LEN: u32 = 64;
+/// Exact SHA-256 digest size for quiz question and answer hashes.
+pub(crate) const QUIZ_HASH_LEN: u32 = 32;
+/// Exact SHA-256 digest size for Merkle distribution roots.
+pub(crate) const MERKLE_ROOT_HASH_LEN: u32 = 32;
+/// Exact SHA-256 digest size for revenue-share Merkle roots.
+pub(crate) const REVENUE_MERKLE_ROOT_HASH_LEN: u32 = 32;
 /// Max waitlist size cap (Acceptance Criteria #7)
 pub(crate) const MAX_WAITLIST_SIZE: u32 = 100;
 
@@ -561,7 +583,7 @@ impl VaultContract {
         if admin_addr != admin::get_admin(&env)? {
             return Err(VaultError::Unauthorized);
         }
-        if referrer_bps > 10_000 || referee_bps > 10_000 {
+        if referrer_bps > crate::constants::BPS_DENOMINATOR_U32 || referee_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultError::InvalidRate);
         }
         env.storage()
@@ -1814,8 +1836,8 @@ impl VaultContract {
         let boosted = if let Some((unlocks_at, boost_bps)) = Self::get_lock_status(env.clone(), user) {
             if env.ledger().sequence() < unlocks_at && boost_bps > 0 {
                 gated
-                    .checked_mul(10_000_i128 + boost_bps as i128)
-                    .and_then(|value| value.checked_div(10_000))
+                    .checked_mul(crate::constants::BPS_DENOMINATOR + boost_bps as i128)
+                    .and_then(|value| value.checked_div(crate::constants::BPS_DENOMINATOR))
                     .ok_or(VaultError::ArithmeticError)?
             } else {
                 gated
@@ -1915,7 +1937,7 @@ impl VaultContract {
                 .checked_mul(rank_weighted)
                 .ok_or(VaultError::ArithmeticError)?
                 .checked_sub(
-                    (10_000i128)
+                    (crate::constants::BPS_DENOMINATOR)
                         .checked_mul(n + 1)
                         .ok_or(VaultError::ArithmeticError)?
                         .checked_mul(total)
@@ -1923,7 +1945,7 @@ impl VaultContract {
                 )
                 .ok_or(VaultError::ArithmeticError)?;
             let denominator = n.checked_mul(total).ok_or(VaultError::ArithmeticError)?;
-            (numerator / denominator).clamp(0, 10_000) as u32
+            (numerator / denominator).clamp(0, crate::constants::BPS_DENOMINATOR) as u32
         };
 
         events::gini_computed(&env, gini_bps, count, env.ledger().sequence());
@@ -2010,7 +2032,7 @@ impl VaultContract {
             for r in recipients.iter() {
                 total_bps = total_bps.saturating_add(r.share_bps);
             }
-            if total_bps != 10_000 {
+            if total_bps != crate::constants::BPS_DENOMINATOR_U32 {
                 return Err(VaultExtError::InvalidFeeAllocation);
             }
         }
@@ -2042,7 +2064,7 @@ impl VaultContract {
         // first normally, then give the first whatever remains.
         let mut distributed_to_rest: i128 = 0;
         for r in recipients.iter().skip(1) {
-            let share_amount = (fee_amount * r.share_bps as i128) / 10_000;
+            let share_amount = (fee_amount * r.share_bps as i128) / crate::constants::BPS_DENOMINATOR;
             distributed_to_rest += share_amount;
             if share_amount > 0 {
                 token_client.transfer(&env.current_contract_address(), &r.address, &share_amount);
@@ -2353,8 +2375,8 @@ impl VaultContract {
 
     /// Pause all deposits and withdrawals (admin only).
     ///
-    /// `reason` categorizes why the pool is paused; `message` provides a
-    /// human-readable explanation (max 200 characters).
+    /// `reason` categorizes the pause; `message` is a human-readable explanation
+    /// limited to `MAX_PAUSE_MESSAGE_LEN` bytes (`DescriptionTooLong` otherwise).
     pub fn pause(
         env: Env,
         reason: PauseReason,
@@ -2367,7 +2389,7 @@ impl VaultContract {
             return Err(VaultError::Unauthorized);
         }
 
-        if message.len() > 200 {
+        if message.len() > MAX_PAUSE_MESSAGE_LEN {
             return Err(VaultError::DescriptionTooLong);
         }
 
@@ -2426,6 +2448,7 @@ impl VaultContract {
 
     /// Pause all deposits and withdrawals now, scheduling an automatic
     /// unpause once `target_ledger` is reached (issue #556) — useful for
+    /// planned windows; `message` is limited to `MAX_PAUSE_MESSAGE_LEN` bytes.
     /// planned maintenance windows where the duration is known in advance,
     /// without a second manual transaction later.
     ///
@@ -2449,7 +2472,7 @@ impl VaultContract {
             return Err(VaultError::Unauthorized);
         }
 
-        if message.len() > 200 {
+        if message.len() > MAX_PAUSE_MESSAGE_LEN {
             return Err(VaultError::DescriptionTooLong);
         }
 
@@ -2611,7 +2634,8 @@ impl VaultContract {
 
     /// Admin function to add a new quiz for the stake_to_learn feature (issue #391).
     ///
-    /// - `question_hash` / `answer_hash`: pre-hashed off-chain (plaintext never stored).
+    /// - `question_hash` / `answer_hash`: exactly `QUIZ_HASH_LEN` bytes each
+    ///   (SHA-256); plaintext is never stored.
     /// - `reward_tier_unlocked`: tier index unlocked on quiz completion.
     /// - `attempts_allowed`: max answer submissions per user (must be ≥ 1).
     ///
@@ -2628,8 +2652,8 @@ impl VaultContract {
         admin::require_admin(&env)?;
         Self::require_not_paused(&env)?;
 
-        if question_hash.len() == 0 || answer_hash.len() == 0 {
-            return Err(VaultQuizError::ZeroAmount);
+        if question_hash.len() != QUIZ_HASH_LEN || answer_hash.len() != QUIZ_HASH_LEN {
+            return Err(VaultQuizError::InvalidHashLength);
         }
         if attempts_allowed == 0 {
             return Err(VaultQuizError::ZeroAmount);
@@ -2661,7 +2685,7 @@ impl VaultContract {
         Ok(())
     }
 
-    /// User function to submit a hashed answer to a quiz (issue #391).
+    /// User function to submit `answer_hash`, exactly `QUIZ_HASH_LEN` bytes (issue #391).
     ///
     /// - **Correct answer**: records completion permanently, updates the user's
     ///   highest unlocked tier, emits `quiz_completed`.
@@ -2675,6 +2699,9 @@ impl VaultContract {
         user.require_auth();
         Self::require_not_paused(&env)?;
 
+        if answer_hash.len() != QUIZ_HASH_LEN {
+            return Err(VaultQuizError::InvalidHashLength);
+        }
         if answer_hash.len() == 0 {
             return Err(VaultQuizError::ZeroAmount);
         }
@@ -2807,6 +2834,7 @@ impl VaultContract {
     }
 
     /// Explicit/admin entrypoint to log a reward token movement.
+    /// `triggered_by` is limited to 128 bytes; excess returns `DescriptionTooLong`.
     pub fn log_reward_movement(
         env: Env,
         movement_type: crate::reward_token_audit_trail::MovementType,
@@ -2816,6 +2844,9 @@ impl VaultContract {
         triggered_by: String,
     ) -> Result<u64, VaultError> {
         admin::require_admin(&env)?;
+        if triggered_by.len() > MAX_TRIGGERED_BY_LEN {
+            return Err(VaultError::DescriptionTooLong);
+        }
         Ok(crate::reward_token_audit_trail::log_reward_movement(
             &env,
             movement_type,
@@ -2870,6 +2901,9 @@ impl VaultContract {
 
         if amount <= 0 {
             return Err(VaultError::ZeroAmount);
+        }
+        if description_hash.len() != BUG_BOUNTY_DESCRIPTION_HASH_LEN {
+            return Err(VaultError::InvalidHashLength);
         }
 
         let current_fund = crate::stake_funded_bug_bounty::get_fund_balance(&env);
@@ -3053,6 +3087,8 @@ impl VaultContract {
         crate::community_treasury::get_spending_proposal(&env, proposal_id)
     }
 
+    /// `purpose` is limited to `MAX_SPENDING_PURPOSE_LEN` bytes
+    /// (`DescriptionTooLong` otherwise).
     pub fn propose_spending(
         env: Env,
         user: Address,
@@ -3061,6 +3097,9 @@ impl VaultContract {
         purpose: String,
         duration_ledgers: u32,
     ) -> Result<u32, VaultError> {
+        if purpose.len() > MAX_SPENDING_PURPOSE_LEN {
+            return Err(VaultError::DescriptionTooLong);
+        }
         crate::community_treasury::propose_spending(
             &env,
             &user,
@@ -3123,7 +3162,7 @@ impl VaultContract {
 
     // ── Issue #182: stake-event webhook URL config ───────────────────────────
 
-    /// Maximum length in characters for the stored webhook URL.
+    /// Maximum stored webhook URL length, in bytes (`MAX_WEBHOOK_URL_LENGTH`).
     const MAX_WEBHOOK_URL_LENGTH: u32 = 200;
 
     /// Admin: store an off-chain webhook URL for indexers/monitoring bots to
@@ -3225,7 +3264,7 @@ impl VaultContract {
         let bonus = |bps: u32| {
             deposit_amount
                 .checked_mul(bps as i128)
-                .and_then(|value| value.checked_div(10_000))
+                .and_then(|value| value.checked_div(crate::constants::BPS_DENOMINATOR))
                 .ok_or(VaultError::ArithmeticError)
         };
         let referrer_bonus = bonus(referrer_bps)?;
@@ -4678,7 +4717,7 @@ impl VaultContract {
         if bps == 0 || reward == 0 {
             return (reward, 0);
         }
-        let user_reward = reward.saturating_mul(10_000 - bps as i128) / 10_000;
+        let user_reward = reward.saturating_mul(crate::constants::BPS_DENOMINATOR - bps as i128) / crate::constants::BPS_DENOMINATOR;
         let insurance_portion = reward - user_reward;
         (user_reward, insurance_portion)
     }
@@ -5754,9 +5793,10 @@ impl VaultContract {
 
     /// Admin schedules a new season: a `[starts_at, ends_at)` ledger window
     /// during which the reward rate is multiplied by `multiplier_bps`
-    /// (issue #276). Max `MAX_SEASONS` (10) scheduled at once. Reverts with
-    /// `SeasonOverlap` if the range overlaps any existing season — only one
-    /// season may be active at a time.
+    /// (issue #276). Max `MAX_SEASONS` (10) scheduled at once; `name` is
+    /// limited to `MAX_SEASON_NAME_LEN` bytes. Reverts with `InvalidSeasonConfig`
+    /// if the name or time/rate configuration is invalid, and `SeasonOverlap`
+    /// if the range overlaps any existing season.
     pub fn add_season(
         env: Env,
         admin: Address,
@@ -8889,7 +8929,8 @@ impl VaultContract {
 
     // ── Issue #97: pool description ────────────────────────────────────────────
 
-    /// Admin: set or update the on-chain pool description.
+    /// Admin: set or update the on-chain pool description (maximum
+    /// `MAX_POOL_DESCRIPTION_LEN` bytes).
     ///
     /// The description is stored as a `soroban_sdk::String` in instance storage
     /// and can be queried via `get_pool_description`. Maximum length is 200
@@ -8903,7 +8944,7 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin::require_admin_as(&env, &admin)?;
 
-        if description.len() > 200 {
+        if description.len() > MAX_POOL_DESCRIPTION_LEN {
             return Err(VaultError::DescriptionTooLong);
         }
 
@@ -10249,6 +10290,7 @@ impl VaultContract {
     /// `soroban_sdk::crypto::Sha256`). Each proof step hashes
     /// `hash(left || right)` to walk up to the root, matching the convention
     /// used by the off-chain proof generator.
+    /// `root` must be exactly `MERKLE_ROOT_HASH_LEN` bytes (SHA-256).
     pub fn publish_merkle_root(
         env: Env,
         admin: Address,
@@ -10257,6 +10299,9 @@ impl VaultContract {
         total_claimable: i128,
     ) -> Result<(), VaultExtError> {
         admin::require_admin_as(&env, &admin)?;
+        if root.len() != MERKLE_ROOT_HASH_LEN {
+            return Err(VaultExtError::MerkleInvalidProof);
+        }
 
         let mr = MerkleRoot {
             root,
@@ -10750,7 +10795,8 @@ impl VaultContract {
 
     // ── Issue #238: loyalty milestone badges ───────────────────────────────────
 
-    /// Admin registers a new milestone. Max 10 milestones may be configured.
+    /// Admin registers a new milestone. Max 10 milestones; `name` is limited
+    /// to `MAX_MILESTONE_NAME_LEN` bytes (excess returns `InvalidMultisigConfig`).
     ///
     /// Reverts with `TooManyMilestones` if the cap is already reached.
     pub fn add_milestone(
@@ -10762,6 +10808,9 @@ impl VaultContract {
     ) -> Result<u32, VaultExtError> {
         admin::require_admin_as(&env, &admin)?;
 
+        if name.len() > MAX_MILESTONE_NAME_LEN {
+            return Err(VaultExtError::InvalidMultisigConfig);
+        }
         let mut milestones = balance::get_milestones(&env);
         if milestones.len() >= MAX_MILESTONES {
             return Err(VaultExtError::TooManyMilestones);
@@ -10857,6 +10906,8 @@ impl VaultContract {
 
     /// Caller sets their own price condition; once satisfied, it waives
     /// their position's early-exit lock-up penalty (see `check_and_release`).
+    /// `asset_id` is limited to `MAX_ASSET_ID_LEN` bytes (excess returns
+    /// `UnsupportedInputToken`).
     ///
     /// Reverts with `ZeroAmount` if `trigger_price` is not positive.
     pub fn set_price_condition(
@@ -10869,6 +10920,9 @@ impl VaultContract {
         user.require_auth();
         if trigger_price <= 0 {
             return Err(VaultExtError::ZeroAmount);
+        }
+        if asset_id.len() > MAX_ASSET_ID_LEN {
+            return Err(VaultExtError::UnsupportedInputToken);
         }
         let condition = PriceCondition {
             trigger_price,
@@ -11403,7 +11457,7 @@ impl VaultContract {
         for _ in 0..periods {
             table.push_back(current);
             // Simple compound: current += current * rate_bps / 10000
-            let reward = current.saturating_mul(rate) / 10_000i128;
+            let reward = current.saturating_mul(rate) / crate::constants::BPS_DENOMINATOR;
             current = current.saturating_add(reward);
         }
 
@@ -12416,12 +12470,16 @@ impl VaultContract {
         balance::get_revenue_sharing_config(&env)
     }
 
+    /// `merkle_root` must be exactly `REVENUE_MERKLE_ROOT_HASH_LEN` bytes (SHA-256).
     pub fn distribute_revenue(
         env: Env,
         admin: Address,
         merkle_root: soroban_sdk::Bytes,
     ) -> Result<(), VaultFeatureError> {
         admin::require_admin_as(&env, &admin)?;
+        if merkle_root.len() != REVENUE_MERKLE_ROOT_HASH_LEN {
+            return Err(VaultFeatureError::RevenueShareInvalidProof);
+        }
 
         let total_amount = balance::get_revenue_share_pool(&env);
         if total_amount <= 0 {
@@ -12764,7 +12822,7 @@ impl VaultContract {
             return Ok(0);
         }
         let position_amount = (shares * total_deposited) / total_shares;
-        let bonus = (position_amount * bonus_bps as i128) / 10_000;
+        let bonus = (position_amount * bonus_bps as i128) / crate::constants::BPS_DENOMINATOR;
         if bonus <= 0 {
             return Ok(0);
         }
@@ -13514,7 +13572,7 @@ impl VaultContract {
         };
         let fee = amount
             .checked_mul(unstake_fee_bps as i128)
-            .and_then(|v| v.checked_div(10_000))
+            .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
             .ok_or(VaultError::ArithmeticError)?;
         let payout = amount.checked_sub(fee).ok_or(VaultError::ArithmeticError)?;
         // Issue #554: per-user rolling 24h cap on the gross amount withdrawn.
@@ -13544,7 +13602,7 @@ impl VaultContract {
                 for i in 0..split.recipients.len() {
                     let recipient = split.recipients.get(i).unwrap();
                     let bps = split.bps_shares.get(i).unwrap();
-                    let amount = (remaining_fee * (bps as i128)) / 10000;
+                    let amount = (remaining_fee * (bps as i128)) / crate::constants::BPS_DENOMINATOR;
                     if amount > 0 {
                         token_client.transfer(&env.current_contract_address(), &recipient, &amount);
                     }
@@ -14266,7 +14324,7 @@ pub fn set_pool_description(
     admin::require_admin(&env)?;
     let _ = admin;
 
-    if description.len() > 200 {
+    if description.len() > MAX_POOL_DESCRIPTION_LEN {
         return Err(VaultError::DescriptionTooLong);
     }
 
@@ -14999,7 +15057,7 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         Self::require_not_stopped(env)?;
 
-        if message.len() > 200 {
+        if message.len() > MAX_PAUSE_MESSAGE_LEN {
             return Err(VaultError::DescriptionTooLong);
         }
 

@@ -1,4 +1,4 @@
-﻿//! Staking covenant (issue #413).
+//! Staking covenant (issue #413).
 //!
 //! Before staking, a user acknowledges and commits to a set of pool terms â€”
 //! published by the admin as a hash â€” creating an auditable on-chain record
@@ -28,6 +28,8 @@ use crate::vault::VaultContractClient;
 const TERMS_KEY: Symbol = symbol_short!("cov_trm");
 /// Persistent key prefix: `(RECORD_KEY, user) -> CovenantRecord`.
 const RECORD_KEY: Symbol = symbol_short!("cov_rec");
+/// Exact SHA-256 digest size for published pool terms.
+pub const POOL_TERMS_HASH_LEN: u32 = 32;
 
 /// A staker's signed commitment to a specific terms version (issue #413).
 #[contracttype]
@@ -69,12 +71,16 @@ fn signed_current(env: &Env, user: &Address) -> bool {
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
-    /// Publishes the pool terms as a hash and version. Admin only. Existing
+    /// Publishes the pool terms as a SHA-256 hash and version. `terms_hash`
+    /// must be exactly `POOL_TERMS_HASH_LEN` bytes (`InvalidHashLength` otherwise). Admin only. Existing
     /// stakers' positions are untouched, but their `CovenantRecord` is no
     /// longer current, so `stake_with_covenant` will require a fresh
     /// signature on their next top-up.
     pub fn set_pool_terms(env: Env, terms_hash: Bytes, version: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        if terms_hash.len() != POOL_TERMS_HASH_LEN {
+            return Err(VaultError::InvalidHashLength);
+        }
         crate::staking_covenant::set_terms(&env, &terms_hash, version);
         env.events()
             .publish((symbol_short!("cov_set"),), (version, env.ledger().sequence()));
@@ -92,6 +98,9 @@ impl VaultContract {
     /// published hash, or `NotInitialized` if no terms have been published.
     pub fn sign_covenant(env: Env, user: Address, terms_hash: Bytes) -> Result<(), VaultError> {
         user.require_auth();
+        if terms_hash.len() != POOL_TERMS_HASH_LEN {
+            return Err(VaultError::InvalidHashLength);
+        }
 
         let (current_hash, version) =
             crate::staking_covenant::get_terms(&env).ok_or(VaultError::NotInitialized)?;

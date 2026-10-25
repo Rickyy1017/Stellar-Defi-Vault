@@ -63,8 +63,8 @@ fn validate_config(config: &PegConfig) -> Result<(), VaultError> {
     }
     if config.lower_band_bps == 0
         || config.upper_band_bps == 0
-        || config.lower_band_bps > 10_000
-        || config.upper_band_bps > 10_000
+        || config.lower_band_bps > crate::constants::BPS_DENOMINATOR_U32
+        || config.upper_band_bps > crate::constants::BPS_DENOMINATOR_U32
     {
         return Err(VaultError::InvalidRate);
     }
@@ -74,16 +74,16 @@ fn validate_config(config: &PegConfig) -> Result<(), VaultError> {
 fn lower_bound(config: &PegConfig) -> Result<i128, VaultError> {
     config
         .target_price
-        .checked_mul(10_000_i128.saturating_sub(config.lower_band_bps as i128))
-        .and_then(|v| v.checked_div(10_000))
+        .checked_mul(crate::constants::BPS_DENOMINATOR.saturating_sub(config.lower_band_bps as i128))
+        .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
         .ok_or(VaultError::ArithmeticError)
 }
 
 fn upper_bound(config: &PegConfig) -> Result<i128, VaultError> {
     config
         .target_price
-        .checked_mul(10_000_i128.saturating_add(config.upper_band_bps as i128))
-        .and_then(|v| v.checked_div(10_000))
+        .checked_mul(crate::constants::BPS_DENOMINATOR.saturating_add(config.upper_band_bps as i128))
+        .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
         .ok_or(VaultError::ArithmeticError)
 }
 

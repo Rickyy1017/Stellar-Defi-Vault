@@ -91,7 +91,7 @@ impl VaultContract {
             return Err(VaultFeature3Error::TooManyFeeTiers);
         }
         for tier in tiers.iter() {
-            if tier.discount_bps > 10_000 || tier.min_position_amount < 0 {
+            if tier.discount_bps > crate::constants::BPS_DENOMINATOR_U32 || tier.min_position_amount < 0 {
                 return Err(VaultFeature3Error::InvalidFeeTierConfig);
             }
         }
@@ -115,8 +115,8 @@ impl VaultContract {
         let discount_bps = crate::position_fee_tiers::best_discount_bps(&env, position_amount) as i128;
 
         let effective = base_bps
-            .saturating_mul(10_000i128.saturating_sub(discount_bps).max(0))
-            / 10_000;
+            .saturating_mul(crate::constants::BPS_DENOMINATOR.saturating_sub(discount_bps).max(0))
+            / crate::constants::BPS_DENOMINATOR;
         effective.max(0) as u32
     }
 
@@ -150,12 +150,12 @@ impl VaultContract {
             crate::position_fee_tiers::best_discount_bps(&env, position_amount) as i128;
         let base_bps = balance::get_unstake_fee_bps(&env) as i128;
         let effective_bps = base_bps
-            .saturating_mul(10_000i128.saturating_sub(discount_bps).max(0))
-            / 10_000;
+            .saturating_mul(crate::constants::BPS_DENOMINATOR.saturating_sub(discount_bps).max(0))
+            / crate::constants::BPS_DENOMINATOR;
 
         let fee = amount
             .checked_mul(effective_bps)
-            .and_then(|v| v.checked_div(10_000))
+            .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
             .ok_or(VaultFeature3Error::ArithmeticError)?;
         let payout = amount
             .checked_sub(fee)

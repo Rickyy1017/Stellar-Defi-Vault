@@ -169,8 +169,8 @@ pub enum VaultError {
     RelayerNotApproved = 46,
     /// Caller is not on the yield source whitelist (issue #126).
     NotYieldSource = 47,
-    /// notify_reward_added called with a zero or negative amount (issue #126).
-    InvalidRewardAmount = 48,
+    /// A supplied value expected to be a SHA-256 digest was not exactly 32 bytes.
+    InvalidHashLength = 48,
     /// Returned when a new stake is attempted after `start_graceful_shutdown` has been called.
     PoolShuttingDown = 49,
     /// Returned by every admin-gated entrypoint after admin renouncement.
@@ -178,6 +178,9 @@ pub enum VaultError {
 }
 
 impl VaultError {
+    /// Backwards compatibility alias for the former error name at discriminant 48.
+    #[allow(non_upper_case_globals)]
+    pub const InvalidRewardAmount: VaultError = VaultError::InvalidHashLength;
     /// Backwards compatibility alias for `InvalidTokenInterface`.
     pub const InvalidToken: VaultError = VaultError::InvalidTokenInterface;
 }
@@ -630,6 +633,10 @@ pub enum VaultQuizError {
     /// Returned by `execute_config_change()` (issue #455) when called
     /// before the proposal's `executes_at` ledger has been reached.
     AdminProposalNotYetExecutable = 18,
+    /// A supplied SHA-256 digest was not exactly 32 bytes.
+    InvalidHashLength = 19,
+    /// A public text input exceeded its named maximum byte length.
+    InputTooLong = 20,
 }
 
 impl From<VaultError> for VaultQuizError {
@@ -753,6 +760,10 @@ pub enum VaultCampaignError {
     /// Returned by `set_region_tag()` when the code is empty or contains a
     /// non-alphanumeric character.
     InvalidRegionCode = 34,
+    /// A supplied SHA-256 digest was not exactly 32 bytes.
+    InvalidHashLength = 35,
+    /// A public string input exceeded its documented byte limit.
+    InputTooLong = 36,
     /// Returned by `set_region_tag()` when a new tag would exceed
     /// `MAX_REGION_TAGGED_STAKERS`.
     TooManyRegionTags = 35,

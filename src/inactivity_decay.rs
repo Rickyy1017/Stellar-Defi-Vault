@@ -72,28 +72,28 @@ pub fn record_interaction(env: &Env, user: &Address) {
 pub fn get_decay_multiplier_bps(env: &Env, user: &Address) -> u32 {
     let threshold = get_threshold(env);
     if threshold == 0 {
-        return 10_000; // decay disabled
+        return crate::constants::BPS_DENOMINATOR_U32; // decay disabled
     }
 
     let last_interaction = get_last_interaction(env, user);
     if last_interaction == 0 {
-        return 10_000; // no interaction recorded, treat as active
+        return crate::constants::BPS_DENOMINATOR_U32; // no interaction recorded, treat as active
     }
 
     let current = env.ledger().sequence();
     let inactive_ledgers = current.saturating_sub(last_interaction);
 
     if inactive_ledgers <= threshold {
-        return 10_000; // within threshold, no decay
+        return crate::constants::BPS_DENOMINATOR_U32; // within threshold, no decay
     }
 
     let decay_bps = get_decay_bps(env);
     if decay_bps == 0 {
-        return 10_000;
+        return crate::constants::BPS_DENOMINATOR_U32;
     }
 
     let periods_inactive = (inactive_ledgers - threshold) / threshold; // periods of inactivity
-    let decay_factor = 10_000u32.saturating_sub(decay_bps.saturating_mul(periods_inactive));
+    let decay_factor = crate::constants::BPS_DENOMINATOR_U32.saturating_sub(decay_bps.saturating_mul(periods_inactive));
 
     // Floor at 1000 (10%) to prevent complete reward elimination
     decay_factor.max(1_000)

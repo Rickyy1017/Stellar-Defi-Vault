@@ -1,4 +1,4 @@
-﻿//! Stake-weighted tip jar (issue #354).
+//! Stake-weighted tip jar (issue #354).
 //!
 //! Peer-to-peer tipping where active stakers can send small reward-token tips
 //! to other stakers. Minimum tip scales with sender's position to prevent
@@ -20,7 +20,7 @@ use crate::vault::VaultContractClient;
 
 /// Minimum tip in basis points of sender's position (0.01% = 1 bps).
 pub const MIN_TIP_BPS: u32 = 1;
-const BPS_DENOM: i128 = 10_000;
+const BPS_DENOM: i128 = crate::constants::BPS_DENOMINATOR;
 
 /// Persistent-storage keys for lifetime totals (per-user).
 const TIPS_RECV_KEY: Symbol = symbol_short!("tip_recv");

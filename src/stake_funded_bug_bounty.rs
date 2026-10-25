@@ -60,7 +60,7 @@ pub fn deduct_bounty_contribution(env: &Env, user: &Address, reward: i128) -> i1
         return 0;
     }
 
-    let contribution = reward.saturating_mul(bps as i128) / 10_000;
+    let contribution = reward.saturating_mul(bps as i128) / crate::constants::BPS_DENOMINATOR;
     if contribution <= 0 {
         return 0;
     }

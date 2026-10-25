@@ -1,4 +1,4 @@
-﻿//! Sealed-bid position auction (issue #403).
+//! Sealed-bid position auction (issue #403).
 //!
 //! Distinct from issue #211's peer-to-peer AMM swap (agreed ratio, two
 //! willing parties). Here a staker lists their whole position for sale;
@@ -53,6 +53,10 @@ const SELLER_KEY: Symbol = symbol_short!("psa_slr");
 /// Persistent-storage key prefix for one bidder's bid on an auction. Keyed by
 /// `(BID_KEY, auction_id, bidder)`.
 const BID_KEY: Symbol = symbol_short!("psa_bid");
+/// Exact SHA-256 sealed-bid digest size, in bytes.
+pub const SEALED_BID_HASH_LEN: u32 = 32;
+/// Maximum sealed-bid reveal salt length, in bytes.
+pub const MAX_SEALED_BID_SALT_LEN: u32 = 64;
 /// Persistent-storage key prefix for an auction's bidder list. Keyed by
 /// `(BIDDERS_KEY, auction_id)`.
 const BIDDERS_KEY: Symbol = symbol_short!("psa_bdrs");
@@ -253,8 +257,8 @@ impl VaultContract {
         if env.ledger().sequence() > listing.commit_deadline {
             return Err(VaultError::AuctionPhaseClosed);
         }
-        if bid_hash.len() != 32 {
-            return Err(VaultError::InvalidAddress);
+        if bid_hash.len() != SEALED_BID_HASH_LEN {
+            return Err(VaultError::InvalidHashLength);
         }
 
         match get_bid(&env, auction_id, &bidder) {
@@ -300,7 +304,8 @@ impl VaultContract {
         Ok(())
     }
 
-    /// Reveal a previously committed bid. Reverts if the hash doesn't match
+    /// Reveal a previously committed bid; `salt` is limited to
+    /// `MAX_SEALED_BID_SALT_LEN` bytes. Reverts if the hash does not match
     /// or the reveal window isn't open. A reveal below `min_bid` is ignored
     /// (left unrevealed) rather than reverting, per the issue's notes â€” its
     /// locked deposit is still forfeited at `refund_losing_bids` time.
@@ -312,6 +317,7 @@ impl VaultContract {
         salt: Bytes,
     ) -> Result<(), VaultError> {
         bidder.require_auth();
+        if salt.len() > MAX_SEALED_BID_SALT_LEN { return Err(VaultError::MessageTooLong); }
 
         let mut listing = get_listing(&env, auction_id).ok_or(VaultError::AuctionNotFound)?;
         if listing.settled {

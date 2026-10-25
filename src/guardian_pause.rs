@@ -31,6 +31,7 @@ use soroban_sdk::{contractimpl, symbol_short, Address, Env, String, Symbol};
 use crate::admin;
 use crate::balance;
 use crate::errors::VaultError;
+use crate::vault::MAX_PAUSE_MESSAGE_LEN;
 use crate::storage::{DataKey, PauseInfo, PauseReason};
 use crate::vault::VaultContract;
 
@@ -75,6 +76,7 @@ impl VaultContract {
     }
 
     /// Pause the pool as the guardian, without holding any other admin
+    /// capability; `message` is limited to `MAX_PAUSE_MESSAGE_LEN` bytes.
     /// capability. Reverts with `Unauthorized` if the caller is not the
     /// configured guardian, and with `ContractStopped` if the pool has been
     /// permanently stopped (matching `pause()`'s own behavior).
@@ -97,7 +99,7 @@ impl VaultContract {
         {
             return Err(VaultError::ContractStopped);
         }
-        if message.len() > 200 {
+        if message.len() > MAX_PAUSE_MESSAGE_LEN {
             return Err(VaultError::DescriptionTooLong);
         }
 

@@ -1,4 +1,4 @@
-﻿//! Sub-unit reward accumulator (issue #367).
+//! Sub-unit reward accumulator (issue #367).
 //!
 //! Soroban token transfers require amounts >= 1 stroop. Reward accrual â€”
 //! `position * rate_bps * elapsed_ledgers / (10_000 * ledgers_per_year)` â€” is
@@ -41,7 +41,7 @@ use crate::vault::VaultContractClient;
 pub const SUB_UNIT_SCALE: i128 = 1_000_000;
 
 /// Ledgers per year at ~5s/ledger, matching `vault::STELLAR_LEDGERS_PER_YEAR`.
-const LEDGERS_PER_YEAR: i128 = 6_307_200;
+const LEDGERS_PER_YEAR: i128 = crate::constants::STELLAR_LEDGERS_PER_YEAR as i128;
 
 /// Persistent key prefix for a user's carried sub-stroop remainder. Keyed by
 /// `(REMAINDER_KEY, user)`.
@@ -103,7 +103,7 @@ fn compute_accrual(env: &Env, user: &Address, now: u32) -> Result<(i128, i128), 
         .checked_mul(rate_bps)
         .and_then(|v| v.checked_mul(elapsed as i128))
         .and_then(|v| v.checked_mul(SUB_UNIT_SCALE))
-        .and_then(|v| v.checked_div(10_000i128.checked_mul(LEDGERS_PER_YEAR)?))
+        .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR.checked_mul(LEDGERS_PER_YEAR)?))
         .ok_or(VaultError::ArithmeticError)?;
 
     let total_scaled = scaled_reward

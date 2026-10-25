@@ -26,7 +26,7 @@ enum MockKey {
     Supply,
 }
 
-pub const MOCK_BPS_BASE: i128 = 10_000;
+pub const MOCK_BPS_BASE: i128 = crate::constants::BPS_DENOMINATOR;
 
 #[contract]
 pub struct MockToken;

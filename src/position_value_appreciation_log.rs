@@ -59,7 +59,7 @@ pub fn take_value_snapshot_inner(env: &Env, user: &Address) -> ValueSnapshot {
         if last.total_value > 0 {
             total_value
                 .saturating_sub(last.total_value)
-                .saturating_mul(10_000)
+                .saturating_mul(crate::constants::BPS_DENOMINATOR)
                 / last.total_value
         } else {
             0
@@ -124,7 +124,7 @@ pub fn calculate_total_appreciation_bps(env: &Env, user: &Address) -> i128 {
         latest
             .total_value
             .saturating_sub(first.total_value)
-            .saturating_mul(10_000)
+            .saturating_mul(crate::constants::BPS_DENOMINATOR)
             / first.total_value
     } else {
         0

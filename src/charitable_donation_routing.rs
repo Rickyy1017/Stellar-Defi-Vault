@@ -17,6 +17,8 @@ const DONATION_CFG_KEY: Symbol = symbol_short!("ch_dcfg");
 const DONATED_KEY: Symbol = symbol_short!("ch_don");
 
 const MAX_CHARITIES: u32 = 10;
+/// Maximum registered charity display-name length, in bytes.
+pub const MAX_CHARITY_NAME_LEN: u32 = 64;
 const MAX_DONATION_BPS: u32 = 5000;
 
 /// A registered charity: address + display name.
@@ -78,7 +80,7 @@ pub fn compute_donation(env: &Env, user: &Address, reward: i128) -> Option<(Addr
     if config.donation_bps == 0 || reward <= 0 {
         return None;
     }
-    let donation = reward.saturating_mul(config.donation_bps as i128) / 10_000;
+    let donation = reward.saturating_mul(config.donation_bps as i128) / crate::constants::BPS_DENOMINATOR;
     if donation <= 0 {
         return None;
     }
@@ -87,7 +89,7 @@ pub fn compute_donation(env: &Env, user: &Address, reward: i128) -> Option<(Addr
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
-    /// Register a charity address and display name. Admin only. Max 10.
+    /// Register a charity address and display name. Admin only; `name` is
     pub fn add_charity(
         env: Env,
         admin: Address,
@@ -96,6 +98,10 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin.require_auth();
         admin::get_admin(&env)?; // ensure caller is the stored admin
+
+        if name.len() > MAX_CHARITY_NAME_LEN {
+            return Err(VaultError::DescriptionTooLong);
+        }
 
         let mut charities = get_charities(&env);
 

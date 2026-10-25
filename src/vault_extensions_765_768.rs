@@ -37,7 +37,7 @@ const STRATEGIES_KEY: Symbol = symbol_short!("str_list");
 pub const MAX_PERFORMANCE_FEE_BPS: u32 = 5_000;
 
 /// Maximum allowable idle buffer ratio (10 000 bps = 100%).
-pub const MAX_IDLE_BUFFER_BPS: u32 = 10_000;
+pub const MAX_IDLE_BUFFER_BPS: u32 = crate::constants::BPS_DENOMINATOR_U32;
 
 /// Default keeper incentive share from the performance fee (500 bps = 5%).
 pub const KEEPER_TIP_SHARE_BPS: u32 = 500;

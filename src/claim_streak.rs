@@ -70,11 +70,11 @@ const STATE_KEY: Symbol = symbol_short!("stk_pos");
 
 /// Basis-point denominator used when converting the streak multiplier into a
 /// reward amount.
-const BPS_DENOMINATOR: i128 = 10_000;
+const BPS_DENOMINATOR: i128 = crate::constants::BPS_DENOMINATOR;
 
 /// Largest per-streak bonus the admin may configure (100% of the claim per
 /// streak level). Prevents a misconfiguration from paying unbounded bonuses.
-pub const MAX_BONUS_BPS_PER_STREAK: u32 = 10_000;
+pub const MAX_BONUS_BPS_PER_STREAK: u32 = crate::constants::BPS_DENOMINATOR_U32;
 
 /// Largest streak a user can reach (and the largest cap the admin may set).
 pub const MAX_STREAK_CAP: u32 = 1_000;

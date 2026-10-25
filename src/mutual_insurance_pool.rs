@@ -1,4 +1,4 @@
-﻿//! Peer mutual insurance pool (issue #366).
+//! Peer mutual insurance pool (issue #366).
 //!
 //! Distinct from `insurance.rs` (issue #289, a single external guarantor's
 //! reserve covering admin misbehavior) and from the `InsuranceProduct` /
@@ -121,7 +121,7 @@ impl VaultContract {
     ) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
 
-        if contribution_bps > 10_000 {
+        if contribution_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultError::InvalidRate);
         }
         if voting_period_ledgers == 0 {
@@ -232,7 +232,7 @@ impl VaultContract {
 
         let contribution = accrued
             .checked_mul(config.contribution_bps as i128)
-            .and_then(|v| v.checked_div(10_000))
+            .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
             .ok_or(VaultError::ArithmeticError)?;
         let payout = accrued
             .checked_sub(contribution)

@@ -58,7 +58,7 @@ pub fn check(env: &Env, amount: i128) -> Result<(), VaultError> {
     // threshold_amount = total_deposited * bps / 10_000
     let threshold = total_deposited
         .checked_mul(bps as i128)
-        .and_then(|v| v.checked_div(10_000))
+        .and_then(|v| v.checked_div(crate::constants::BPS_DENOMINATOR))
         .unwrap_or(i128::MAX);
     if amount > threshold {
         // Auto-pause: set the vault-wide pause flag, then revert the trigger tx.
@@ -85,7 +85,7 @@ impl VaultContract {
         if admin != crate::admin::get_admin(&env)? {
             return Err(VaultError::Unauthorized);
         }
-        if bps > 10_000 {
+        if bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultError::InvalidRate);
         }
         store_threshold_bps(&env, bps);

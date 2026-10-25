@@ -25,7 +25,7 @@ const GAUGE_BOUND_KEY: Symbol = symbol_short!("g_bnd");
 
 const DEFAULT_MAX_VE_DURATION: u32 = 100_000;
 const DEFAULT_MAX_VE_BOOST_BPS: u32 = 5_000; // +50% max boost
-const DEFAULT_VE_AMOUNT_SCALE: i128 = 10_000; // token scale for max boost calculation
+const DEFAULT_VE_AMOUNT_SCALE: i128 = crate::constants::BPS_DENOMINATOR; // token scale for max boost calculation
 
 fn get_ve_config(env: &Env) -> (u32, u32, i128) {
     env.storage()
@@ -119,7 +119,7 @@ impl VaultContract {
         if max_duration_ledgers == 0 {
             return Err(VaultBoostGaugeError::InvalidDuration);
         }
-        if max_boost_bps == 0 || max_boost_bps > 10_000 {
+        if max_boost_bps == 0 || max_boost_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultBoostGaugeError::InvalidBounds);
         }
         if amount_scale <= 0 {
@@ -256,7 +256,7 @@ impl VaultContract {
                 .ok_or(VaultBoostGaugeError::ArithmeticError)?;
         }
 
-        if total_bps != 10_000 {
+        if total_bps != crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultBoostGaugeError::InvalidAllocation);
         }
 
@@ -278,7 +278,7 @@ impl VaultContract {
         max_bps: u32,
     ) -> Result<(), VaultBoostGaugeError> {
         admin::require_admin_as(&env, &admin)?;
-        if min_bps > max_bps || max_bps > 10_000 {
+        if min_bps > max_bps || max_bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultBoostGaugeError::InvalidBounds);
         }
         env.storage()
@@ -301,7 +301,7 @@ impl VaultContract {
                     .checked_add(ovr.get(i).unwrap().1)
                     .ok_or(VaultBoostGaugeError::ArithmeticError)?;
             }
-            if sum != 10_000 {
+            if sum != crate::constants::BPS_DENOMINATOR_U32 {
                 return Err(VaultBoostGaugeError::InvalidAllocation);
             }
             env.storage().instance().set(&GAUGE_OVERRIDE_KEY, ovr);
@@ -362,7 +362,7 @@ impl VaultContract {
 
         for i in 0..pool_votes.len() {
             let (pool_id, power) = pool_votes.get(i).unwrap();
-            let mut weight_bps = ((power.saturating_mul(10_000)) / total_vote_power) as u32;
+            let mut weight_bps = ((power.saturating_mul(crate::constants::BPS_DENOMINATOR)) / total_vote_power) as u32;
 
             // Apply bounds if configured
             let bounds: Option<(u32, u32)> =

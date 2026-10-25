@@ -33,6 +33,8 @@ use crate::vault::VaultContract;
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 
+/// Maximum sub-pool display name length, in bytes.
+pub const MAX_SUB_POOL_NAME_LEN: u32 = 64;
 const SUB_POOLS_KEY: Symbol = symbol_short!("sub_pool");
 const SUB_POOL_COUNT_KEY: Symbol = symbol_short!("sub_cnt");
 /// Per-user per-pool staked amount:  `(key, user, pool_id)` → `i128`
@@ -43,7 +45,7 @@ const SUB_RWCK_KEY: Symbol = symbol_short!("sub_rwck");
 const SUB_RWAC_KEY: Symbol = symbol_short!("sub_rwac");
 
 /// Stellar ledgers per year at ~5 s/ledger — used for annualised rate math.
-const LEDGERS_PER_YEAR: u32 = 6_307_200;
+const LEDGERS_PER_YEAR: u32 = crate::constants::STELLAR_LEDGERS_PER_YEAR;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -204,7 +206,7 @@ fn settle_sub_pool_rewards(
         position
             .saturating_mul(pool_rate_bps)
             .saturating_mul(elapsed)
-            / (10_000_i128 * LEDGERS_PER_YEAR as i128)
+            / (crate::constants::BPS_DENOMINATOR * LEDGERS_PER_YEAR as i128)
     } else {
         0
     };
@@ -226,7 +228,8 @@ fn settle_sub_pool_rewards(
 impl VaultContract {
     // ── Admin ────────────────────────────────────────────────────────────────
 
-    /// Admin: create a named sub-pool with a delegated sub-admin.
+    /// Admin: create a named sub-pool with a delegated sub-admin; `name` is
+    /// limited to `MAX_SUB_POOL_NAME_LEN` bytes (`InvalidFeeAllocation` otherwise).
     pub fn create_sub_pool(
         env: Env,
         admin: Address,
@@ -237,6 +240,9 @@ impl VaultContract {
     ) -> Result<u32, VaultExtError> {
         admin.require_auth();
         admin::require_admin(&env)?;
+        if name.len() > MAX_SUB_POOL_NAME_LEN {
+            return Err(VaultExtError::InvalidFeeAllocation);
+        }
         if max_capacity <= 0 {
             return Err(VaultExtError::ZeroAmount);
         }
@@ -559,6 +565,6 @@ impl VaultContract {
         position
             .saturating_mul(pool.reward_rate_bps)
             .saturating_mul(elapsed)
-            / (10_000_i128 * LEDGERS_PER_YEAR as i128)
+            / (crate::constants::BPS_DENOMINATOR * LEDGERS_PER_YEAR as i128)
     }
 }

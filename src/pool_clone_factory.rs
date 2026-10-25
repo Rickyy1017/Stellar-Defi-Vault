@@ -1,4 +1,4 @@
-﻿//! Pool clone factory (issue #412).
+//! Pool clone factory (issue #412).
 //!
 //! Lets the admin deploy a fresh, independent instance of this same pool
 //! contract from within a running pool, instead of redeploying bytecode by
@@ -29,6 +29,8 @@ use crate::vault::VaultContractClient;
 
 /// Instance key: addresses of every clone deployed by this instance.
 const CLONES_KEY: Symbol = symbol_short!("pcf_cln");
+/// Maximum deterministic deployment salt length, in bytes.
+pub const MAX_CLONE_SALT_LEN: u32 = 64;
 
 /// Configuration for a newly deployed pool clone (issue #412).
 #[contracttype]
@@ -59,7 +61,8 @@ impl VaultContract {
     /// the template, initializes it with `config`, and registers it as a
     /// sibling pool in this contract's league. Admin only. `salt` must be
     /// unique per deployment â€” reusing one for the same admin/template
-    /// produces the same deterministic address and reverts.
+    /// produces the same deterministic address and reverts. `salt` is limited
+    /// to `MAX_CLONE_SALT_LEN` bytes (`MessageTooLong` otherwise).
     ///
     /// `config.reward_token` is recorded in the `clone_deployed` event for
     /// off-chain bookkeeping; like this contract, the deployed clone has no
@@ -74,6 +77,7 @@ impl VaultContract {
         salt: Bytes,
     ) -> Result<Address, VaultError> {
         admin::require_admin(&env)?;
+        if salt.len() > MAX_CLONE_SALT_LEN { return Err(VaultError::MessageTooLong); }
 
         let salt_hash = env.crypto().sha256(&salt);
         let new_pool = env.deployer().with_current_contract(salt_hash).deploy(wasm_hash);

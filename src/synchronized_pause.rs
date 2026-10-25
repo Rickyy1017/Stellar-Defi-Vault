@@ -8,6 +8,8 @@ use crate::storage::PauseReason;
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, String, Vec};
 
 pub const MAX_SIBLING_POOLS: u32 = 10;
+/// Maximum synchronized pause message length, in bytes.
+pub const MAX_SYNC_PAUSE_MESSAGE_LEN: u32 = 200;
 
 /// Result of synchronized pause operation
 #[derive(Clone, Debug, PartialEq)]
@@ -19,7 +21,8 @@ pub struct SynchronizedPauseResult {
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl crate::VaultContract {
-    /// Pause all sibling pools in the pool registry simultaneously
+    /// Pause all sibling pools simultaneously; `message` is limited to
+    /// `MAX_SYNC_PAUSE_MESSAGE_LEN` bytes (oversize returns `TooManyCompetitors`).
     pub fn synchronized_pause(
         env: Env,
         admin: Address,
@@ -28,6 +31,9 @@ impl crate::VaultContract {
     ) -> Result<Vec<SynchronizedPauseResult>, VaultOverflowError> {
         admin.require_auth();
         crate::admin::require_admin(&env, &admin)?;
+        if message.len() > MAX_SYNC_PAUSE_MESSAGE_LEN {
+            return Err(VaultOverflowError::TooManyCompetitors);
+        }
 
         // Pause this pool first
         let pause_info = crate::storage::PauseInfo {

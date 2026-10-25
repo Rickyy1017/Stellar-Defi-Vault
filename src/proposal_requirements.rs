@@ -101,7 +101,7 @@ pub fn meets_quorum(total_votes: i128, total_shares: i128, quorum_bps_value: u32
     if total_shares <= 0 {
         return false;
     }
-    match total_votes.checked_mul(10_000) {
+    match total_votes.checked_mul(crate::constants::BPS_DENOMINATOR) {
         Some(scaled) => scaled >= (quorum_bps_value as i128).saturating_mul(total_shares),
         // Only reachable with an astronomically large `total_votes`; such a
         // proposal has obviously drawn more than enough participation.
@@ -189,7 +189,7 @@ impl VaultContract {
         {
             return Err(ProposalRequirementsError::Unauthorized);
         }
-        if bps > 10_000 {
+        if bps > crate::constants::BPS_DENOMINATOR_U32 {
             return Err(ProposalRequirementsError::InvalidRequirements);
         }
         env.storage().instance().set(&QUORUM_BPS_KEY, &bps);

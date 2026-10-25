@@ -257,7 +257,7 @@ impl VaultContract {
             // Per-ledger emission ≈ total_deposited * rate_bps / 10_000 / ledgers_per_year
             let per_ledger = total_deposited
                 .saturating_mul(rate_bps as i128)
-                .saturating_div(10_000)
+                .saturating_div(crate::constants::BPS_DENOMINATOR)
                 .saturating_div(crate::vault::STELLAR_LEDGERS_PER_YEAR as i128);
             per_ledger.saturating_mul(reserve_ledgers as i128)
         } else {

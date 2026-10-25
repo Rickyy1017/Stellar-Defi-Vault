@@ -33,6 +33,10 @@ const NEXT_ID_KEY: Symbol = symbol_short!("rdmp_nid");
 pub const MAX_ROADMAP_ITEMS: u32 = 20;
 /// Maximum title length, in characters.
 pub const MAX_TITLE_LEN: u32 = 80;
+/// Maximum roadmap category length, in bytes.
+pub const MAX_CATEGORY_LEN: u32 = 32;
+/// Exact SHA-256 digest size for a roadmap description reference.
+pub const ROADMAP_DESCRIPTION_HASH_LEN: u32 = 32;
 /// Vote points each user may distribute per epoch.
 pub const VOTE_POINTS_BUDGET: u32 = 100;
 /// Length of a voting epoch: 30 days.
@@ -98,7 +102,9 @@ fn find_index(items: &Vec<RoadmapItem>, id: u32) -> Option<u32> {
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
-    /// Issue #462: admin adds a roadmap item. Max 20 items; title max 80 chars.
+    /// Issue #462: admin adds an item. `title` max `MAX_TITLE_LEN` bytes,
+    /// `category` max `MAX_CATEGORY_LEN` bytes, `description_hash` exactly
+    /// `ROADMAP_DESCRIPTION_HASH_LEN` bytes (InvalidHashLength otherwise).
     /// Returns the new item id.
     pub fn add_roadmap_item(
         env: Env,
@@ -116,6 +122,13 @@ impl VaultContract {
         }
         if title.len() > MAX_TITLE_LEN {
             return Err(VaultCampaignError::TitleTooLong);
+        }
+
+        if category.len() > MAX_CATEGORY_LEN {
+            return Err(VaultCampaignError::InputTooLong);
+        }
+        if description_hash.len() != ROADMAP_DESCRIPTION_HASH_LEN {
+            return Err(VaultCampaignError::InvalidHashLength);
         }
 
         let id = next_id(&env);

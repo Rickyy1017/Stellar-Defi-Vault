@@ -34,7 +34,7 @@ pub fn set_clawback_window(env: &Env, ledgers: u32) {
 pub fn get_nft_yield_boost(env: &Env, user: &Address) -> u32 {
     let _nft_contract = match balance::get_nft_contract(env) {
         Some(addr) => addr,
-        None => return 10_000, // No boost
+        None => return crate::constants::BPS_DENOMINATOR_U32, // No boost
     };
 
     // Simple check: if user has any NFT receipt, grant 20% boost (12000 bps)
@@ -45,7 +45,7 @@ pub fn get_nft_yield_boost(env: &Env, user: &Address) -> u32 {
     if has_nft {
         12_000 // 20% boost
     } else {
-        10_000 // No boost
+        crate::constants::BPS_DENOMINATOR_U32 // No boost
     }
 }
 
@@ -64,7 +64,7 @@ pub struct MilestoneProgress {
     pub milestone_name: String,
     pub current_value: i128,
     pub target_value: i128,
-    pub progress_pct: u32, // 0-10000 (basis points)
+    pub progress_pct: u32, // 0..10,000 basis points
     pub ledgers_to_target: u32,
 }
 
@@ -88,13 +88,14 @@ pub fn get_user_milestone_progress(
 
     // Example milestones: 1 week = 120960 ledgers, 1 month = 518400 ledgers
     let (target, name) = match milestone_id {
-        1 => (120_960u32, String::from_str(env, "1 Week Staker")),
+        1 => (crate::constants::LEDGERS_PER_WEEK, String::from_str(env, "1 Week Staker")),
         2 => (518_400u32, String::from_str(env, "1 Month Staker")),
-        _ => (120_960u32, String::from_str(env, "1 Week Staker")),
+        _ => (crate::constants::LEDGERS_PER_WEEK, String::from_str(env, "1 Week Staker")),
     };
 
     let progress_pct = if target > 0 && current_stake > 0 {
-        ((duration as u64 * 10_000u64) / target as u64).min(10_000) as u32
+        ((duration as u64 * crate::constants::BPS_DENOMINATOR as u64) / target as u64)
+            .min(crate::constants::BPS_DENOMINATOR as u64) as u32
     } else {
         0
     };

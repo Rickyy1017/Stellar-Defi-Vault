@@ -12,6 +12,10 @@ use crate::vault::VaultContract;
 const NEWS_ITEMS_KEY: Symbol = symbol_short!("news_itm");
 const NEWS_COUNT_KEY: Symbol = symbol_short!("news_cnt");
 const NEWS_VOTE_KEY: Symbol = symbol_short!("news_vt");
+/// Maximum news-item title length, in bytes.
+pub const MAX_NEWS_TITLE_LEN: u32 = 80;
+/// Exact SHA-256 digest size for a news content reference.
+pub const NEWS_CONTENT_HASH_LEN: u32 = 32;
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -60,7 +64,8 @@ fn set_voted(env: &Env, item_id: u32, voter: &Address) {
 
 #[cfg_attr(not(feature = "testutils"), contractimpl)]
 impl VaultContract {
-    /// Any staker can submit; title max 80 chars
+    /// Any staker can submit; `title` is limited to `MAX_NEWS_TITLE_LEN` bytes
+    /// and `content_hash` must be exactly `NEWS_CONTENT_HASH_LEN` bytes.
     pub fn submit_news_item(
         env: Env,
         user: Address,
@@ -71,8 +76,11 @@ impl VaultContract {
         if balance::get_shares(&env, &user) == 0 {
             return Err(VaultError::PositionNotFound);
         }
-        if title.len() > 80 {
+        if title.len() > MAX_NEWS_TITLE_LEN {
             return Err(VaultError::DescriptionTooLong);
+        }
+        if content_hash.len() != NEWS_CONTENT_HASH_LEN {
+            return Err(VaultError::InvalidHashLength);
         }
         let mut items = get_news_items(&env);
         // Enforce max 50 total items (promoted + pending). Suppressed items are not stored, so we just cap at 50.

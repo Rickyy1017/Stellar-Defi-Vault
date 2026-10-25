@@ -35,7 +35,7 @@ const RATING_KEY: Symbol = symbol_short!("si_rat");
 const VOTER_TRACKER_KEY: Symbol = symbol_short!("si_vote");
 
 // 7 days at ~5s/ledger (matches vault::LEDGERS_PER_DAY * 7 in other modules).
-const SEVEN_DAY_LEDGERS: u32 = 120_960;
+const SEVEN_DAY_LEDGERS: u32 = crate::constants::LEDGERS_PER_WEEK;
 
 fn get_inflow_7d(env: &Env) -> (i128, i128) {
     let cutoff = env.ledger().sequence().saturating_sub(SEVEN_DAY_LEDGERS);
@@ -87,7 +87,7 @@ fn get_claim_velocity_bps(env: &Env) -> i128 {
     if total_staked == 0 {
         return 0;
     }
-    total_claims.saturating_mul(10_000) / total_staked
+    total_claims.saturating_mul(crate::constants::BPS_DENOMINATOR) / total_staked
 }
 
 fn get_active_voters_last_epoch(env: &Env) -> u32 {

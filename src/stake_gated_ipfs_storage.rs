@@ -20,9 +20,11 @@ const IPFS_CONFIG_KEY: Symbol = symbol_short!("ipfscfg");
 const IPFS_RECORDS_KEY: Symbol = symbol_short!("ipfsrec");
 
 /// Maximum length of an IPFS CID v1 string.
-const MAX_HASH_LEN: u32 = 64;
+/// Maximum IPFS hash/CID string length, in bytes.
+pub const MAX_HASH_LEN: u32 = 64;
 /// Maximum length of a stored description.
-const MAX_DESC_LEN: u32 = 100;
+/// Maximum IPFS record description length, in bytes.
+pub const MAX_DESC_LEN: u32 = 100;
 
 /// A single pinned IPFS content hash.
 #[contracttype]
@@ -92,10 +94,9 @@ impl VaultContract {
 
     /// Pin an IPFS content hash to the caller's address.
     ///
-    /// Requires the caller's staked position amount to be at least the
-    /// configured `min_stake`; otherwise reverts with
-    /// `InsufficientStakeForStorage`. Hash must be at most 64 characters
-    /// (IPFS CID v1 length) and description at most 100 characters.
+    /// Requires `min_stake`; `hash` is nonempty and limited to `MAX_HASH_LEN`
+    /// bytes and `description` to `MAX_DESC_LEN` bytes. Exceeding either cap
+    /// returns `InvalidRate` / `DescriptionTooLong`, respectively.
     pub fn pin_ipfs_hash(
         env: Env,
         user: Address,
@@ -147,9 +148,13 @@ impl VaultContract {
         Ok(())
     }
 
-    /// Remove a previously pinned IPFS hash from the caller's address.
+    /// Remove a previously pinned IPFS hash; `hash` is limited to
+    /// `MAX_HASH_LEN` bytes (`InvalidRate` otherwise).
     pub fn unpin_ipfs_hash(env: Env, user: Address, hash: String) -> Result<(), VaultError> {
         user.require_auth();
+        if hash.len() == 0 || hash.len() > MAX_HASH_LEN {
+            return Err(VaultError::InvalidRate);
+        }
 
         let mut records = get_user_records(&env, &user);
         let n = records.len();

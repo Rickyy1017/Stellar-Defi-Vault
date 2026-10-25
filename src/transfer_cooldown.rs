@@ -1,4 +1,4 @@
-﻿//! Transfer cooldown ΓÇö a waiting period before the recipient of a
+//! Transfer cooldown ΓÇö a waiting period before the recipient of a
 //! transferred position can unstake it (issue #340).
 //!
 //! Builds on issues #29 (`transfer_position`) and #97
@@ -38,7 +38,7 @@ use crate::vault::VaultContractClient;
 /// `0` (the default) disables the check entirely.
 const COOLDOWN_KEY: Symbol = symbol_short!("tc_cool");
 
-/// Persistent-storage key for the ledger a user most recently received a
+/// Temporary-storage key for the ledger a user most recently received a
 /// transferred position at. Keyed by `(RECEIVED_AT_KEY, user)`.
 const RECEIVED_AT_KEY: Symbol = symbol_short!("tc_recv");
 
@@ -46,10 +46,24 @@ fn get_cooldown(env: &Env) -> u32 {
     env.storage().instance().get(&COOLDOWN_KEY).unwrap_or(0)
 }
 
+fn received_at_key(user: &Address) -> (Symbol, Address) {
+    (RECEIVED_AT_KEY, user.clone())
+}
+
 fn get_received_at(env: &Env, user: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&(RECEIVED_AT_KEY, user.clone()))
+    let key = received_at_key(user);
+    if let Some(ledger) = env.storage().temporary().get(&key) {
+        return Some(ledger);
+    }
+    let legacy = env.storage().persistent().get(&key);
+    if let Some(ledger) = legacy {
+        env.storage().temporary().set(&key, &ledger);
+        let ttl = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+        env.storage().temporary().extend_ttl(&key, ttl, ttl);
+        env.storage().persistent().remove(&key);
+        return Some(ledger);
+    }
+    None
 }
 
 /// Record that `recipient` just received a transferred position at the
@@ -58,18 +72,19 @@ fn get_received_at(env: &Env, user: &Address) -> Option<u32> {
 /// Intended to be called from `transfer_position` and
 /// `transfer_position_with_rewards` ΓÇö see the module-level "Known gap" note.
 pub fn record_transfer_received(env: &Env, recipient: &Address) {
-    env.storage()
-        .persistent()
-        .set(&(RECEIVED_AT_KEY, recipient.clone()), &env.ledger().sequence());
+    let key = received_at_key(recipient);
+    env.storage().temporary().set(&key, &env.ledger().sequence());
+    let ttl = crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL;
+    env.storage().temporary().extend_ttl(&key, ttl, ttl);
 }
 
 /// Clear `user`'s transfer-cooldown marker. Intended to be called once a
 /// user has fully unstaked and later opens a brand-new position by staking
 /// directly (not via transfer) ΓÇö see the module-level "Known gap" note.
 pub fn clear_transfer_received(env: &Env, user: &Address) {
-    env.storage()
-        .persistent()
-        .remove(&(RECEIVED_AT_KEY, user.clone()));
+    let key = received_at_key(user);
+    env.storage().temporary().remove(&key);
+    env.storage().persistent().remove(&key);
 }
 
 /// Ledgers remaining before `user`'s transfer cooldown clears. `0` if no
@@ -104,6 +119,9 @@ impl VaultContract {
     /// Admin only.
     pub fn set_transfer_cooldown(env: Env, cooldown_ledgers: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
+        if cooldown_ledgers > crate::storage::MAX_TEMPORARY_RATE_LIMIT_TTL {
+            return Err(VaultError::InvalidRate);
+        }
         env.storage()
             .instance()
             .set(&COOLDOWN_KEY, &cooldown_ledgers);

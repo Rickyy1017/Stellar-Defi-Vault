@@ -70,7 +70,7 @@ impl VaultContract {
                 .checked_add(bps_shares.get(i).unwrap())
                 .ok_or(PublicApiError::InvalidAllocation)?;
         }
-        if sum != 10000 {
+        if sum != crate::constants::BPS_DENOMINATOR_U32 {
             return Err(VaultFeature5Error::InvalidSplitBpsSum);
         }
 
@@ -97,7 +97,7 @@ pub fn apply_treasury_split(env: &Env, fee: i128, fallback: i128) -> Result<(), 
         for i in 0..split.recipients.len() {
             let recipient = split.recipients.get(i).unwrap();
             let bps = split.bps_shares.get(i).unwrap();
-            let amount = (fee * (bps as i128)) / 10000;
+            let amount = (fee * (bps as i128)) / crate::constants::BPS_DENOMINATOR;
             if amount > 0 {
                 token.transfer(&env.current_contract_address(), &recipient, &amount);
             }

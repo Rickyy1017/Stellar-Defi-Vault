@@ -10,8 +10,8 @@ use crate::storage::DataKey;
 use soroban_sdk::{contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
 pub const MAX_COMPETITORS: u32 = 10;
-pub const BPS_DENOM: i128 = 10_000;
-pub const LEDGERS_PER_YEAR: i128 = 31_536_000 / 5; // Assuming 5 second ledgers
+pub const BPS_DENOM: i128 = crate::constants::BPS_DENOMINATOR;
+pub const LEDGERS_PER_YEAR: i128 = crate::constants::STELLAR_LEDGERS_PER_YEAR as i128;
 
 /// Admin-set arbitrage detection configuration
 #[contracttype]

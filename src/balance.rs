@@ -1780,13 +1780,13 @@ pub fn halving_adjusted_rate(env: &Env, base_rate_bps: u32, ledger: u32) -> i128
     match get_halving_config(env) {
         Some(config) => {
             let count = halving_count_at(env, ledger);
-            let keep_bps = 10_000i128 - get_halving_reduction_bps(env) as i128;
+            let keep_bps = crate::constants::BPS_DENOMINATOR - get_halving_reduction_bps(env) as i128;
             let mut effective = base_rate_bps as i128;
             let mut applied = 0u32;
             // Stops as soon as the floor is reached, so the loop is bounded by
             // the rate itself rather than by the number of elapsed intervals.
             while applied < count && effective > config.floor_rate_bps {
-                effective = effective * keep_bps / 10_000;
+                effective = effective * keep_bps / crate::constants::BPS_DENOMINATOR;
                 applied += 1;
             }
             effective.max(config.floor_rate_bps)

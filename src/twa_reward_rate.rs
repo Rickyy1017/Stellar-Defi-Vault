@@ -1,4 +1,4 @@
-﻿//! Time-weighted average reward rate for smoother pending-reward estimates
+//! Time-weighted average reward rate for smoother pending-reward estimates
 //! (issue #400).
 //!
 //! The pool's reward rate can change over a position's lifetime (decay,
@@ -169,7 +169,7 @@ impl VaultContract {
         let elapsed = (current_ledger - from_ledger) as i128;
 
         amount.saturating_mul(twa_rate).saturating_mul(elapsed)
-            / (10_000i128.saturating_mul(STELLAR_LEDGERS_PER_YEAR as i128))
+            / (crate::constants::BPS_DENOMINATOR.saturating_mul(STELLAR_LEDGERS_PER_YEAR as i128))
     }
 
     /// Difference between the spot pending-reward estimate and the
