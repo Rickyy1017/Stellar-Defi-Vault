@@ -24,6 +24,9 @@ slot because no individual account is the event's primary subject.
 ### `deposit`
 Emitted on every successful stake/deposit.
 
+The event is published through `DepositEvent`, a typed contract event. Its
+event name, topic order, and positional `Vec` data encoding are unchanged.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | topic[0] | Symbol | `"deposit"` |

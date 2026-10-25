@@ -102,13 +102,15 @@ pub fn assert_transfer_cooldown_cleared(env: &Env, user: &Address) -> Result<(),
 impl VaultContract {
     /// Set the transfer cooldown length, in ledgers. `0` disables the check.
     /// Admin only.
-    pub fn set_transfer_cooldown(env: Env, ledgers: u32) -> Result<(), VaultError> {
+    pub fn set_transfer_cooldown(env: Env, cooldown_ledgers: u32) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
-        env.storage().instance().set(&COOLDOWN_KEY, &ledgers);
+        env.storage()
+            .instance()
+            .set(&COOLDOWN_KEY, &cooldown_ledgers);
 
         env.events().publish(
             (symbol_short!("tc_set"),),
-            (ledgers, env.ledger().sequence()),
+            (cooldown_ledgers, env.ledger().sequence()),
         );
         Ok(())
     }
@@ -131,7 +133,6 @@ impl VaultContract {
         assert_transfer_cooldown_cleared(&env, &user)
     }
 }
-
 
 
 

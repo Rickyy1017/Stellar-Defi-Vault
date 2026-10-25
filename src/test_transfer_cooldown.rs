@@ -90,6 +90,14 @@ fn cooldown_expires_correctly() {
     f.vault.set_transfer_cooldown(&1_000);
     f.record_transfer(1_000);
 
+    set_ledger(&f.env, 1_999);
+    assert_eq!(f.vault.get_transfer_cooldown_remaining(&f.recipient), 1);
+    assert!(f.vault.try_check_transfer_cooldown(&f.recipient).is_err());
+
+    set_ledger(&f.env, 2_000);
+    assert_eq!(f.vault.get_transfer_cooldown_remaining(&f.recipient), 0);
+    assert!(f.vault.try_check_transfer_cooldown(&f.recipient).is_ok());
+
     set_ledger(&f.env, 2_001);
     assert_eq!(f.vault.get_transfer_cooldown_remaining(&f.recipient), 0);
     assert!(f.vault.try_check_transfer_cooldown(&f.recipient).is_ok());

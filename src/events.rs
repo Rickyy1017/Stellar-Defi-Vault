@@ -1,10 +1,29 @@
 use crate::storage::AdminAction;
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contractevent, symbol_short, Address, Env, Symbol};
+
+/// Deposit event preserving the existing topic order and positional data.
+#[contractevent(topics = ["deposit"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DepositEvent {
+    /// Account that deposited.
+    #[topic]
+    pub depositor: Address,
+    /// Token amount deposited.
+    pub amount: i128,
+    /// Shares minted for the deposit.
+    pub shares_minted: i128,
+    /// Ledger sequence at which the deposit occurred.
+    pub ledger: u32,
+}
 
 pub fn deposit(env: &Env, depositor: &Address, amount: i128, shares_minted: i128, ledger: u32) {
-    let topics = (symbol_short!("deposit"), depositor);
-    env.events()
-        .publish(topics, (amount, shares_minted, ledger));
+    DepositEvent {
+        depositor: depositor.clone(),
+        amount,
+        shares_minted,
+        ledger,
+    }
+    .publish(env);
 }
 
 pub fn referral_bonus_paid(
@@ -1836,4 +1855,3 @@ pub fn strategy_unwound(
     let topics = (Symbol::new(env, "strategy_unwound"), strategy.clone());
     env.events().publish(topics, (recovered, loss, ledger));
 }
-
