@@ -90,13 +90,23 @@ fn rewards_unlock_retroactively_at_the_cliff() {
     let before = client.calc_pending_reward(&user);
     assert_eq!(before, 0, "inside the cliff nothing should be pending");
 
-    // Cross the cliff. Accrual runs from staked_at_ledger, not from the cliff
-    // date, so the first post-cliff read pays for the whole elapsed period.
+    // One ledger before the cliff is still locked.
+    set_ledger(&env, 1_000 + 1_000 - 1);
+    assert!(!client.is_past_cliff(&user));
+    assert_eq!(client.calc_pending_reward(&user), 0);
+
+    // The cliff is inclusive. Accrual runs from staked_at_ledger, not from
+    // the cliff date, so the first read at the boundary unlocks retroactively.
+    set_ledger(&env, 1_000 + 1_000);
+    assert!(client.is_past_cliff(&user));
+    let at_boundary = client.calc_pending_reward(&user);
+    assert!(at_boundary >= before);
+
     set_ledger(&env, 1_000 + 1_001);
     let after = client.calc_pending_reward(&user);
 
     assert!(
-        after >= before,
+        after >= at_boundary && at_boundary >= before,
         "crossing the cliff must not reduce the pending balance"
     );
 }

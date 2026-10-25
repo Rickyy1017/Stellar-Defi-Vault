@@ -42,7 +42,7 @@ pub struct WithdrawalRequest {
     /// Number of shares locked for this withdrawal.
     pub shares: i128,
     /// Ledger sequence at which the request was created.
-    pub requested_at: u32,
+    pub requested_at_ledger: u32,
 }
 
 /// Read the configured cooldown period in ledgers (0 = disabled).
@@ -84,16 +84,16 @@ impl VaultContract {
     pub fn set_withdrawal_cooldown(
         env: Env,
         admin: Address,
-        ledgers: u32,
+        cooldown_ledgers: u32,
     ) -> Result<(), VaultError> {
         admin.require_auth();
         if admin != crate::admin::get_admin(&env)? {
             return Err(VaultError::Unauthorized);
         }
-        store_cooldown_ledgers(&env, ledgers);
+        store_cooldown_ledgers(&env, cooldown_ledgers);
         env.events().publish(
             (symbol_short!("wd_cd_s"),),
-            ledgers,
+            cooldown_ledgers,
         );
         Ok(())
     }
@@ -132,7 +132,7 @@ impl VaultContract {
             &user,
             &WithdrawalRequest {
                 shares,
-                requested_at: env.ledger().sequence(),
+                requested_at_ledger: env.ledger().sequence(),
             },
         );
         env.events().publish(
@@ -155,7 +155,13 @@ impl VaultContract {
 
         let cooldown = get_cooldown_ledgers(&env);
         let now = env.ledger().sequence();
-        if cooldown > 0 && !crate::ledger_boundary::duration_elapsed(now, req.requested_at, cooldown) {
+        if cooldown > 0
+            && !crate::ledger_boundary::duration_elapsed(
+                now,
+                req.requested_at_ledger,
+                cooldown,
+            )
+        {
             return Err(VaultError::UseCooldownFlow);
         }
 

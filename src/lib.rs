@@ -72,6 +72,12 @@ pub use vault::VaultContract;
 mod test_issues_757_760;
 
 #[cfg(test)]
+mod test_admin_contract_auth;
+
+#[cfg(test)]
+mod test_withdrawal_cooldown;
+
+#[cfg(test)]
 mod test;
 
 #[cfg(test)]

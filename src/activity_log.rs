@@ -43,6 +43,7 @@ pub struct ActivityEntry {
     pub amount: i128,
     pub shares: i128,
     pub ledger: u32,
+    /// Ledger close timestamp in Unix seconds; informational, not a deadline.
     pub timestamp: u64,
 }
 

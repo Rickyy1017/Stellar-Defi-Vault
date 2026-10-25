@@ -138,16 +138,18 @@ impl VaultContract {
     pub fn set_claim_vesting_duration(
         env: Env,
         admin_addr: Address,
-        ledgers: u32,
+        duration_ledgers: u32,
     ) -> Result<(), VaultAccessError> {
         admin_addr.require_auth();
         if admin_addr != admin::get_admin(&env)? {
             return Err(VaultAccessError::Unauthorized);
         }
-        if ledgers > MAX_CLAIM_VESTING_LEDGERS {
+        if duration_ledgers > MAX_CLAIM_VESTING_LEDGERS {
             return Err(VaultAccessError::InvalidVestingDuration);
         }
-        env.storage().instance().set(&DURATION_KEY, &ledgers);
+        env.storage()
+            .instance()
+            .set(&DURATION_KEY, &duration_ledgers);
         Ok(())
     }
 

@@ -46,8 +46,18 @@ Format for an entry:
 
 ## Unreleased
 
-No public-interface changes recorded yet. The first entry here should
-land alongside the first commit of
+### Time units and event schema
+- **What:** made the withdrawal cooldown's ledger field and selected
+  cooldown/vesting arguments unit-explicit, clarified timestamp-only metadata,
+  documented the time-unit inventory, and added a typed deposit event.
+- **Why:** distinguish ledger counts from Unix timestamp seconds. The deposit
+  event retains its existing name, topic order, and positional payload while
+  exposing a typed schema.
+- **Breaking:** generated field/argument names change for the explicitly
+  renamed values; the event's wire encoding is unchanged.
+- **PR:** references #739, #740, and #741.
+
+This entry should land alongside the first commit of
 `interface-spec/VaultContract.json` (see
 [docs/INTERFACE_SPEC.md § One-time setup](./docs/INTERFACE_SPEC.md#one-time-setup) —
 that initial snapshot establishes the baseline rather than describing a

@@ -26,7 +26,11 @@ const WQ_QUEUE: Symbol = symbol_short!("wq_q");
 pub struct QueueEntry {
     pub user: Address,
     pub shares: i128,
-    pub requested_at: u64,
+    /// Unix timestamp in seconds when the request entered the queue.
+    ///
+    /// This is informational metadata; eligibility and processing are not
+    /// based on this timestamp.
+    pub requested_at_timestamp_seconds: u64,
 }
 
 pub fn is_withdrawal_queue_enabled(env: &Env) -> bool {
@@ -38,7 +42,7 @@ pub fn enqueue_withdrawal(env: &Env, user: Address, shares: i128) {
     q.push_back(QueueEntry {
         user: user.clone(),
         shares,
-        requested_at: env.ledger().timestamp(),
+        requested_at_timestamp_seconds: env.ledger().timestamp(),
     });
     env.storage().instance().set(&WQ_QUEUE, &q);
     env.events().publish((symbol_short!("wq_queued"),), (user, shares));

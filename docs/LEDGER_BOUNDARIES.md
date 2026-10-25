@@ -13,3 +13,8 @@ boundary, and `N + 1` remains after it.
 
 These comparisons share `ledger_boundary` helpers, whose tests cover all
 three positions around both absolute deadlines and elapsed durations.
+
+The configured units and clock used by each time-based feature are inventoried
+in [TIME_UNITS.md](./TIME_UNITS.md). Ledger-based delays are ledger counts,
+not seconds: converting ledgers to elapsed wall-clock time is approximate
+because ledger close time is not fixed at five seconds.
