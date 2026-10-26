@@ -78,7 +78,7 @@ jobs:
       # also written locally for attaching to the release.
       - name: Generate build provenance attestation
         id: attest
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ env.WASM_PATH }}
 
