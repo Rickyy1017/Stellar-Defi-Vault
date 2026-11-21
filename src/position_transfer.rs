@@ -41,6 +41,8 @@ impl VaultContract {
     /// transferred.
     pub fn transfer_position(env: Env, from: Address, to: Address) -> Result<i128, VaultError> {
         from.require_auth();
+        crate::address_blocklist::require_not_blocked(&env, &from)?;
+        crate::address_blocklist::require_not_blocked(&env, &to)?;
 
         let from_shares = balance::get_shares(&env, &from);
         if from_shares <= 0 {

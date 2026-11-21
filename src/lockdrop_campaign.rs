@@ -132,6 +132,9 @@ impl VaultContract {
     ) -> Result<(), VaultCampaignError> {
         admin_addr.require_auth();
         admin::require_admin(&env)?;
+        if !crate::feature_flags::is_enabled(&env, crate::feature_flags::Feature::Lockdrop) {
+            return Err(VaultCampaignError::FeatureDisabled);
+        }
 
         if let Some(cfg) = get_config(&env) {
             if !cfg.finalized {
@@ -182,6 +185,9 @@ impl VaultContract {
         lock_duration_ledgers: u32,
     ) -> Result<i128, VaultCampaignError> {
         user.require_auth();
+        if !crate::feature_flags::is_enabled(&env, crate::feature_flags::Feature::Lockdrop) {
+            return Err(VaultCampaignError::FeatureDisabled);
+        }
 
         let cfg = get_config(&env).ok_or(VaultCampaignError::LockdropNotActive)?;
         if cfg.finalized {

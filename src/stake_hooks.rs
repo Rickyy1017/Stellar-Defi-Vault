@@ -46,6 +46,10 @@ pub fn hooks(env: &Env) -> Vec<Address> {
 /// Notify every registered hook that `user` performed `action` for `amount`.
 /// Never fails: a failing hook only emits `hook_fail`.
 pub fn notify(env: &Env, user: &Address, action: Symbol, amount: i128) {
+    // The Hooks feature flag silences every hook while it is off.
+    if !crate::feature_flags::is_enabled(env, crate::feature_flags::Feature::Hooks) {
+        return;
+    }
     for hook in hooks(env).iter() {
         let args: Vec<Val> = (user.clone(), action.clone(), amount).into_val(env);
         let result = env.try_invoke_contract::<Val, soroban_sdk::Error>(
@@ -74,8 +78,12 @@ impl VaultContract {
     /// - `InvalidAddress`: `hook` is this contract.
     /// - `AlreadyInitialized`: `hook` is already registered.
     /// - `MaxPositionsReached`: [`MAX_HOOKS`] hooks are already registered.
+    /// - `FeatureDisabled`: the `Hooks` feature flag is off.
     pub fn register_hook(env: Env, admin: Address, hook: Address) -> Result<(), VaultError> {
         admin::require_admin_as(&env, &admin)?;
+        if !crate::feature_flags::is_enabled(&env, crate::feature_flags::Feature::Hooks) {
+            return Err(VaultError::FeatureDisabled);
+        }
         if hook == env.current_contract_address() {
             return Err(VaultError::InvalidAddress);
         }

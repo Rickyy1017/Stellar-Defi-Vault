@@ -98,6 +98,10 @@ fn remove_follower(env: &Env, leader: &Address, follower: &Address) {
 /// Try to mirror a stake/unstake for all followers of leader.
 /// Called from vault stake/unstake paths.
 pub fn maybe_mirror_action(env: &Env, leader: &Address, action: Symbol, amount: i128) {
+    // The Mirroring feature flag stops followers from mirroring while it is off.
+    if !crate::feature_flags::is_enabled(env, crate::feature_flags::Feature::Mirroring) {
+        return;
+    }
     let followers = get_followers(env, leader);
     if followers.is_empty() {
         return;
@@ -265,6 +269,9 @@ impl VaultContract {
         leader_fee_bps: u32,
     ) -> Result<(), VaultExtError> {
         follower.require_auth();
+        if !crate::feature_flags::is_enabled(&env, crate::feature_flags::Feature::Mirroring) {
+            return Err(VaultExtError::FeatureDisabled);
+        }
         if follower == leader {
             return Err(VaultExtError::InvalidMultisigConfig);
         }
