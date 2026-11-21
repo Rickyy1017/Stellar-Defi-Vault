@@ -1,0 +1,5 @@
+---
+source: src/test_event_snapshots.rs
+expression: trace
+---
+0: topics=[symbol(yield_add), address] data=vec[i128(50000), u32(0)]

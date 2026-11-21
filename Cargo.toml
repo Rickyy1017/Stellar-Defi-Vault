@@ -20,6 +20,7 @@ vault-wasm = []
 soroban-sdk = { version = "=29.0.1" }
 
 [dev-dependencies]
+insta = "1.49.0"
 proptest = "1.6.0"
 soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
 

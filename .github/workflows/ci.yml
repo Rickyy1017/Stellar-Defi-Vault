@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Issue #878: fail on an unaccepted insta snapshot instead of writing a new
+  # one. Accept changes locally with `cargo insta accept` and commit the .snap.
+  INSTA_UPDATE: no
 
 jobs:
   # Issue #773: run the suite on both the pinned toolchain (required to

@@ -1,4 +1,4 @@
-.PHONY: build test docs coverage coverage-lcov scout scout-sarif mutants deploy-testnet stake claim wasm-release fuzz-check fuzz-build fuzz interface-spec interface-spec-check
+.PHONY: build test docs coverage coverage-lcov scout scout-sarif mutants deploy-testnet stake claim wasm-release fuzz-check fuzz-build fuzz interface-spec interface-spec-check event-snapshots event-snapshots-check
 
 build:
 	cargo build --target wasm32-unknown-unknown --release
@@ -66,6 +66,16 @@ interface-spec-check:
 interface-spec:
 	@chmod +x scripts/interface_spec.sh
 	./scripts/interface_spec.sh --update
+
+# ── Event snapshots (issue #878). See docs/EVENT_SNAPSHOTS.md ───────────────
+
+# Check committed event snapshots; fails on an unaccepted change.
+event-snapshots-check:
+	INSTA_UPDATE=no cargo test --features testutils test_event_snapshots
+
+# Regenerate event snapshots for an intentional change, then review the diff.
+event-snapshots:
+	INSTA_UPDATE=always cargo test --features testutils test_event_snapshots
 
 # ── Fuzzing (issue #661). See fuzz/README.md ────────────────────────────────
 

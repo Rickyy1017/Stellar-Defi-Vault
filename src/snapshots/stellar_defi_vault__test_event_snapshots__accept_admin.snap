@@ -1,0 +1,7 @@
+---
+source: src/test_event_snapshots.rs
+expression: trace
+---
+0: topics=[symbol(admin_set), address] data=vec[address, u32(0)]
+1: topics=[symbol(adm_act), address, u32(3)] data=vec[address, u32(0), address]
+2: topics=[symbol(adm_acpt), address] data=vec[address, u32(0)]

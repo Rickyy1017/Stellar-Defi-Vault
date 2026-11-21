@@ -1,0 +1,5 @@
+---
+source: src/test_event_snapshots.rs
+expression: trace
+---
+0: topics=[symbol(paused), address] data=vec[u32(4), string(test), u32(0)]

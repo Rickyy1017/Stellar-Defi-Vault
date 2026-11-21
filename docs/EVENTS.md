@@ -285,6 +285,19 @@ Global and per-token fee changes emit `fee_set`, `fee_queued`, `fee_apld`, or
 dedicated event; keep off-chain monitoring of admin transactions in addition
 to this event watcher.
 
+### `deprec` — deprecated_call
+Emitted whenever a deprecated entrypoint is invoked (issue #881). It is
+currently emitted by `transfer_admin`; indexers can use it to find remaining
+callers before the entrypoint is removed. See
+[`docs/DEPRECATION.md`](./DEPRECATION.md) for the registry and notice period.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| topic[0] | Symbol | `"deprec"` |
+| topic[1] | Address | caller (the signing admin for `transfer_admin`) |
+| data.0 | Symbol | deprecated entrypoint name, e.g. `"transfer_admin"` |
+| data.1 | u32 | ledger sequence |
+
 ### Pool-wide event topics
 
 Events that do not have a single user or administrator as their primary

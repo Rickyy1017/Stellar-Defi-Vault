@@ -2595,7 +2595,12 @@ impl VaultContract {
 
     /// Transfer the admin role to a new address (admin only).
     ///
-    /// Deprecated in favor of the two-step `propose_admin()` and `accept_admin()` flow (Issue #738).
+    /// # Deprecation
+    /// Use `propose_admin()` followed by `accept_admin()` instead (Issue #738).
+    /// This single-step entrypoint is still callable for ABI compatibility but
+    /// emits a `deprecated_call` event on every invocation. It will be removed
+    /// under the policy in `docs/DEPRECATION.md`, which also records the
+    /// replacement and the notice period.
     #[deprecated(note = "use propose_admin and accept_admin instead")]
     pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), VaultError> {
         admin::require_admin(&env)?;
@@ -2603,6 +2608,12 @@ impl VaultContract {
             return Err(VaultError::InvalidAddress);
         }
         let old_admin = admin::get_admin(&env)?;
+        events::deprecated_call(
+            &env,
+            &old_admin,
+            &Symbol::new(&env, "transfer_admin"),
+            env.ledger().sequence(),
+        );
         admin::clear_pending_admin(&env);
         admin::set_admin(&env, &new_admin);
         events::admin_changed(&env, &old_admin, &new_admin);

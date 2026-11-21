@@ -26,7 +26,8 @@ VaultContract
 ├── set_min_stake(amount)      — admin dust-position control
 ├── set_boost_schedule(tiers)  — admin reward multiplier tiers
 ├── pause() / unpause()        — admin circuit breaker
-└── transfer_admin(new_admin)  — rotate admin key
+├── propose_admin() / accept_admin() — two-step admin rotation
+└── transfer_admin(new_admin)  — deprecated single-step rotation (docs/DEPRECATION.md)
 ```
 
 ### Share Price Formula
@@ -154,6 +155,8 @@ make scout                 # Scout static analysis (Soroban)          — docs/S
 make mutants                # mutation testing of the accounting core  — docs/MUTATION_TESTING.md
 make interface-spec-check  # fail if the public interface drifted     — docs/INTERFACE_SPEC.md
 make interface-spec        # regenerate the committed snapshot        — docs/INTERFACE_SPEC.md
+make event-snapshots-check # fail on an unaccepted event change       — docs/EVENT_SNAPSHOTS.md
+make event-snapshots       # regenerate event snapshots for review    — docs/EVENT_SNAPSHOTS.md
 ```
 
 - [docs/COVERAGE.md](docs/COVERAGE.md) — coverage on every PR, the no-regression
@@ -170,6 +173,17 @@ make interface-spec        # regenerate the committed snapshot        — docs/I
   up as a CI-failing diff instead of shipping silently; see
   [CHANGELOG.md](CHANGELOG.md) for the entry an intentional change needs
   alongside the refreshed snapshot.
+- [docs/EVENT_SNAPSHOTS.md](docs/EVENT_SNAPSHOTS.md) — `insta` snapshots of the
+  topics and data emitted by public entrypoints, and the accept/review flow.
+- [docs/FAQ.md](docs/FAQ.md) — plain-language answers for stakers: rewards, fees,
+  locks, risks, and what admins can and cannot do.
+- [docs/GLOSSARY.md](docs/GLOSSARY.md) — shares, bps, ledger, stroop, TTL,
+  archival, SAC, and the rest of the vocabulary used across these docs.
+- [docs/DEPRECATION.md](docs/DEPRECATION.md) — how entrypoints are deprecated,
+  the notice period, and the current registry.
+- [docs/adr/](docs/adr/README.md) — architecture decision records explaining why
+  the rounding, storage, fee-routing, gating, and admin-transfer models are what
+  they are.
 
 ### Deploying to Testnet
 
@@ -239,7 +253,8 @@ To deploy the staking vault to Stellar Testnet and initialize it:
 | `pause()`                                                     | admin         | Emergency pause                                          |
 | `unpause()`                                                   | admin         | Resume operations                                        |
 | `add_yield(admin_addr, amount)`                               | admin         | Inject yield; raises share price                         |
-| `transfer_admin(new_admin)`                                   | admin         | Rotate admin key                                         |
+| `propose_admin(admin, new_admin)` / `accept_admin(new_admin)` | admin / nominee | Two-step admin rotation                               |
+| `transfer_admin(new_admin)`                                   | admin         | Deprecated single-step rotation; use the two-step flow   |
 
 ## Using the CLI Helper
 
@@ -395,7 +410,10 @@ affected address in topic 1. Pool-wide events use the vault contract address;
 admin audit events additionally index the action type in topic 2.
 
 See [docs/EVENTS.md](./docs/EVENTS.md) for the topic conventions and event
-reference used by off-chain indexers.
+reference used by off-chain indexers. Event topics and data are also captured
+by [`insta`](https://insta.rs) snapshots in `src/test_event_snapshots.rs`, so an
+accidental schema change fails CI as a reviewable diff; see
+[docs/EVENT_SNAPSHOTS.md](./docs/EVENT_SNAPSHOTS.md).
 
 ## Roadmap / Open Issues
 

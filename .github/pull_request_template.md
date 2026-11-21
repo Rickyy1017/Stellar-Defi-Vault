@@ -35,6 +35,7 @@ Closes #<!-- issue number — required so the Drips bot can track the PR -->
 - [ ] README **Trust Assumptions and Admin Powers** and `docs/SECURITY.md` updated if an admin-gated function, role or parameter changed
 - [ ] `CONTRACT_VERSION` kept in sync with `Cargo.toml` (if the version changed)
 - [ ] If the public interface changed (added/removed/renamed a function or parameter, changed a type): ran `make interface-spec`, committed the updated `interface-spec/VaultContract.json`, and added a `CHANGELOG.md` entry (see `docs/INTERFACE_SPEC.md`)
+- [ ] **ADR:** this change does not need one, **or** an ADR was added under `docs/adr/` and the index updated. An ADR is needed for a change to an economic rule (rounding, fees, rewards, caps), storage layout or key convention, gating precedence, authority/upgrade model, or an interface that needs a migration. See `docs/adr/README.md`.
 
 ### Lint
 - [ ] `cargo fmt --check` passes

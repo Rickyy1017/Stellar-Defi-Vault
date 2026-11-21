@@ -1790,6 +1790,19 @@ pub fn admin_proposal_cancelled(env: &Env, admin: &Address, cancelled_admin: &Ad
     );
 }
 
+/// Emitted whenever a deprecated entrypoint is invoked (issue #881).
+///
+/// `function` names the deprecated entrypoint and `caller` is the address that
+/// signed the call, so indexers can find remaining integrations before the
+/// removal release. See `docs/DEPRECATION.md` for the notice period and the
+/// list of deprecated entrypoints.
+pub fn deprecated_call(env: &Env, caller: &Address, function: &Symbol, ledger: u32) {
+    env.events().publish(
+        (symbol_short!("deprec"), caller.clone()),
+        (function.clone(), ledger),
+    );
+}
+
 /// Emitted when the global reward accumulator index updates (Issue #650).
 pub fn reward_accumulator_updated(env: &Env, global_index: i128, ledger: u32) {
     env.events().publish(

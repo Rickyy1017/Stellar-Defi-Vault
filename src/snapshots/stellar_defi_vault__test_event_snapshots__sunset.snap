@@ -1,0 +1,5 @@
+---
+source: src/test_event_snapshots.rs
+expression: trace
+---
+0: topics=[symbol(snst_ini), address] data=vec[u32(1000000), u32(0)]

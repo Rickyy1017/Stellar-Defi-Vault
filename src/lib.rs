@@ -170,6 +170,10 @@ mod test_resource_costs;
 #[cfg(test)]
 mod test_runbook_interface_snapshot;
 
+// ── Issue #878: insta snapshots of emitted event topics and data ─────────────
+#[cfg(test)]
+mod test_event_snapshots;
+
 // â”€â”€ Issue #770: upgrade test using previously-released WASM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #[cfg(test)]
 mod test_issues_770_upgrade;

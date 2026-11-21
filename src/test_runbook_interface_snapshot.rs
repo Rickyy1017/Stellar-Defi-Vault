@@ -49,3 +49,21 @@ fn runbook_entrypoints<'a>(
 fn incident_runbook_entrypoints_match_the_generated_contract_client() {
     let _ = runbook_entrypoints;
 }
+
+/// Entrypoints that are callable but deprecated (issue #881).
+///
+/// This is the test-side mirror of the registry in `docs/DEPRECATION.md`:
+/// changing one without the other fails the next test, so deprecated status is
+/// tracked in review alongside the interface, not only in prose.
+const DEPRECATED_ENTRYPOINTS: &[&str] = &["transfer_admin"];
+
+#[test]
+fn deprecated_entrypoints_are_tracked_by_the_policy() {
+    let policy = include_str!("../docs/DEPRECATION.md");
+    for entrypoint in DEPRECATED_ENTRYPOINTS {
+        assert!(
+            policy.contains(entrypoint),
+            "`{entrypoint}` is deprecated in code but missing from docs/DEPRECATION.md"
+        );
+    }
+}

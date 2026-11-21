@@ -27,6 +27,12 @@ pub trait VaultTrait {
     ) -> Result<(), VaultError>;
 
     /// Rotate the primary admin key to a new address.
+    ///
+    /// # Deprecation
+    /// Use `propose_admin` followed by `accept_admin` instead. This single-step
+    /// entrypoint remains callable for ABI compatibility and emits
+    /// `deprecated_call`; see `docs/DEPRECATION.md`.
+    #[deprecated(note = "use propose_admin and accept_admin instead")]
     fn transfer_admin(env: Env, new_admin: Address) -> Result<(), VaultError>;
 
     /// Stake tokens on behalf of the caller.

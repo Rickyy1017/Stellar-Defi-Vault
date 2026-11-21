@@ -41,6 +41,16 @@ human explicitly accepts it (see below). It does not distinguish
 "breaking" from "additive" changes for you; a reviewer still has to read
 the diff and judge that, the same as any other code review.
 
+## Deprecated entrypoints
+
+The generated interface spec records names, parameters, and types but not the
+deprecation status of an entrypoint. Deprecated status is tracked separately in
+[`docs/DEPRECATION.md`](./DEPRECATION.md) and mirrored by
+`DEPRECATED_ENTRYPOINTS` in `src/test_runbook_interface_snapshot.rs`. The test
+embeds the policy document and fails if the two lists drift, so a deprecation
+change is reviewed like any other interface change. Deprecated entrypoints also
+emit `deprecated_call` at runtime.
+
 ## Refreshing the snapshot for an intentional change
 
 1. Make your contract change as normal.

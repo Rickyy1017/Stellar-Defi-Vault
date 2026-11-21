@@ -1,0 +1,5 @@
+---
+source: src/test_event_snapshots.rs
+expression: trace
+---
+0: topics=[symbol(wd_only), address] data=vec[bool(true), u32(0)]
