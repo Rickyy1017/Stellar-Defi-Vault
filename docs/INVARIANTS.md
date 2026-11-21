@@ -242,3 +242,7 @@ a survey, not a commitment (the deliverable for #665 is the spec):
 
 Recommendation: close G1–G6 with proptest first, then evaluate Kani on the two
 conversion functions once the property suite is stable.
+
+A Certora Sunbeam prototype was evaluated separately for issue #877; the setup,
+findings and unproven properties are in
+[`docs/FORMAL_VERIFICATION.md`](./FORMAL_VERIFICATION.md). It is not run in CI.

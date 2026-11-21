@@ -553,6 +553,127 @@ impl VaultContract {
         Ok(shares_minted)
     }
 
+    /// Deposit on behalf of `owner` using `spender`'s token allowance, and
+    /// credit the minted shares to `receiver` (issue #874).
+    ///
+    /// This is the aggregator/custodian path: `spender` never needs custody of
+    /// the owner's tokens, only an allowance to the vault. Shares, the
+    /// per-user deposit cap and the unique-depositor cap all apply to
+    /// `receiver`, because that is the address that owns the new position.
+    ///
+    /// # Authorization
+    /// `spender` must sign. `owner` and `receiver` do not; the token contract
+    /// enforces `owner`'s allowance to `spender`.
+    ///
+    /// # Errors
+    /// - `ZeroAmount`: `amount <= 0`, or the token delivered nothing.
+    /// - `PoolShuttingDown`: the pool is sunsetting or withdraw-only.
+    /// - `NotInitialized`: no deposit token is configured.
+    /// - `DepositorCapReached`: `receiver` would exceed the unique-depositor cap.
+    /// - Token errors when the allowance is insufficient or the transfer fails.
+    /// - `DepositCapExceeded`: `receiver`'s position would exceed the cap.
+    /// - `ArithmeticError`: share/total overflow or a short-delivery underflow.
+    ///
+    /// # Events
+    /// `dep_from` with `(spender, owner)` as topics and
+    /// `(receiver, amount_received, shares_minted)` as data.
+    pub fn deposit_from(
+        env: Env,
+        spender: Address,
+        owner: Address,
+        amount: i128,
+        receiver: Address,
+    ) -> Result<i128, VaultError> {
+        spender.require_auth();
+        Self::require_no_sunset(&env)?;
+        if amount <= 0 {
+            return Err(VaultError::ZeroAmount);
+        }
+
+        // Issue #542: same reward-seed gate as `stake`.
+        crate::vault_extensions_542_545::require_pool_seeded(&env)?;
+        // Issue #568: shares land at `receiver`, so the depositor cap applies
+        // to `receiver`, not to `spender` or `owner`.
+        Self::register_depositor(&env, &receiver)?;
+
+        let token_addr = Self::token_address(&env)?;
+        let received = crate::transfer_safety::pull_tokens_from(
+            &env,
+            &token_addr,
+            &spender,
+            &owner,
+            amount,
+        )?;
+
+        // Issue #488: cap the receiver's total position, not just this deposit.
+        crate::max_deposit_cap::enforce(&env, &receiver, received);
+
+        let total_shares = balance::get_total_shares(&env);
+        let total_deposited = balance::get_total_deposited(&env);
+        let shares_minted = balance::amount_to_shares_with_decimals(
+            total_shares,
+            total_deposited,
+            received,
+            balance::get_stake_decimals(&env),
+        )
+        .ok_or(VaultError::ArithmeticError)?;
+
+        let current_shares = balance::get_shares(&env, &receiver);
+        balance::set_shares(
+            &env,
+            &receiver,
+            current_shares
+                .checked_add(shares_minted)
+                .ok_or(VaultError::ArithmeticError)?,
+        );
+        balance::set_total_shares(
+            &env,
+            total_shares
+                .checked_add(shares_minted)
+                .ok_or(VaultError::ArithmeticError)?,
+        );
+        balance::set_total_deposited(
+            &env,
+            total_deposited
+                .checked_add(received)
+                .ok_or(VaultError::ArithmeticError)?,
+        );
+        if current_shares == 0 {
+            balance::register_staker(&env, &receiver);
+        }
+
+        crate::vault_extensions_546_549::maybe_lock_deposit(
+            &env,
+            &receiver,
+            received,
+            shares_minted,
+        );
+        crate::position_mirroring::maybe_mirror_action(
+            &env,
+            &receiver,
+            symbol_short!("stake"),
+            received,
+        );
+        crate::activity_log::record(
+            &env,
+            &receiver,
+            crate::activity_log::ActivityKind::Deposit,
+            received,
+            shares_minted,
+        );
+        crate::vault_extensions_542_545::check_and_emit_low_balance(&env);
+        crate::stake_hooks::notify(&env, &receiver, symbol_short!("stake"), received);
+        crate::ttl_management::bump(&env);
+        crate::user_ttl::bump_entries(&env, &receiver);
+
+        env.events().publish(
+            (symbol_short!("dep_from"), spender, owner),
+            (receiver, received, shares_minted),
+        );
+
+        Ok(shares_minted)
+    }
+
     /// Enable an existing or former staker to refer new depositors.
     pub fn register_referrer(env: Env, user: Address) -> Result<(), VaultError> {
         user.require_auth();

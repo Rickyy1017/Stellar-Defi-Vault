@@ -184,8 +184,14 @@ mod test_issue_843;
 
 pub mod vault_extensions_897;
 
+pub mod pool_factory; // issue #875 — deploy pools from one audited Wasm hash
+pub mod pool_registry; // issue #876 — discover registered sibling pools
+
 #[cfg(test)]
 mod test_issue_897;
+
+#[cfg(test)]
+mod test_issues_874_877;
 
 #[cfg(test)]
 mod test_rage_quit;

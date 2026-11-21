@@ -28,15 +28,51 @@ pub(crate) fn pull_tokens(
     client.transfer(from, &vault, &amount);
     let after = client.balance(&vault);
 
-    let received = after.checked_sub(before).ok_or(VaultError::ArithmeticError)?;
+    let received = after
+        .checked_sub(before)
+        .ok_or(VaultError::ArithmeticError)?;
     if received <= 0 {
         return Err(VaultError::ZeroAmount);
     }
     if received < amount {
-        env.events()
-            .publish((symbol_short!("short_rcv"), from.clone()), (amount, received));
+        env.events().publish(
+            (symbol_short!("short_rcv"), from.clone()),
+            (amount, received),
+        );
     }
     // Never credit more than was requested, even if a rebasing token
     // happened to rebase upward mid-transfer.
+    Ok(received.min(amount))
+}
+
+/// Transfers `amount` of `token_addr` from `from` into the vault using
+/// `spender`'s token allowance, and returns the amount the vault actually
+/// received.
+pub(crate) fn pull_tokens_from(
+    env: &Env,
+    token_addr: &Address,
+    spender: &Address,
+    from: &Address,
+    amount: i128,
+) -> Result<i128, VaultError> {
+    let client = token::Client::new(env, token_addr);
+    let vault = env.current_contract_address();
+
+    let before = client.balance(&vault);
+    client.transfer_from(spender, from, &vault, &amount);
+    let after = client.balance(&vault);
+
+    let received = after
+        .checked_sub(before)
+        .ok_or(VaultError::ArithmeticError)?;
+    if received <= 0 {
+        return Err(VaultError::ZeroAmount);
+    }
+    if received < amount {
+        env.events().publish(
+            (symbol_short!("short_rcv"), from.clone()),
+            (amount, received),
+        );
+    }
     Ok(received.min(amount))
 }
