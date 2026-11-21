@@ -10,6 +10,12 @@ boundary, and `N + 1` remains after it.
 | Withdrawal cooldown | waiting | executable | executable |
 | Reward vesting cliff | unvested | vested | vested |
 | Reward-rate ramp | interpolating | target rate | target rate |
+| Reward window start | not accruing | accruing begins | accruing |
+| Reward window end | accruing | accrual stopped | stopped |
+
+A reward window `[start, end)` is the one half-open case: `start` is inclusive
+and `end` exclusive, so a window of `[2000, 3000)` emits for exactly 1000
+ledgers and nothing accrues at or after ledger 3000.
 
 These comparisons share `ledger_boundary` helpers, whose tests cover all
 three positions around both absolute deadlines and elapsed durations.

@@ -7044,6 +7044,30 @@ impl VaultContract {
         end_ledger: u32,
         persist: bool,
     ) -> Result<i128, VaultError> {
+        Self::reward_between_ledgers_at_rate(
+            env,
+            user,
+            current_shares,
+            start_ledger,
+            end_ledger,
+            persist,
+            None,
+        )
+    }
+
+    /// Same as `reward_between_ledgers`, but a `Some(rate_bps)` override
+    /// replaces the window's base rate (the bootstrap-weighted stored rate).
+    /// Halving, boost tiers, campaigns and seasons still apply on top. Used by
+    /// `project_reward` to feed in a ramp-averaged rate.
+    fn reward_between_ledgers_at_rate(
+        env: &Env,
+        user: &Address,
+        current_shares: i128,
+        start_ledger: u32,
+        end_ledger: u32,
+        persist: bool,
+        rate_override: Option<u32>,
+    ) -> Result<i128, VaultError> {
         if current_shares == 0 || end_ledger <= start_ledger {
             return Ok(0);
         }
@@ -7060,11 +7084,23 @@ impl VaultContract {
             return Ok(0);
         }
 
+        // Reward window: only the part of the range inside the configured
+        // campaign window accrues (nothing, if there is no overlap). With no
+        // window configured the range is left unchanged.
+        let (start_ledger, end_ledger) =
+            match crate::vault::reward_window::overlap(env, start_ledger, end_ledger) {
+                Some(range) => range,
+                None => return Ok(0),
+            };
+
         // Issue #202: time-weighted average rate across [start_ledger,
         // end_ledger), correctly handling a bootstrap window that only
         // partially overlaps this range (falls back to the plain
         // reward_rate_bps() when no bootstrap is configured).
-        let base_rate = Self::effective_rate_bps_for_window(env, start_ledger, end_ledger);
+        let base_rate = match rate_override {
+            Some(rate) => rate,
+            None => Self::effective_rate_bps_for_window(env, start_ledger, end_ledger),
+        };
         if base_rate == 0 {
             return Ok(0);
         }
@@ -15214,3 +15250,7 @@ pub mod proposal_cancel;
 pub mod proposal_requirements;
 #[path = "proposal_state.rs"]
 pub mod proposal_state;
+#[path = "reward_projection.rs"]
+pub mod reward_projection;
+#[path = "reward_window.rs"]
+pub mod reward_window;

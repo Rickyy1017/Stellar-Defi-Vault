@@ -167,9 +167,7 @@ impl VaultContract {
             duration_ledgers,
         };
 
-        env.storage()
-            .persistent()
-            .set(&(VE_LOCK_KEY, user.clone()), &lock);
+        crate::versioned::write_lock(&env, &(VE_LOCK_KEY, user.clone()), &lock);
 
         events::ve_boost_locked(&env, &user, amount, duration_ledgers, unlock_ledger);
         Ok(())
@@ -178,10 +176,8 @@ impl VaultContract {
     /// Read-only query for current vote-escrow boost in basis points.
     /// Decays linearly to zero at expiry.
     pub fn get_ve_boost_bps(env: Env, user: Address) -> u32 {
-        let lock: Option<VeBoostLock> = env
-            .storage()
-            .persistent()
-            .get(&(VE_LOCK_KEY, user.clone()));
+        let lock: Option<VeBoostLock> =
+            crate::versioned::read_lock(&env, &(VE_LOCK_KEY, user.clone()));
 
         let lock = match lock {
             Some(l) => l,
@@ -214,10 +210,8 @@ impl VaultContract {
     pub fn unlock_boost(env: Env, user: Address) -> Result<i128, VaultBoostGaugeError> {
         user.require_auth();
 
-        let lock: Option<VeBoostLock> = env
-            .storage()
-            .persistent()
-            .get(&(VE_LOCK_KEY, user.clone()));
+        let lock: Option<VeBoostLock> =
+            crate::versioned::read_lock(&env, &(VE_LOCK_KEY, user.clone()));
 
         let lock = lock.ok_or(VaultBoostGaugeError::PositionNotFound)?;
         let current_ledger = env.ledger().sequence();

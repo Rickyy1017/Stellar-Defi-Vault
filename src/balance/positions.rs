@@ -286,15 +286,22 @@ pub fn set_cohort_of(env: &Env, user: &Address, cohort_id: u32) {
     env.storage().persistent().set(&key, &cohort_id);
 }
 
+/// Read a user's split positions, normalizing every entry to the latest
+/// in-memory form. See `crate::versioned`.
 pub fn get_split_positions(env: &Env, user: &Address) -> Vec<crate::storage::StakePosition> {
+    let key = (symbol_short!("splt_pos"), user.clone());
+    let raw: Vec<soroban_sdk::Val> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
+    crate::versioned::decode_positions(env, raw)
+}
+
+/// Write a user's split positions in the newest versioned storage form.
+pub fn set_split_positions(env: &Env, user: &Address, positions: &Vec<crate::storage::StakePosition>) {
     let key = (symbol_short!("splt_pos"), user.clone());
     env.storage()
         .persistent()
-        .get(&key)
-        .unwrap_or(Vec::new(env))
-}
-
-pub fn set_split_positions(env: &Env, user: &Address, positions: &Vec<crate::storage::StakePosition>) {
-    let key = (symbol_short!("splt_pos"), user.clone());
-    env.storage().persistent().set(&key, positions);
+        .set(&key, &crate::versioned::encode_positions(env, positions));
 }

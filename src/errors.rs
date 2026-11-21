@@ -1403,3 +1403,86 @@ impl From<VaultError> for ParamReasonError {
         }
     }
 }
+
+/// Errors for the on-chain pool metadata record. `VaultError` is at
+/// Soroban's 50-variant cap, so these get their own enum.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum PoolMetadataError {
+    /// Caller is not the stored admin.
+    Unauthorized = 1,
+    /// No admin is stored.
+    NotInitialized = 2,
+    /// The metadata revision counter overflowed.
+    ArithmeticError = 3,
+    /// The pool name is empty.
+    EmptyName = 4,
+    /// The pool name is longer than 64 bytes.
+    NameTooLong = 5,
+    /// The description is longer than 512 bytes.
+    DescriptionTooLong = 6,
+    /// The website is longer than 128 bytes.
+    WebsiteTooLong = 7,
+}
+
+impl From<VaultError> for PoolMetadataError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::NotInitialized | VaultError::NoAdmin => PoolMetadataError::NotInitialized,
+            VaultError::ArithmeticError => PoolMetadataError::ArithmeticError,
+            _ => PoolMetadataError::Unauthorized,
+        }
+    }
+}
+
+/// Errors for `project_reward`. `VaultError` is at Soroban's 50-variant cap,
+/// so these get their own enum.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ProjectionError {
+    /// No admin is stored (the pool is not initialized).
+    NotInitialized = 1,
+    /// An intermediate value overflowed.
+    ArithmeticError = 2,
+    /// `at_ledger` is earlier than the current ledger.
+    LedgerInPast = 3,
+}
+
+impl From<VaultError> for ProjectionError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::NotInitialized | VaultError::NoAdmin => ProjectionError::NotInitialized,
+            _ => ProjectionError::ArithmeticError,
+        }
+    }
+}
+
+/// Errors for the reward campaign window. `VaultError` is at Soroban's
+/// 50-variant cap, so these get their own enum.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum RewardWindowError {
+    /// Caller is not the stored admin.
+    Unauthorized = 1,
+    /// No admin is stored.
+    NotInitialized = 2,
+    /// Settling accrual before the change overflowed.
+    ArithmeticError = 3,
+    /// `end_ledger` is not after `start_ledger`.
+    InvalidWindow = 4,
+    /// There is no window to clear.
+    NoWindow = 5,
+}
+
+impl From<VaultError> for RewardWindowError {
+    fn from(err: VaultError) -> Self {
+        match err {
+            VaultError::NotInitialized | VaultError::NoAdmin => RewardWindowError::NotInitialized,
+            VaultError::Unauthorized => RewardWindowError::Unauthorized,
+            _ => RewardWindowError::ArithmeticError,
+        }
+    }
+}

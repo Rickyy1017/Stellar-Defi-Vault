@@ -316,3 +316,27 @@ Soroban enforces a maximum ledger entry size of 64KB (65,536 bytes). Rolling-buf
 - The largest rolling buffer entry (`clm_hist` at 100 entries) consumes ~2.2 KB in XDR format, providing a safety margin of over 96.6% below Soroban's 64 KB ledger entry limit.
 - Verified via `src/test_vec_storage_capacity.rs`: filling every rolling buffer to its maximum capacity succeeds without error.
 - No rolling buffer key risks exceeding ledger entry capacity.
+
+## Versioned persisted structs
+
+Changing a `#[contracttype]` struct breaks decoding of every entry written by
+an older contract version. `StakePosition` (split positions),
+`GovernanceProposal` (proposals) and `VeBoostLock` (vote-escrow locks) are
+therefore stored inside versioned enums (`VersionedPosition`,
+`VersionedProposal`, `VersionedLock` in `src/versioned.rs`), each currently
+`V1(..)`.
+
+- **Reads normalize.** The storage helpers (`balance::get_split_positions`,
+  `balance::get_proposal`, `balance::get_governance_proposals` and the lock
+  accessors) return the latest in-memory struct whatever variant is stored.
+- **Legacy entries keep working.** Entries written before versioning (the bare
+  struct, no enum wrapper) are still decoded, and are rewritten in the
+  versioned form on their next save. No migration call is needed.
+- **Writes use the newest variant.**
+- **Public ABI is unchanged.** Entrypoints still take and return the plain
+  structs; the enums and the frozen `*V1` structs are storage-only.
+
+To add a field safely, follow the step-by-step pattern in the module docs of
+`src/versioned.rs`: keep the frozen old struct, add a new variant at the end,
+fill a default for the new field in `normalize`, and make `wrap` emit the new
+variant.

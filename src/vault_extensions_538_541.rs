@@ -51,8 +51,13 @@ pub fn clear_rate_ramp(env: &Env) {
 /// If a ramp is active, calculates linear interpolation between start and target.
 /// If no ramp is active, returns the pool's base reward rate.
 pub fn compute_current_rate(env: &Env) -> u32 {
+    rate_at_ledger(env, env.ledger().sequence())
+}
+
+/// The reward rate at an arbitrary `current_ledger`, interpolating linearly
+/// while a ramp is active (and holding the target rate after it ends).
+pub fn rate_at_ledger(env: &Env, current_ledger: u32) -> u32 {
     if let Some(ramp) = get_rate_ramp(env) {
-        let current_ledger = env.ledger().sequence();
         if current_ledger <= ramp.start_ledger {
             return ramp.start_rate_bps;
         }
@@ -73,6 +78,38 @@ pub fn compute_current_rate(env: &Env) -> u32 {
     } else {
         balance::get_reward_rate_bps(env)
     }
+}
+
+/// Time-weighted average of the ramped rate over `[start, end)`, or `None`
+/// when no ramp is configured (or the window is empty). The ramp is linear, so
+/// its average over a stretch equals the rate at that stretch's midpoint; the
+/// flat parts before and after the ramp are weighted by their length.
+pub fn average_rate_over(env: &Env, start: u32, end: u32) -> Option<u32> {
+    let ramp = get_rate_ramp(env)?;
+    if end <= start {
+        return None;
+    }
+    let ramp_end = ramp.start_ledger.saturating_add(ramp.duration_ledgers);
+    let mut weighted: u64 = 0;
+
+    let pre_end = end.min(ramp.start_ledger);
+    if pre_end > start {
+        weighted += ramp.start_rate_bps as u64 * (pre_end - start) as u64;
+    }
+
+    let ramp_from = start.max(ramp.start_ledger);
+    let ramp_to = end.min(ramp_end);
+    if ramp_to > ramp_from {
+        let mid = ramp_from + (ramp_to - ramp_from) / 2;
+        weighted += rate_at_ledger(env, mid) as u64 * (ramp_to - ramp_from) as u64;
+    }
+
+    let post_from = start.max(ramp_end);
+    if end > post_from {
+        weighted += ramp.target_rate_bps as u64 * (end - post_from) as u64;
+    }
+
+    Some((weighted / (end - start) as u64) as u32)
 }
 
 // ── Per-token fee override storage helpers (issue #539) ──────────────────────

@@ -34,17 +34,23 @@ pub fn set_admin_proposals(env: &Env, proposals: &Vec<AdminProposal>) {
         .set(&symbol_short!("adm_prop"), proposals);
 }
 
+/// Read the stored proposal list, normalizing every entry to the latest
+/// in-memory form. See `crate::versioned`.
 pub fn get_governance_proposals(env: &Env) -> Vec<GovernanceProposal> {
-    env.storage()
+    let raw: Vec<soroban_sdk::Val> = env
+        .storage()
         .instance()
         .get(&symbol_short!("gov_prop"))
-        .unwrap_or(Vec::new(env))
+        .unwrap_or(Vec::new(env));
+    crate::versioned::decode_proposals(env, raw)
 }
 
+/// Write the proposal list in the newest versioned storage form.
 pub fn set_governance_proposals(env: &Env, proposals: &Vec<GovernanceProposal>) {
-    env.storage()
-        .instance()
-        .set(&symbol_short!("gov_prop"), proposals);
+    env.storage().instance().set(
+        &symbol_short!("gov_prop"),
+        &crate::versioned::encode_proposals(env, proposals),
+    );
 }
 
 pub fn get_veto_threshold_bps(env: &Env) -> u32 {
@@ -157,14 +163,17 @@ pub fn set_emergency_admin(env: &Env, admin: &Address) {
         .set(&symbol_short!("emg_adm"), admin);
 }
 
+/// Read a proposal, normalizing any stored version (or the pre-versioning bare
+/// struct) to the latest in-memory form. See `crate::versioned`.
 pub fn get_proposal(env: &Env, id: u32) -> Option<GovernanceProposal> {
     let key = (Symbol::new(env, "prop"), id);
-    env.storage().persistent().get(&key)
+    crate::versioned::read_proposal(env, &key)
 }
 
+/// Write a proposal in the newest versioned storage form.
 pub fn set_proposal(env: &Env, id: u32, proposal: &GovernanceProposal) {
     let key = (Symbol::new(env, "prop"), id);
-    env.storage().persistent().set(&key, proposal);
+    crate::versioned::write_proposal(env, &key, proposal);
 }
 
 pub fn has_voted(env: &Env, proposal_id: u32, voter: &Address) -> bool {

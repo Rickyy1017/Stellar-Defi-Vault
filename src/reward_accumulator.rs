@@ -100,11 +100,14 @@ pub fn update_global_accumulator(env: &Env) -> Result<i128, VaultError> {
     let mut index = get_global_reward_per_share(env);
 
     if current_ledger > last_ledger {
-        let elapsed = current_ledger - last_ledger;
+        // Only ledgers inside the reward window (if any) emit rewards.
+        let elapsed = crate::vault::reward_window::overlap(env, last_ledger, current_ledger)
+            .map(|(from, to)| to - from)
+            .unwrap_or(0);
         let total_shares = balance::get_total_shares(env);
         let rate_bps = balance::get_reward_rate_bps(env) as i128;
 
-        if total_shares > 0 && rate_bps > 0 {
+        if total_shares > 0 && rate_bps > 0 && elapsed > 0 {
             // Delta reward per share scaled by ACCUMULATOR_SCALE (1e12):
             // delta = (rate_bps * elapsed * ACCUMULATOR_SCALE) / (BOOST_BPS_BASE * STELLAR_LEDGERS_PER_YEAR)
             let numerator = rate_bps
