@@ -259,6 +259,7 @@ impl VaultContract {
             .set(&(GAUGE_VOTE_KEY, user.clone()), &allocations);
 
         add_gauge_voter(&env, &user);
+        crate::gauge_incentives::record_epoch_vote(&env, &user, &allocations);
         events::gauge_voted(&env, &user, env.ledger().sequence());
         Ok(())
     }

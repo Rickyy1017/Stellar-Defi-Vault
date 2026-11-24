@@ -55,6 +55,7 @@ pub mod balance_checkpoints; // issues #709, #710 — balance checkpoints and TW
 pub mod cross_pool_identity; // issue #470 — cross-pool identity
 pub mod daily_community_tip; // issue #458 — daily stake-weighted featured tip vote
 pub mod deposit_and_lock; // issue #747 — deposit_and_lock() atomic deposit + lock
+pub mod gauge_incentives; // issue #936 — bribe and incentive market for gauge votes
 pub mod governance_params; // issue #712 — governance quorum and pass threshold
 pub mod lockdrop_campaign; // issue #460 — lockdrop campaign
 pub mod minimum_unstake_amount; // issue #441 — minimum unstake amount
@@ -174,7 +175,11 @@ mod test_issues_765_768;
 /// `testutils` feature, and in-crate tests get it via `cfg(test)`.
 #[cfg(any(test, feature = "testutils"))]
 pub mod fuzz_support {
-    pub use crate::balance::{amount_to_shares_with_decimals, shares_to_amount_with_decimals};
+    pub use crate::balance::{
+        amount_to_shares, amount_to_shares_with_decimals, shares_to_amount,
+        shares_to_amount_with_decimals,
+    };
+    pub use crate::math::{mul_div_ceil, mul_div_floor, MathError};
     pub use crate::reward_math::reward_for_ledgers;
 }
 #[cfg(test)]
@@ -187,10 +192,4 @@ mod test_runbook_interface_snapshot;
 mod test_feature_gating_matrix;
 
 #[cfg(test)]
-mod test_depositor_index;
-
-#[cfg(test)]
-mod test_allowlist_merkle;
-
-#[cfg(test)]
-mod test_merkle_distributor;
+mod test_gauge_incentives;

@@ -1,0 +1,46 @@
+name: Core Math Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/math.rs"
+      - "src/reward_math.rs"
+      - "src/balance/shares.rs"
+      - "benches/**"
+      - "Cargo.toml"
+  workflow_dispatch:
+
+jobs:
+  bench-math:
+    name: Criterion Math Benchmarks
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "ci-bench-math"
+          key: "1.94.0"
+
+      - name: Run Criterion benchmarks
+        id: bench
+        run: |
+          set -o pipefail
+          cargo bench --bench core_math --features testutils -- --noplot | tee bench_output.txt
+
+      - name: Post benchmark summary
+        if: always()
+        run: |
+          {
+            echo "### Core Math Criterion Benchmarks"
+            echo ""
+            echo '```text'
+            grep -E "time:|change:" bench_output.txt || cat bench_output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,15 @@
+[package]
+name = "linear-vesting"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Standalone linear vesting contract with optional cliff and revocation for team and partner token allocations"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { version = "=29.0.1" }
+
+[dev-dependencies]
+soroban-sdk = { version = "=29.0.1", features = ["testutils"] }

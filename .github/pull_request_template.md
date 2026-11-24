@@ -27,6 +27,7 @@ Release note:
 
 ### Tests
 - [ ] Tests added or updated for the new/changed behaviour
+- [ ] **Bug fixes:** added a named regression test under `tests/regressions/issue_<number>_<slug>.rs` and registered it in `tests/regressions.rs` (or N/A — not a bug fix)
 - [ ] `cargo test --features testutils` passes locally
 
 ### Events
