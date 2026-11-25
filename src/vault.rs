@@ -2211,9 +2211,30 @@ impl VaultContract {
         Ok(())
     }
 
-    /// Read-only: all currently queued actions.
+    /// Read-only: all currently queued timelocked admin actions.
+    ///
+    /// # Order
+    /// Ascending by `executable_at` ledger, then ascending `id` (issue #920).
     pub fn get_pending_actions(env: Env) -> Vec<PendingAction> {
-        balance::get_pending_actions(&env)
+        let pending = balance::get_pending_actions(&env);
+        let mut remaining = pending;
+        let mut out: Vec<PendingAction> = Vec::new(&env);
+        while remaining.len() > 0 {
+            let mut best_i: u32 = 0;
+            let mut best = remaining.get(0).unwrap();
+            for i in 1..remaining.len() {
+                let a = remaining.get(i).unwrap();
+                if a.executable_at < best.executable_at
+                    || (a.executable_at == best.executable_at && a.id < best.id)
+                {
+                    best = a;
+                    best_i = i;
+                }
+            }
+            out.push_back(remaining.get(best_i).unwrap());
+            remaining.remove(best_i);
+        }
+        out
     }
 
     /// Shared by `execute_action()` (#195) and `execute_proposal()` (#196).
@@ -14220,8 +14241,11 @@ impl VaultContract {
     /// same price, so the ordering is the same either way, but the converted
     /// value is what a leaderboard should display). `limit` is clamped to
     /// `MAX_TOP_DEPOSITORS` (50), and `0` returns an empty vec. Depositors
-    /// with no position left are skipped, and equal sizes keep registration
-    /// order, so the output is deterministic for identical state.
+    /// with no position left are skipped.
+    ///
+    /// # Order
+    /// Descending by position size (`i128` stake-token amount); ties break on
+    /// lexicographically smaller `Address` string (issue #920).
     ///
     /// No auth required, no state changes, no events, so it is cheap and safe
     /// to poll.
@@ -14351,7 +14375,8 @@ absent events and must not treat event presence as proof of a balance.",
 
     /// Ranks registered depositors by position size, highest first, keeping at
     /// most `limit` rows (issue #523). `limit` must be non-zero;
-    /// `get_top_depositors()` clamps it.
+    /// `get_top_depositors()` clamps it. Ties break on lexicographically smaller
+    /// address (issue #920).
     ///
     /// Reads `total_shares`/`total_deposited` once and reuses them for every
     /// depositor, so the whole scan costs one registry read plus one share read
@@ -14380,11 +14405,15 @@ absent events and must not treat event presence as proof of a balance.",
                 continue;
             }
 
-            // Stop at the first row this depositor outranks, which leaves
-            // equal sizes in registration order behind it.
             let mut inserted = false;
             for j in 0..ranked.len() {
-                if size > ranked.get(j).unwrap().1 {
+                let (ref r_addr, r_size) = ranked.get(j).unwrap();
+                if crate::vec_ordering::rank_by_amount_desc(
+                    size,
+                    &depositor,
+                    r_size,
+                    r_addr,
+                ) {
                     ranked.insert(j, (depositor.clone(), size));
                     inserted = true;
                     break;

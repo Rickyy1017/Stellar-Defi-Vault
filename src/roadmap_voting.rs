@@ -256,6 +256,9 @@ impl VaultContract {
     }
 
     /// Issue #462: roadmap items sorted by total votes, descending.
+    ///
+    /// # Order
+    /// Descending `votes`; ties break on lower `id` first (issue #920).
     pub fn get_roadmap_rankings(env: Env) -> Vec<RoadmapItem> {
         let items = get_items(&env);
         let mut remaining = items.clone();
@@ -263,11 +266,15 @@ impl VaultContract {
 
         while remaining.len() > 0 {
             let mut best_i: u32 = 0;
-            let mut best_votes: i128 = remaining.get(0).unwrap().votes;
+            let best = remaining.get(0).unwrap();
+            let mut best_votes: i128 = best.votes;
+            let mut best_id: u32 = best.id;
             for i in 1..remaining.len() {
-                let v = remaining.get(i).unwrap().votes;
-                if v > best_votes {
+                let item = remaining.get(i).unwrap();
+                let v = item.votes;
+                if v > best_votes || (v == best_votes && item.id < best_id) {
                     best_votes = v;
+                    best_id = item.id;
                     best_i = i;
                 }
             }

@@ -215,8 +215,30 @@ impl VaultContract {
     }
 
     /// Issue #455: Read-only query for all announced proposals (max
-    /// `MAX_ADMIN_PROPOSALS`), oldest first.
+    /// `MAX_ADMIN_PROPOSALS`).
+    ///
+    /// # Order
+    /// Ascending `announced_at` (oldest first); ties break on lower `id`
+    /// (issue #920).
     pub fn get_all_admin_proposals(env: Env) -> Vec<AdminProposal> {
-        crate::time_locked_admin_proposal::get_proposals(&env)
+        let proposals = crate::time_locked_admin_proposal::get_proposals(&env);
+        let mut remaining = proposals;
+        let mut sorted = Vec::new(&env);
+        while remaining.len() > 0 {
+            let mut best_i: u32 = 0;
+            let mut best = remaining.get(0).unwrap();
+            for i in 1..remaining.len() {
+                let a = remaining.get(i).unwrap();
+                if a.announced_at < best.announced_at
+                    || (a.announced_at == best.announced_at && a.id < best.id)
+                {
+                    best = a;
+                    best_i = i;
+                }
+            }
+            sorted.push_back(remaining.get(best_i).unwrap());
+            remaining.remove(best_i);
+        }
+        sorted
     }
 }

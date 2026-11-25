@@ -504,6 +504,28 @@ fn test_exceeding_budget_reverts() {
 }
 
 #[test]
+fn test_ranking_ties_break_by_lower_id() {
+    let f = Fixture::new();
+    f.vault.deposit(&f.alice, &10_000, &0);
+    let i_high_id = add_item(&f, "Later", "a");
+    let i_low_id = add_item(&f, "Earlier", "b");
+
+    f.vault.vote_roadmap_item(&f.alice, &i_high_id, &50);
+    f.vault.vote_roadmap_item(&f.alice, &i_low_id, &50);
+
+    let rankings = f.vault.get_roadmap_rankings();
+    assert_eq!(rankings.len(), 2);
+    assert_eq!(rankings.get(0).unwrap().votes, 50);
+    assert_eq!(rankings.get(1).unwrap().votes, 50);
+    assert!(
+        rankings.get(0).unwrap().id < rankings.get(1).unwrap().id,
+        "equal votes must sort by lower id first (issue #920)"
+    );
+    let repeat = f.vault.get_roadmap_rankings();
+    assert_eq!(rankings.get(0).unwrap().id, repeat.get(0).unwrap().id);
+}
+
+#[test]
 fn test_rankings_sorted_correctly() {
     let f = Fixture::new();
     f.vault.deposit(&f.alice, &10_000, &0);

@@ -192,7 +192,11 @@ impl VaultContract {
         reversed
     }
 
-    /// Items awaiting promotion vote
+    /// Items awaiting promotion vote.
+    ///
+    /// # Order
+    /// Descending `submitted_at` (newest first); ties break on lower `id`
+    /// (issue #920).
     pub fn get_pending_items(env: Env) -> Vec<NewsItem> {
         let items = get_news_items(&env);
         let mut pending = Vec::new(&env);
@@ -201,7 +205,24 @@ impl VaultContract {
                 pending.push_back(it);
             }
         }
-        pending
+        let mut remaining = pending;
+        let mut sorted = Vec::new(&env);
+        while remaining.len() > 0 {
+            let mut best_i: u32 = 0;
+            let mut best = remaining.get(0).unwrap();
+            for i in 1..remaining.len() {
+                let a = remaining.get(i).unwrap();
+                if a.submitted_at > best.submitted_at
+                    || (a.submitted_at == best.submitted_at && a.id < best.id)
+                {
+                    best = a;
+                    best_i = i;
+                }
+            }
+            sorted.push_back(remaining.get(best_i).unwrap());
+            remaining.remove(best_i);
+        }
+        sorted
     }
 
     /// Admin override to suppress any item (permanently removed)
