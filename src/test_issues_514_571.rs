@@ -123,7 +123,7 @@ fn allowlist_adds_and_removes_members() {
 
     // Add users
     let users = soroban_sdk::Vec::from_array(&f.env, [user.clone(), user2.clone()]);
-    al::add_to_allowlist(&f.env, &f.admin, &users);
+    al::add_to_allowlist(&f.env, &f.admin, &users).unwrap();
 
     assert!(al::is_allowlisted(&f.env, &user));
     assert!(al::is_allowlisted(&f.env, &user2));
@@ -150,7 +150,7 @@ fn allowlist_takes_effect_immediately() {
 
     // Add user — immediately unblocked
     let users = soroban_sdk::Vec::from_array(&f.env, [user.clone()]);
-    al::add_to_allowlist(&f.env, &f.admin, &users);
+    al::add_to_allowlist(&f.env, &f.admin, &users).unwrap();
     assert!(al::check_allowlist(&f.env, &user).is_ok());
 
     // Remove user — immediately blocked again

@@ -141,6 +141,8 @@ impl VaultContract {
         if count == 0 || count > MAX_SPLIT_RECIPIENTS {
             return Err(VaultSafetyError::InvalidClaimSplitCount);
         }
+        crate::vec_unique::ensure_unique_address_pairs_u32(&recipients)
+            .map_err(|_| VaultSafetyError::DuplicateEntry)?;
         let mut total: u32 = 0;
         for i in 0..count {
             if let Some((_, bps)) = recipients.get(i) {

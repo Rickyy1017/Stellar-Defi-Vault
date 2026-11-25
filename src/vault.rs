@@ -1004,17 +1004,8 @@ impl VaultContract {
         let _guard = ReentrancyGuard::new(&env)?;
         user.require_auth();
 
-        let cooldown: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::CooldownPeriod)
-            .unwrap_or(0);
-        // If cooldown is zero, user can call instant unstake directly — we still allow request_unstake to perform instant withdrawal for convenience
-
-        let total_shares = balance::get_total_shares(&env);
-        let total_deposited = balance::get_total_deposited(&env);
-        let user_shares = balance::get_shares(&env, &user);
-        if user_shares == 0 {
+        let shares = balance::get_shares(&env, &user);
+        if shares <= 0 {
             return Err(VaultError::PositionNotFound);
         }
         crate::address_blocklist::require_withdrawal_allowed(&env, &user, &recipient)?;
@@ -1033,88 +1024,12 @@ impl VaultContract {
             Self::do_claim(&env, &user)?
         };
 
-        // ensure requested amount <= position_amount
-        let actual_amount = if amount > position_amount {
-            position_amount
-        } else {
-            amount
-        };
+        let fees_before = balance::get_protocol_fee_collected(&env);
+        let principal = Self::do_unstake_to(&env, &user, shares, &recipient)?;
+        let fee = balance::get_protocol_fee_collected(&env) - fees_before;
 
         events::position_exited(&env, &user, &recipient, principal, reward, fee);
         Ok((principal, reward))
-    }
-
-        // compute shares to remove corresponding to actual_amount
-        let mut shares_to_remove =
-            balance::amount_to_shares(total_shares, total_deposited, actual_amount)
-                .unwrap_or(user_shares);
-        if shares_to_remove > user_shares {
-            shares_to_remove = user_shares;
-        }
-
-        // compute concrete amount removed based on shares_to_remove (rounding-safe)
-        let amount_removed =
-            balance::shares_to_amount(total_shares, total_deposited, shares_to_remove)
-                .ok_or(VaultError::ArithmeticError)?;
-
-        let current_shares = balance::get_shares(&env, &user);
-        if split_amount <= 0 || split_amount >= current_shares {
-            return Err(VaultExtError::InvalidSplitAmount);
-        }
-
-        // Issue #546: creating a split position counts against the per-user cap.
-        {
-            let cap = crate::vault_extensions_546_549::get_max_positions_inner(&env);
-            if cap > 0
-                && crate::vault_extensions_546_549::position_count_inner(&env, &user) >= cap
-            {
-                return Err(VaultExtError::TooManyPositions);
-            }
-        }
-
-        // Settle pending rewards on the existing (pre-split) position first.
-        Self::do_claim(&env, &user)?;
-
-        let staked_at_ledger = env
-            .storage()
-            .persistent()
-            .get(&DataKey::UnbondingPosition(user.clone()))
-            .unwrap_or(UnbondingPosition {
-                amount: 0,
-                unbonding_since: 0,
-            });
-        let new_amount = existing.amount + amount_removed;
-        let new_pos = UnbondingPosition {
-            amount: new_amount,
-            unbonding_since: current_ledger,
-        };
-        env.storage()
-            .persistent()
-            .set(&DataKey::UnbondingPosition(user.clone()), &new_pos);
-
-        // Shrink the primary position.
-        let remaining = current_shares.checked_sub(split_amount).ok_or(VaultError::ArithmeticError)?;
-        balance::set_shares(&env, &user, remaining);
-        balance::set_last_claim_ledger(&env, &user, current_ledger);
-
-        // If cooldown == 0, optionally auto-execute withdrawal immediately
-        if cooldown == 0 {
-            // transfer tokens immediately
-            let token_addr: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Token)
-                .ok_or(VaultError::NotInitialized)?;
-            let token_client = token::Client::new(&env, &token_addr);
-            token_client.transfer(&env.current_contract_address(), &user, &amount_removed);
-            // remove unbonding position since executed
-            env.storage()
-                .persistent()
-                .remove(&DataKey::UnbondingPosition(user.clone()));
-        }
-
-        events::position_split(&env, &user, current_shares, split_amount);
-        Ok(())
     }
 
     /// Execute unstake after cooldown has passed. Transfers the pending unbonded amount to the user.
@@ -1153,6 +1068,9 @@ impl VaultContract {
         env.storage()
             .persistent()
             .remove(&DataKey::UnbondingPosition(user.clone()));
+
+        Ok(pos.amount)
+    }
 
     pub fn get_mev_protection_threshold(env: Env) -> i128 {
         crate::mev_claim_protection::get_mev_protection_threshold(&env)
@@ -1220,13 +1138,11 @@ impl VaultContract {
             balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
             return Ok(0);
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::EarlyExitPenaltyBps, &bps);
-        let admin = admin::get_admin(&env)?;
-        events::admin_action_set_early_exit_penalty(&env, &admin, bps);
-        balance::increment_admin_action_count(&env);
-        Ok(())
+        let result = Self::do_claim(&env, &staker);
+        if result.is_ok() {
+            balance::set_last_claim_action_ledger(&env, &staker, env.ledger().sequence());
+        }
+        result
     }
 
     /// Claim `amount` of the pending reward instead of the whole balance,
@@ -1846,6 +1762,8 @@ impl VaultContract {
         if users.len() > MAX_BATCH_ENTRIES {
             return Err(VaultError::BatchTooLarge);
         }
+        crate::vec_unique::ensure_unique_addresses(&users)
+            .map_err(crate::vec_unique::into_vault_error)?;
         let mut results = Vec::new(&env);
         let mut i = 0;
         while i < users.len() {
@@ -2383,6 +2301,8 @@ impl VaultContract {
         if threshold == 0 || threshold > admins.len() {
             return Err(VaultExtError::InvalidMultisigConfig);
         }
+        crate::vec_unique::ensure_unique_addresses(&admins)
+            .map_err(|_| VaultExtError::InvalidMultisigConfig)?;
 
         balance::set_multisig_config(&env, &MultisigConfig { admins, threshold });
         Ok(())
@@ -3041,16 +2961,11 @@ impl VaultContract {
         if pools.len() > crate::cross_pool_identity::MAX_LINKED_POOLS {
             return Err(VaultError::MaxPositionsReached);
         }
-
-        let mut unique_pools: Vec<Address> = Vec::new(&env);
-        for p in pools.iter() {
-            if !unique_pools.contains(&p) {
-                unique_pools.push_back(p);
-            }
-        }
+        crate::vec_unique::ensure_unique_addresses(&pools)
+            .map_err(crate::vec_unique::into_vault_error)?;
 
         let identity = crate::cross_pool_identity::CrossPoolIdentity {
-            linked_pools: unique_pools,
+            linked_pools: pools,
             total_staked_all_pools: 0,
             last_synced_at: 0,
         };
@@ -9456,6 +9371,8 @@ impl VaultContract {
         if active_users.len() > MAX_WAVE_USERS {
             return Err(VaultError::TooManyActiveUsers);
         }
+        crate::vec_unique::ensure_unique_addresses(&active_users)
+            .map_err(crate::vec_unique::into_vault_error)?;
 
         let last_wave = balance::get_last_recorded_wave(&env).unwrap_or(0);
         if wave_id <= last_wave {
@@ -12324,16 +12241,7 @@ impl VaultContract {
         Ok(())
     }
 
-        Ok(if ledgers > u32::MAX as i128 {
-            u32::MAX
-        } else {
-            ledgers as u32
-        })
-    }
-
-    /// Stakes and unstakes `amount` within a single call, leaving behind a
-    /// permanent on-chain receipt that `user` held `amount` at this ledger.
-    /// Useful for snapshot-based airdrops and eligibility checks.
+    /// Ledger-days estimate until a given pending reward is accrued.
     ///
     /// Uses 5 seconds per ledger (Stellar's approximate close time) and 86 400 seconds per day.
     /// Returns `u32::MAX` when `ledgers_to_target` returns `u32::MAX`.
@@ -12342,6 +12250,14 @@ impl VaultContract {
         if ledgers == u32::MAX {
             return Ok(u32::MAX);
         }
+        let days = ((ledgers as u64) * 5).div_ceil(86400);
+        Ok(days.min(u32::MAX as u64) as u32)
+    }
+
+    /// Stakes and unstakes `amount` within a single call, leaving behind a
+    /// permanent on-chain receipt that `user` held `amount` at this ledger.
+    /// Useful for snapshot-based airdrops and eligibility checks.
+    pub fn flash_stake(env: Env, user: Address, amount: i128) -> Result<i128, VaultFeatureError> {
         Self::require_not_paused(&env, crate::pause_mask::PAUSE_DEPOSIT)?;
 
         let token_addr = Self::token_address(&env)?;
@@ -14964,6 +14880,8 @@ pub fn bulk_set_kyc(
     if approvals.len() > MAX_KYC_APPROVALS {
         return Err(VaultError::BatchKycTooLarge);
     }
+    crate::vec_unique::ensure_unique_address_pairs_bool(&approvals)
+        .map_err(crate::vec_unique::into_vault_error)?;
 
     let mut i = 0u32;
     while i < approvals.len() {
@@ -15396,6 +15314,8 @@ pub fn get_reward_threshold(env: Env) -> i128 {
         if beneficiaries.is_empty() {
             return Err(VaultError::ZeroAmount);
         }
+        crate::vec_unique::ensure_unique_addresses(&beneficiaries)
+            .map_err(crate::vec_unique::into_vault_error)?;
 
         // Pre-validate all entries (all-or-nothing)
         let min_stake = balance::get_min_stake(&env);
@@ -15406,16 +15326,8 @@ pub fn get_reward_threshold(env: Env) -> i128 {
             if amount <= 0 {
                 return Err(VaultError::ZeroAmount);
             }
-            if !found {
-                let mut streak = balance::get_user_streak(&env, &staker).unwrap_or(StakeStreak {
-                    current_streak: 0,
-                    longest_streak: 0,
-                    last_active_wave: 0,
-                });
-                if streak.current_streak > 0 {
-                    streak.current_streak = 0;
-                    balance::set_user_streak(&env, &staker, &streak);
-                }
+            if min_stake > 0 && amount < min_stake {
+                return Err(VaultError::BelowMinimumStake);
             }
             total_amount = total_amount
                 .checked_add(amount)
@@ -15615,6 +15527,7 @@ impl VaultContract {
         balance::set_vesting_entries(&env, &user, &entries);
         Ok(())
     }
+}
 
 // ── Extension modules with `#[contractimpl]` blocks ─────────────────────────
 //

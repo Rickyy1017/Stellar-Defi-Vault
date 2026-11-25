@@ -28,6 +28,8 @@ pub enum AllowlistRateLimitError {
     Unauthorized = 5,
     /// A configured rate-limit window exceeds the temporary-storage bound.
     WindowTooLong = 6,
+    /// The supplied address list contains a duplicate (issue #919).
+    DuplicateEntry = 7,
 }
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
@@ -67,8 +69,15 @@ pub fn set_allowlist_enabled(env: &Env, admin: &Address, enabled: bool) {
 }
 
 /// Add addresses to the allowlist (admin only).
-pub fn add_to_allowlist(env: &Env, admin: &Address, users: &soroban_sdk::Vec<Address>) {
+pub fn add_to_allowlist(
+    env: &Env,
+    admin: &Address,
+    users: &soroban_sdk::Vec<Address>,
+) -> Result<(), AllowlistRateLimitError> {
     admin.require_auth();
+    crate::vec_unique::ensure_unique_addresses(users).map_err(|_| {
+        AllowlistRateLimitError::DuplicateEntry
+    })?;
     for user in users.iter() {
         env.storage()
             .persistent()
@@ -77,11 +86,19 @@ pub fn add_to_allowlist(env: &Env, admin: &Address, users: &soroban_sdk::Vec<Add
                 &true,
             );
     }
+    Ok(())
 }
 
 /// Remove addresses from the allowlist (admin only).
-pub fn remove_from_allowlist(env: &Env, admin: &Address, users: &soroban_sdk::Vec<Address>) {
+pub fn remove_from_allowlist(
+    env: &Env,
+    admin: &Address,
+    users: &soroban_sdk::Vec<Address>,
+) -> Result<(), AllowlistRateLimitError> {
     admin.require_auth();
+    crate::vec_unique::ensure_unique_addresses(users).map_err(|_| {
+        AllowlistRateLimitError::DuplicateEntry
+    })?;
     for user in users.iter() {
         env.storage()
             .persistent()
@@ -90,6 +107,7 @@ pub fn remove_from_allowlist(env: &Env, admin: &Address, users: &soroban_sdk::Ve
                 &false,
             );
     }
+    Ok(())
 }
 
 /// Read-only query: is a user on the allowlist?
