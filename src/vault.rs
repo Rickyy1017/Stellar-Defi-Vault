@@ -2211,30 +2211,9 @@ impl VaultContract {
         Ok(())
     }
 
-    /// Read-only: all currently queued timelocked admin actions.
-    ///
-    /// # Order
-    /// Ascending by `executable_at` ledger, then ascending `id` (issue #920).
+    /// Read-only: all currently queued actions (insertion order; ascending `id`).
     pub fn get_pending_actions(env: Env) -> Vec<PendingAction> {
-        let pending = balance::get_pending_actions(&env);
-        let mut remaining = pending;
-        let mut out: Vec<PendingAction> = Vec::new(&env);
-        while remaining.len() > 0 {
-            let mut best_i: u32 = 0;
-            let mut best = remaining.get(0).unwrap();
-            for i in 1..remaining.len() {
-                let a = remaining.get(i).unwrap();
-                if a.executable_at < best.executable_at
-                    || (a.executable_at == best.executable_at && a.id < best.id)
-                {
-                    best = a;
-                    best_i = i;
-                }
-            }
-            out.push_back(remaining.get(best_i).unwrap());
-            remaining.remove(best_i);
-        }
-        out
+        balance::get_pending_actions(&env)
     }
 
     /// Shared by `execute_action()` (#195) and `execute_proposal()` (#196).
