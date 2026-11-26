@@ -27,7 +27,7 @@ vault-wasm = []
 soroban-sdk = { version = "=29.0.1" }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 insta = "1.49.0"
 proptest = "1.6.0"
 serde_json = "1.0"
