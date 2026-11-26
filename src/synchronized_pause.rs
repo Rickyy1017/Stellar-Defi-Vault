@@ -174,6 +174,8 @@ impl crate::VaultContract {
         if sibling_pools.len() > MAX_SIBLING_POOLS {
             return Err(VaultOverflowError::TooManyCompetitors);
         }
+        crate::vec_unique::ensure_unique_addresses(&sibling_pools)
+            .map_err(|_| VaultOverflowError::ArithmeticError)?;
 
         env.storage()
             .persistent()

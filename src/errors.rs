@@ -213,6 +213,9 @@ impl VaultError {
     /// Returned by `set_withdrawal_allowlist()` when more than 5 addresses are
     /// supplied. Aliases `BatchTooLarge` (code 22) for the same reason.
     pub const AllowlistTooLong: VaultError = VaultError::BatchTooLarge;
+    /// Returned when an address list argument repeats the same address (issue
+    /// #919). Aliases `InvalidAddress` (code 35), matching `add_charity()`.
+    pub const DuplicateEntry: VaultError = VaultError::InvalidAddress;
 }
 
 impl VaultExtError {
@@ -1173,6 +1176,8 @@ pub enum VaultFeature5Error {
     /// Returned by `compound()` while the pool is in withdraw-only mode
     /// (issue #705).
     WithdrawOnlyMode = 11,
+    /// Returned when a treasury recipient list repeats an address (issue #919).
+    DuplicateEntry = 12,
 }
 
 impl From<VaultError> for VaultFeature5Error {
@@ -1371,6 +1376,8 @@ pub enum VaultSafetyError {
     /// Returned by `execute_recurring_deposit()` before the deposit's next due
     /// ledger has been reached (issue #832).
     RecurringDepositNotDue = 27,
+    /// Returned when a list parameter repeats the same address (issue #919).
+    DuplicateEntry = 28,
 }
 
 impl From<VaultError> for VaultSafetyError {

@@ -119,6 +119,8 @@ impl VaultContract {
     /// Rejects an oversized batch outright rather than silently pricing a
     /// prefix, so a caller cannot believe it published more than it did.
     pub fn bulk_publish_prices(env: Env, users: Vec<Address>) -> Result<u32, VaultError> {
+        crate::vec_unique::ensure_unique_addresses(&users)
+            .map_err(crate::vec_unique::into_vault_error)?;
         admin::require_admin(&env)?;
 
         if users.len() > MAX_BULK_USERS {

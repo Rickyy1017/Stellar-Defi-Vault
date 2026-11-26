@@ -215,7 +215,7 @@ impl VaultContract {
     }
 
     /// Issue #455: Read-only query for all announced proposals (max
-    /// `MAX_ADMIN_PROPOSALS`), oldest first.
+    /// `MAX_ADMIN_PROPOSALS`), ascending `id` / announcement order.
     pub fn get_all_admin_proposals(env: Env) -> Vec<AdminProposal> {
         crate::time_locked_admin_proposal::get_proposals(&env)
     }

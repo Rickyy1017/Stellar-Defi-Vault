@@ -34,6 +34,8 @@ mod storage;
 pub mod ttl_management;
 pub mod user_ttl;
 pub mod vault;
+pub mod vec_unique;
+pub mod vec_ordering;
 
 pub mod commitment;
 pub mod content_curation;
@@ -193,3 +195,9 @@ mod test_feature_gating_matrix;
 
 #[cfg(test)]
 mod test_gauge_incentives;
+
+#[cfg(test)]
+mod test_issue_919;
+
+#[cfg(test)]
+mod test_issue_920;

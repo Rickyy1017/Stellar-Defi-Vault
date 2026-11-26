@@ -199,8 +199,7 @@ pub fn get_effective_rate(env: &Env, amount: i128) -> u32 {
     }
 }
 
-// pub fn get_reward_pool_balance(env: &Env) -> i128 {
-//
+pub fn get_reward_pool_balance(env: &Env) -> i128 {
     env.storage()
         .instance()
         .get(&DataKey::RewardPoolBalance)

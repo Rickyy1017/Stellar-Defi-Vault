@@ -64,6 +64,8 @@ impl VaultContract {
         {
             return Err(VaultFeature5Error::InvalidSplitRecipients);
         }
+        crate::vec_unique::ensure_unique_addresses(&recipients)
+            .map_err(|_| VaultFeature5Error::DuplicateEntry)?;
         let mut sum: u32 = 0;
         for i in 0..bps_shares.len() {
             sum = sum

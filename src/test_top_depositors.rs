@@ -95,13 +95,22 @@ fn returns_top_depositors_sorted_descending() {
 }
 
 #[test]
-fn equal_sizes_keep_registration_order() {
+fn equal_sizes_break_ties_by_address() {
     let f = Fixture::new();
     let alice = f.depositor(100);
     let bob = f.depositor(100);
 
     let top = entries(&f.vault.get_top_depositors(&2_u32));
-    assert_eq!(top, std::vec![(alice, 100), (bob, 100)]);
+    assert_eq!(top.len(), 2);
+    assert_eq!(top[0].1, 100);
+    assert_eq!(top[1].1, 100);
+    let first = top[0].0.to_string();
+    let second = top[1].0.to_string();
+    assert!(
+        first < second,
+        "ties must sort by lexicographic address (issue #920)"
+    );
+    let _ = (alice, bob);
 }
 
 #[test]

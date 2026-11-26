@@ -192,13 +192,24 @@ impl VaultContract {
         reversed
     }
 
-    /// Items awaiting promotion vote
+    /// Items awaiting promotion vote, ascending `id` (issue #920).
     pub fn get_pending_items(env: Env) -> Vec<NewsItem> {
         let items = get_news_items(&env);
         let mut pending = Vec::new(&env);
         for it in items.iter() {
             if !it.promoted {
                 pending.push_back(it);
+            }
+        }
+        let n = pending.len();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let a = pending.get(j).unwrap();
+                let b = pending.get(i).unwrap();
+                if a.id < b.id {
+                    pending.set(i, a);
+                    pending.set(j, b);
+                }
             }
         }
         pending

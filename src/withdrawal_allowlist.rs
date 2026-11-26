@@ -128,6 +128,8 @@ impl VaultContract {
         if addresses.len() > MAX_ALLOWLIST_LEN {
             return Err(VaultError::AllowlistTooLong);
         }
+        crate::vec_unique::ensure_unique_addresses(&addresses)
+            .map_err(crate::vec_unique::into_vault_error)?;
         // Fold an already-matured pending change into the active list first, so
         // replacing the pending entry can never un-apply a change that took effect.
         let current = effective_list(&env, &user);
